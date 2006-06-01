@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,23 +21,31 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+#include <stdio.h>
 
+// if we used one big array, the linker would page align it
+// but we want to test a non-page align big chunk of zero-fill data
+int bigarray1[256];
+int bigarray2[256];
+int bigarray3[256];
+int bigarray4[256];
+int bigarray5[256];
+int bigarray6[256];
+static int staticbigarray1[256];
+static int staticbigarray2[256];
+static int staticbigarray3[256];
+static int staticbigarray4[256];
+static int staticbigarray5[256];
+static int staticbigarray6[256];
 
-#ifndef __SECTCREATE__
-#define __SECTCREATE__
-
-
-#include "ObjectFile.h"
-
-namespace SectCreate {
-
-	extern ObjectFile::Reader* MakeReader(const char* segmentName, const char* sectionName, const char* path, const uint8_t fileContent[], uint64_t fileLength);
-
-};
-
-
-#endif
-
-
-
+int main()
+{
+	staticbigarray1[10] = 4;
+	staticbigarray2[10] = 4;
+	staticbigarray3[10] = 4;
+	staticbigarray4[10] = 4;
+	staticbigarray5[10] = 4;
+	staticbigarray6[10] = 4;
+	return 0;
+}
 

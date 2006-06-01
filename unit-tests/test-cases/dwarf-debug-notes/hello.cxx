@@ -21,23 +21,13 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+#include <stdio.h>
+
+#include "header.h"
 
 
-#ifndef __SECTCREATE__
-#define __SECTCREATE__
-
-
-#include "ObjectFile.h"
-
-namespace SectCreate {
-
-	extern ObjectFile::Reader* MakeReader(const char* segmentName, const char* sectionName, const char* path, const uint8_t fileContent[], uint64_t fileLength);
-
-};
-
-
-#endif
-
-
-
-
+int main()
+{
+	foo(bar(3));
+	fprintf(stdout, "hello\n");
+}

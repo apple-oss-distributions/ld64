@@ -22,22 +22,26 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+const char*			foo = "foo";
+const char* const	bar = "bar";
 
-#ifndef __SECTCREATE__
-#define __SECTCREATE__
-
-
-#include "ObjectFile.h"
-
-namespace SectCreate {
-
-	extern ObjectFile::Reader* MakeReader(const char* segmentName, const char* sectionName, const char* path, const uint8_t fileContent[], uint64_t fileLength);
-
-};
+const char charArray1[] = "charArray1";
+static const char charArray2[] = "charArray2";
 
 
-#endif
+const char* getString() { return "string"; }
+const char* getString2() { return charArray2; }
+const char* getString3() { return charArray1; }
+const char* getString4() { return foo; }
+
+
+float		f1 = 3.0;
+double		d1 = 3.0;
+long double ld1 = 3.0;
 
 
 
+float getSingle() { return 1.0; }
+double getDouble() { return 2.0; }
+long double getLongDouble() { return 3.0; }
 

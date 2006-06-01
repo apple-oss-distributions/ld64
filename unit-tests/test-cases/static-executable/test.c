@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -22,22 +22,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-
-#ifndef __SECTCREATE__
-#define __SECTCREATE__
-
-
-#include "ObjectFile.h"
-
-namespace SectCreate {
-
-	extern ObjectFile::Reader* MakeReader(const char* segmentName, const char* sectionName, const char* path, const uint8_t fileContent[], uint64_t fileLength);
-
-};
-
-
-#endif
-
-
-
-
+int main()
+{
+	return 0;
+}

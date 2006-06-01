@@ -21,23 +21,30 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+#include <Foundation/Foundation.h>
 
 
-#ifndef __SECTCREATE__
-#define __SECTCREATE__
+@interface Foo : NSObject
+{
+	int ivar;
+}
+- (id) init;
+- (void) foo;
+@end
 
 
-#include "ObjectFile.h"
+@implementation Foo
 
-namespace SectCreate {
+- (id) init
+{
+	self = [super init];
+	return self;
+}
 
-	extern ObjectFile::Reader* MakeReader(const char* segmentName, const char* sectionName, const char* path, const uint8_t fileContent[], uint64_t fileLength);
+- (void) foo
+{
+	[self class];
+}
 
-};
-
-
-#endif
-
-
-
+@end
 

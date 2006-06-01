@@ -21,23 +21,50 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+ 
+#ifndef __ARCHITECTURES__
+#define __ARCHITECTURES__
+
+#include "FileAbstraction.hpp"
 
 
-#ifndef __SECTCREATE__
-#define __SECTCREATE__
+//
+// Architectures
+//
+struct ppc
+{
+	typedef Pointer32<BigEndian>		P;
+	
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff32, kPointerDiff64,
+							kBranch24, kBranch24WeakImport, kBranch14,
+							kPICBaseLow16, kPICBaseLow14, kPICBaseHigh16, 
+							kAbsLow16, kAbsLow14, kAbsHigh16, kAbsHigh16AddLow };
+};
 
+struct ppc64
+{
+	typedef Pointer64<BigEndian>		P;
+	
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff32, kPointerDiff64,
+							kBranch24, kBranch24WeakImport, kBranch14,
+							kPICBaseLow16, kPICBaseLow14, kPICBaseHigh16, 
+							kAbsLow16, kAbsLow14, kAbsHigh16, kAbsHigh16AddLow };
+};
 
-#include "ObjectFile.h"
-
-namespace SectCreate {
-
-	extern ObjectFile::Reader* MakeReader(const char* segmentName, const char* sectionName, const char* path, const uint8_t fileContent[], uint64_t fileLength);
-
+struct x86
+{
+	typedef Pointer32<LittleEndian>		P;
+	
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff, 
+							kPCRel32, kPCRel32WeakImport };
 };
 
 
-#endif
 
 
+
+
+
+#endif // __ARCHITECTURES__
 
 

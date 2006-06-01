@@ -1,16 +1,16 @@
-/* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
+/* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
  * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
- * 
+ *
  * This file contains Original Code and/or Modifications of Original Code
  * as defined in and that are subject to the Apple Public Source License
  * Version 2.0 (the 'License'). You may not use this file except in
  * compliance with the License. Please obtain a copy of the License at
  * http://www.opensource.apple.com/apsl/ and read it before using this
  * file.
- * 
+ *
  * The Original Code and all software distributed under the License are
  * distributed on an 'AS IS' basis, WITHOUT WARRANTY OF ANY KIND, EITHER
  * EXPRESS OR IMPLIED, AND APPLE HEREBY DISCLAIMS ALL SUCH WARRANTIES,
@@ -18,43 +18,47 @@
  * FITNESS FOR A PARTICULAR PURPOSE, QUIET ENJOYMENT OR NON-INFRINGEMENT.
  * Please see the License for the specific language governing rights and
  * limitations under the License.
- * 
+ *
  * @APPLE_LICENSE_HEADER_END@
  */
 
 
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <math.h>
 #include <fcntl.h>
 #include <vector>
 
 
 #include "Options.h"
 
- __attribute__((noreturn))
-void throwf(const char* format, ...) 
+void throwf(const char* format, ...)
 {
 	va_list	list;
 	char*	p;
 	va_start(list, format);
 	vasprintf(&p, format, list);
 	va_end(list);
-	
+
 	const char*	t = p;
 	throw t;
 }
 
-
 Options::Options(int argc, const char* argv[])
- : fOutputFile("a.out"), fArchitecture(CPU_TYPE_POWERPC64), fOutputKind(kDynamicExecutable), fBindAtLoad(false),
-	fStripLocalSymbols(false),  fKeepPrivateExterns(false),
-	fInterposable(false), fIgnoreOtherArchFiles(false), fForceSubtypeAll(false), fNameSpace(kTwoLevelNameSpace),
-	fDylibCompatVersion(0), fDylibCurrentVersion(0), fDylibInstallName(NULL), fEntryName("start"), fBaseAddress(0),
-	fExportMode(kExportDefault), fLibrarySearchMode(kSearchAllDirsForDylibsThenAllDirsForArchives),
-	fUndefinedTreatment(kUndefinedError), fMessagesPrefixedWithArchitecture(false), fPICTreatment(kPICError),
-	fWeakReferenceMismatchTreatment(kWeakReferenceMismatchError), 
-	fUmbrellaName(NULL), fInitFunctionName(NULL), fZeroPageSize(0x1000), fStackSize(0), fStackAddr(0), fMinimumHeaderPad(0),
-	fCommonsMode(kCommonsIgnoreDylibs), fWarnCommons(false), fVerbose(false)
+	: fOutputFile("a.out"), fArchitecture(0), fOutputKind(kDynamicExecutable), fBindAtLoad(false),
+	  fStripLocalSymbols(false),  fKeepPrivateExterns(false),
+	  fInterposable(false), fIgnoreOtherArchFiles(false), fForceSubtypeAll(false), fDeadStrip(kDeadStripOff),
+	  fVersionMin(k10_1),fNameSpace(kTwoLevelNameSpace),
+	  fDylibCompatVersion(0), fDylibCurrentVersion(0), fDylibInstallName(NULL), fEntryName("start"), fBaseAddress(0),
+	  fExportMode(kExportDefault), fLibrarySearchMode(kSearchAllDirsForDylibsThenAllDirsForArchives),
+	  fUndefinedTreatment(kUndefinedError), fMessagesPrefixedWithArchitecture(false), fPICTreatment(kError),
+	  fWeakReferenceMismatchTreatment(kWeakReferenceMismatchError), fMultiplyDefinedDynamic(kWarning),
+	  fMultiplyDefinedUnused(kSuppress), fWarnOnMultiplyDefined(false), fClientName(NULL),
+	  fUmbrellaName(NULL), fInitFunctionName(NULL), fDotOutputFile(NULL), fExecutablePath(NULL),
+	  fZeroPageSize(0x1000), fStackSize(0), fStackAddr(0), fExecutableStack(false), fMinimumHeaderPad(0),
+	  fCommonsMode(kCommonsIgnoreDylibs), fWarnCommons(false), fVerbose(false), fKeepRelocations(false),
+	  fEmitUUID(true),fWarnStabs(false),
+	  fTraceDylibSearching(false), fPause(false), fStatistics(false), fPrintOptions(false)
 {
 	this->parsePreCommandLineEnvironmentSettings();
 	this->parse(argc, argv);
@@ -66,8 +70,7 @@ Options::~Options()
 {
 }
 
-
-ObjectFile::ReaderOptions& Options::readerOptions()
+const ObjectFile::ReaderOptions& Options::readerOptions()
 {
 	return fReaderOptions;
 }
@@ -77,12 +80,10 @@ cpu_type_t Options::architecture()
 	return fArchitecture;
 }
 
-
 const char*	Options::getOutputFilePath()
 {
 	return fOutputFile;
 }
-
 
 std::vector<Options::FileInfo>& Options::getInputFiles()
 {
@@ -99,14 +100,14 @@ bool Options::stripLocalSymbols()
 	return fStripLocalSymbols;
 }
 
-bool Options::stripDebugInfo()
-{
-	return fReaderOptions.fStripDebugInfo;
-}
-
 bool Options::bindAtLoad()
 {
 	return fBindAtLoad;
+}
+
+bool Options::prebind()
+{
+	return fPrebind;
 }
 
 bool Options::fullyLoadArchives()
@@ -121,7 +122,7 @@ Options::NameSpace Options::nameSpace()
 
 const char*	Options::installPath()
 {
-	if ( fDylibInstallName != NULL ) 
+	if ( fDylibInstallName != NULL )
 		return fDylibInstallName;
 	else
 		return fOutputFile;
@@ -182,14 +183,44 @@ Options::UndefinedTreatment Options::undefinedTreatment()
 	return fUndefinedTreatment;
 }
 
+Options::VersionMin Options::macosxVersionMin()
+{
+	return fVersionMin;
+}
+
 Options::WeakReferenceMismatchTreatment	Options::weakReferenceMismatchTreatment()
 {
 	return fWeakReferenceMismatchTreatment;
 }
 
+Options::Treatment Options::multipleDefinitionsInDylibs()
+{
+	return fMultiplyDefinedDynamic;
+}
+
+Options::Treatment Options::overridingDefinitionInDependentDylib()
+{
+	return fMultiplyDefinedUnused;
+}
+
+bool Options::warnOnMultipleDefinitionsInObjectFiles()
+{
+	return fWarnOnMultiplyDefined;
+}
+
 const char* Options::umbrellaName()
 {
 	return fUmbrellaName;
+}
+
+std::vector<const char*>& Options::allowableClients()
+{
+	return fAllowableClients;
+}
+
+const char* Options::clientName()
+{
+	return fClientName;
 }
 
 uint64_t Options::zeroPageSize()
@@ -201,7 +232,7 @@ bool Options::hasCustomStack()
 {
 	return (fStackSize != 0);
 }
-	
+
 uint64_t Options::customStackSize()
 {
 	return fStackSize;
@@ -212,14 +243,29 @@ uint64_t Options::customStackAddr()
 	return fStackAddr;
 }
 
+bool Options::hasExecutableStack()
+{
+	return fExecutableStack;
+}
+
 std::vector<const char*>& Options::initialUndefines()
 {
 	return fInitialUndefines;
 }
 
+std::vector<const char*>& Options::traceSymbols()
+{
+	return fTraceSymbols;
+}
+
 const char*	Options::initFunctionName()
 {
 	return fInitFunctionName;
+}
+
+const char*	Options::dotOutputFile()
+{
+	return fDotOutputFile;
 }
 
 bool Options::hasExportRestrictList()
@@ -242,7 +288,6 @@ std::vector<Options::SectionAlignment>&	Options::sectionAlignments()
 	return fSectionAlignments;
 }
 
-
 Options::CommonsMode Options::commonsMode()
 {
 	return fCommonsMode;
@@ -251,6 +296,31 @@ Options::CommonsMode Options::commonsMode()
 bool Options::warnCommons()
 {
 	return fWarnCommons;
+}
+
+bool Options::keepRelocations()
+{
+	return fKeepRelocations;
+}
+
+bool Options::emitUUID()
+{
+	return fEmitUUID;
+}
+
+bool Options::warnStabs()
+{
+	return fWarnStabs;
+}
+
+const char* Options::executablePath()
+{
+	return fExecutablePath;
+}
+
+Options::DeadStripMode Options::deadStrip()
+{
+	return fDeadStrip;
 }
 
 bool Options::shouldExport(const char* symbolName)
@@ -266,7 +336,6 @@ bool Options::shouldExport(const char* symbolName)
 	throw "internal error";
 }
 
-
 void Options::parseArch(const char* architecture)
 {
 	if ( architecture == NULL )
@@ -277,22 +346,26 @@ void Options::parseArch(const char* architecture)
 		fArchitecture = CPU_TYPE_POWERPC64;
 	else if ( strcmp(architecture, "i386") == 0 )
 		fArchitecture = CPU_TYPE_I386;
-	else 
+	else
 		throw "-arch followed by unknown architecture name";
 }
 
 bool Options::checkForFile(const char* format, const char* dir, const char* rootName, FileInfo& result)
 {
 	struct stat statBuffer;
-	char possiblePath[strlen(dir)+strlen(rootName)+20];
+	char possiblePath[strlen(dir)+strlen(rootName)+strlen(format)+8];
 	sprintf(possiblePath, format,  dir, rootName);
-	if ( stat(possiblePath, &statBuffer) == 0 ) {
+	bool found = (stat(possiblePath, &statBuffer) == 0);
+	if ( fTraceDylibSearching )
+		printf("[Logging for XBS]%sfound library: '%s'\n", (found ? " " : " not "), possiblePath);
+	if ( found ) {
 		result.path = strdup(possiblePath);
 		result.fileLen = statBuffer.st_size;
+		result.modTime = statBuffer.st_mtime;
 		return true;
 	}
 	return false;
-} 
+}
 
 
 Options::FileInfo Options::findLibrary(const char* rootName)
@@ -301,7 +374,9 @@ Options::FileInfo Options::findLibrary(const char* rootName)
 	const int rootNameLen = strlen(rootName);
 	// if rootName ends in .o there is no .a vs .dylib choice
 	if ( (rootNameLen > 3) && (strcmp(&rootName[rootNameLen-2], ".o") == 0) ) {
-		for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin(); it != fLibrarySearchPaths.end(); it++) {
+		for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin();
+			 it != fLibrarySearchPaths.end();
+			 it++) {
 			const char* dir = *it;
 			if ( checkForFile("%s/%s", dir, rootName, result) )
 				return result;
@@ -310,17 +385,21 @@ Options::FileInfo Options::findLibrary(const char* rootName)
 	else {
 		bool lookForDylibs = ( fOutputKind != Options::kDyld);
 		switch ( fLibrarySearchMode ) {
-			case kSearchAllDirsForDylibsThenAllDirsForArchives:
+		case kSearchAllDirsForDylibsThenAllDirsForArchives:
 				// first look in all directories for just for dylibs
 				if ( lookForDylibs ) {
-					for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin(); it != fLibrarySearchPaths.end(); it++) {
+					for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin();
+						 it != fLibrarySearchPaths.end();
+						 it++) {
 						const char* dir = *it;
 						if ( checkForFile("%s/lib%s.dylib", dir, rootName, result) )
 							return result;
 					}
 				}
 				// next look in all directories for just for archives
-				for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin(); it != fLibrarySearchPaths.end(); it++) {
+				for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin();
+					 it != fLibrarySearchPaths.end();
+					 it++) {
 					const char* dir = *it;
 					if ( checkForFile("%s/lib%s.a", dir, rootName, result) )
 						return result;
@@ -329,7 +408,9 @@ Options::FileInfo Options::findLibrary(const char* rootName)
 
 			case kSearchDylibAndArchiveInEachDir:
 				// look in each directory for just for a dylib then for an archive
-				for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin(); it != fLibrarySearchPaths.end(); it++) {
+				for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin();
+					 it != fLibrarySearchPaths.end();
+					 it++) {
 					const char* dir = *it;
 					if ( lookForDylibs && checkForFile("%s/lib%s.dylib", dir, rootName, result) )
 						return result;
@@ -347,7 +428,11 @@ Options::FileInfo Options::findFramework(const char* rootName)
 {
 	struct stat statBuffer;
 	const int rootNameLen = strlen(rootName);
-	for (std::vector<const char*>::iterator it = fFrameworkSearchPaths.begin(); it != fFrameworkSearchPaths.end(); it++) {
+	for (std::vector<const char*>::iterator it = fFrameworkSearchPaths.begin();
+		 it != fFrameworkSearchPaths.end();
+		 it++) {
+		// ??? Shouldn't we be using String here and just initializing it?
+		// ??? Use str.c_str () to pull out the string for the stat call.
 		const char* dir = *it;
 		char possiblePath[strlen(dir)+2*rootNameLen+20];
 		strcpy(possiblePath, dir);
@@ -355,10 +440,15 @@ Options::FileInfo Options::findFramework(const char* rootName)
 		strcat(possiblePath, rootName);
 		strcat(possiblePath, ".framework/");
 		strcat(possiblePath, rootName);
-		if ( stat(possiblePath, &statBuffer) == 0 ) {
+		bool found = (stat(possiblePath, &statBuffer) == 0);
+		if ( fTraceDylibSearching )
+			printf("[Logging for XBS]%sfound framework: '%s'\n",
+				   (found ? " " : " not "), possiblePath);
+		if ( found ) {
 			FileInfo result;
 			result.path = strdup(possiblePath);
 			result.fileLen = statBuffer.st_size;
+			result.modTime = statBuffer.st_mtime;
 			return result;
 		}
 	}
@@ -369,11 +459,12 @@ Options::FileInfo Options::findFile(const char* path)
 {
 	FileInfo result;
 	struct stat statBuffer;
-	
+
 	// if absolute path and not a .o file, the use SDK prefix
 	if ( (path[0] == '/') && (strcmp(&path[strlen(path)-2], ".o") != 0) ) {
 		const int pathLen = strlen(path);
 		for (std::vector<const char*>::iterator it = fSDKPaths.begin(); it != fSDKPaths.end(); it++) {
+			// ??? Shouldn't we be using String here?
 			const char* sdkPathDir = *it;
 			const int sdkPathDirLen = strlen(sdkPathDir);
 			char possiblePath[sdkPathDirLen+pathLen+4];
@@ -384,6 +475,7 @@ Options::FileInfo Options::findFile(const char* path)
 			if ( stat(possiblePath, &statBuffer) == 0 ) {
 				result.path = strdup(possiblePath);
 				result.fileLen = statBuffer.st_size;
+				result.modTime = statBuffer.st_mtime;
 				return result;
 			}
 		}
@@ -392,8 +484,27 @@ Options::FileInfo Options::findFile(const char* path)
 	if ( stat(path, &statBuffer) == 0 ) {
 		result.path = strdup(path);
 		result.fileLen = statBuffer.st_size;
+		result.modTime = statBuffer.st_mtime;
 		return result;
 	}
+
+	// try @executable_path substitution
+	if ( (strncmp(path, "@executable_path/", 17) == 0) && (fExecutablePath != NULL) ) {
+		char newPath[strlen(fExecutablePath) + strlen(path)];
+		strcpy(newPath, fExecutablePath);
+		char* addPoint = strrchr(newPath,'/');
+		if ( addPoint != NULL )
+			strcpy(&addPoint[1], &path[17]);
+		else
+			strcpy(newPath, &path[17]);
+		if ( stat(newPath, &statBuffer) == 0 ) {
+			result.path = strdup(newPath);
+			result.fileLen = statBuffer.st_size;
+			result.modTime = statBuffer.st_mtime;
+			return result;
+		}
+	}
+
 	// not found
 	throwf("file not found: %s", path);
 }
@@ -402,16 +513,16 @@ Options::FileInfo Options::findFile(const char* path)
 void Options::loadFileList(const char* fileOfPaths)
 {
 	FILE* file = fopen(fileOfPaths, "r");
-	if ( file == NULL ) 
+	if ( file == NULL )
 		throwf("-filelist file not found: %s\n", fileOfPaths);
-	
+
 	char path[1024];
 	while ( fgets(path, 1024, file) != NULL ) {
 		path[1023] = '\0';
 		char* eol = strchr(path, '\n');
 		if ( eol != NULL )
 			*eol = '\0';
-			
+
 		fInputFiles.push_back(findFile(path));
 	}
 	fclose(file);
@@ -429,53 +540,68 @@ void Options::loadExportFile(const char* fileOfExports, const char* option, Name
 	char* p = (char*)malloc(stat_buf.st_size);
 	if ( p == NULL )
 		throwf("can't process %s file: %s", option, fileOfExports);
-	
+
 	if ( read(fd, p, stat_buf.st_size) != stat_buf.st_size )
 		throwf("can't read %s file: %s", option, fileOfExports);
-	
+
 	::close(fd);
-	
+
 	// parse into symbols and add to hash_set
 	char * const end = &p[stat_buf.st_size];
 	enum { lineStart, inSymbol, inComment } state = lineStart;
 	char* symbolStart = NULL;
 	for (char* s = p; s < end; ++s ) {
 		switch ( state ) {
-			case lineStart:
-				if ( *s =='#' ) {
-					state = inComment;
+		case lineStart:
+			if ( *s =='#' ) {
+				state = inComment;
+			}
+			else if ( !isspace(*s) ) {
+				state = inSymbol;
+				symbolStart = s;
+			}
+			break;
+		case inSymbol:
+			if ( *s == '\n' ) {
+				*s = '\0';
+				// removing any trailing spaces
+				char* last = s-1;
+				while ( isspace(*last) ) {
+					*last = '\0';
+					--last;
 				}
-				else if ( !isspace(*s) ) {
-					state = inSymbol;
-					symbolStart = s;
-				}
-				break;
-			case inSymbol:
-				if ( *s == '\n' ) {
-					*s = '\0';
-					// removing any trailing spaces
-					char* last = s-1;
-					while ( isspace(*last) ) {
-						*last = '\0';
-						--last;
-					}
-					set.insert(symbolStart);
-					symbolStart = NULL;
-					state = lineStart;
-				}
-				break;
-			case inComment:
-				if ( *s == '\n' )
-					state = lineStart;
-				break;
+				set.insert(symbolStart);
+				symbolStart = NULL;
+				state = lineStart;
+			}
+			break;
+		case inComment:
+			if ( *s == '\n' )
+				state = lineStart;
+			break;
 		}
 	}
+	if ( state == inSymbol ) {
+		fprintf(stderr, "ld64 warning: missing line-end at end of file \"%s\"\n", fileOfExports);
+		int len = end-symbolStart+1;
+		char* temp = new char[len];
+		strlcpy(temp, symbolStart, len);
+
+		// remove any trailing spaces
+		char* last = &temp[len-2];
+		while ( isspace(*last) ) {
+			*last = '\0';
+			--last;
+		}
+		set.insert(temp);
+	}
+
 	// Note: we do not free() the malloc buffer, because the strings are used by the export-set hash table
 }
 
 void Options::setUndefinedTreatment(const char* treatment)
 {
-	if ( treatment == NULL ) 
+	if ( treatment == NULL )
 		throw "-undefined missing [ warning | error | suppress | dynamic_lookup ]";
 
 	if ( strcmp(treatment, "warning") == 0 )
@@ -490,37 +616,43 @@ void Options::setUndefinedTreatment(const char* treatment)
 		throw "invalid option to -undefined [ warning | error | suppress | dynamic_lookup ]";
 }
 
-void Options::setReadOnlyRelocTreatment(const char* treatment)
+Options::Treatment Options::parseTreatment(const char* treatment)
 {
-	if ( treatment == NULL ) 
-		throw "-read_only_relocs missing [ warning | error | suppress ]";
+	if ( treatment == NULL )
+		return kNULL;
 
 	if ( strcmp(treatment, "warning") == 0 )
-		throw "-read_only_relocs warning not supported";
+		return kWarning;
+	else if ( strcmp(treatment, "error") == 0 )
+		return kError;
 	else if ( strcmp(treatment, "suppress") == 0 )
-		throw "-read_only_relocs suppress not supported";
-	else if ( strcmp(treatment, "error") != 0 )
-		throw "invalid option to -read_only_relocs [ warning | error | suppress | dynamic_lookup ]";
+		return kSuppress;
+	else
+		return kInvalid;
 }
 
-void Options::setPICTreatment(const char* treatment)
+void Options::setVersionMin(const char* version)
 {
-	if ( treatment == NULL ) 
-		throw "-sect_diff_relocs missing [ warning | error | suppress ]";
+	if ( version == NULL )
+		throw "-macosx_version_min argument missing";
 
-	if ( strcmp(treatment, "warning") == 0 )
-		fPICTreatment = kPICWarning;
-	else if ( strcmp(treatment, "error") == 0 )
-		fPICTreatment = kPICError;
-	else if ( strcmp(treatment, "suppress") == 0 )
-		fPICTreatment = kPICSuppress;
+	if ( strcmp(version, "10.1") == 0 )
+		fVersionMin = k10_1;
+	else if ( strcmp(version, "10.2") == 0)
+		fVersionMin = k10_2;
+	else if ( strcmp(version, "10.3") == 0)
+		fVersionMin = k10_3;
+	else if ( strcmp(version, "10.4") == 0)
+		fVersionMin = k10_4;
+	else if ( strcmp(version, "10.5") == 0)
+		fVersionMin = k10_5;
 	else
-		throw "invalid option to -sect_diff_relocs [ warning | error | suppress ]";
+		fprintf(stderr, "ld64: unknown option to -macosx_version_min");
 }
 
 void Options::setWeakReferenceMismatchTreatment(const char* treatment)
 {
-	if ( treatment == NULL ) 
+	if ( treatment == NULL )
 		throw "-weak_reference_mismatches missing [ error | weak | non-weak ]";
 
 	if ( strcmp(treatment, "error") == 0 )
@@ -535,7 +667,7 @@ void Options::setWeakReferenceMismatchTreatment(const char* treatment)
 
 Options::CommonsMode Options::parseCommonsTreatment(const char* mode)
 {
-	if ( mode == NULL ) 
+	if ( mode == NULL )
 		throw "-commons missing [ ignore_dylibs | use_dylibs | error ]";
 
 	if ( strcmp(mode, "ignore_dylibs") == 0 )
@@ -548,21 +680,11 @@ Options::CommonsMode Options::parseCommonsTreatment(const char* mode)
 		throw "invalid option to -commons [ ignore_dylibs | use_dylibs | error ]";
 }
 
-
 void Options::setDylibInstallNameOverride(const char* paths)
 {
 
 
 }
-
-void Options::setExecutablePath(const char* path)
-{
-
-
-}
-
-
-
 
 uint64_t Options::parseAddress(const char* addr)
 {
@@ -571,10 +693,8 @@ uint64_t Options::parseAddress(const char* addr)
 	return result;
 }
 
-
-
 //
-// Parses number of form X[.Y[.Z]] into a uint32_t where the nibbles are xxxx.yy.zz 
+// Parses number of form X[.Y[.Z]] into a uint32_t where the nibbles are xxxx.yy.zz
 //
 //
 uint32_t Options::parseVersionNumber(const char* versionString)
@@ -605,8 +725,12 @@ void Options::addSection(const char* segment, const char* section, const char* p
 {
 	if ( strlen(segment) > 16 )
 		throw "-seccreate segment name max 16 chars";
-	if ( strlen(section) > 16 )
-		throw "-seccreate section name max 16 chars";
+	if ( strlen(section) > 16 ) {
+		char* tmp = strdup(section);
+		tmp[16] = '\0';
+		fprintf(stderr, "ld64 warning: -seccreate section name (%s) truncated to 16 chars (%s)\n", section, tmp);
+		section = tmp;
+	}
 
 	// read in whole file
 	int fd = ::open(path, O_RDONLY, 0);
@@ -620,7 +744,7 @@ void Options::addSection(const char* segment, const char* section, const char* p
 	if ( read(fd, p, stat_buf.st_size) != stat_buf.st_size )
 		throwf("can't read -sectcreate file: %s", path);
 	::close(fd);
-	
+
 	// record section to create
 	ExtraSection info = { segment, section, path, (uint8_t*)p, stat_buf.st_size };
 	fExtraSections.push_back(info);
@@ -633,33 +757,59 @@ void Options::addSectionAlignment(const char* segment, const char* section, cons
 	if ( strlen(section) > 16 )
 		throw "-sectalign section name max 16 chars";
 
+	// argument to -sectalign is a hexadecimal number
 	char* endptr;
 	unsigned long value = strtoul(alignmentStr, &endptr, 16);
 	if ( *endptr != '\0')
 		throw "argument for -sectalign is not a hexadecimal number";
 	if ( value > 0x8000 )
 		throw "argument for -sectalign must be less than or equal to 0x8000";
-	uint8_t alignment = 0;
-	for(unsigned long x=value; x != 1; x >>= 1)
-		++alignment;
-	if ( (unsigned long)(1 << alignment) != value )
-		throw "argument for -sectalign is not a power of two";
+	if ( value == 0 ) {
+		fprintf(stderr, "ld64 warning: zero is not a valid -sectalign\n");
+		value = 1;
+	}
+	
+	// alignment is power of 2 (e.g. page alignment = 12)
+	uint8_t alignment = (uint8_t)log2(value);
+	
+	if ( (unsigned long)(1 << alignment) != value ) {
+		fprintf(stderr, "ld64 warning: alignment for -sectalign %s %s is not a power of two, using 0x%X\n", 
+			segment, section, 1 << alignment);
+	}
 
 	SectionAlignment info = { segment, section, alignment };
 	fSectionAlignments.push_back(info);
 }
 
-
+//
+// Process all command line arguments.
+//
+// The only error checking done here is that each option is valid and if it has arguments
+// that they too are valid.
+//
+// The general rule is "last option wins", i.e. if both -bundle and -dylib are specified,
+// whichever was last on the command line is used.
+//
+// Error check for invalid combinations of options is done in checkIllegalOptionCombinations()
+//
 void Options::parse(int argc, const char* argv[])
 {
 	// pass one builds search list from -L and -F options
 	this->buildSearchPaths(argc, argv);
-	
+
+	// reduce re-allocations
+	fInputFiles.reserve(32);
+
 	// pass two parse all other options
 	for(int i=1; i < argc; ++i) {
 		const char* arg = argv[i];
-		
+
 		if ( arg[0] == '-' ) {
+
+			// Since we don't care about the files passed, just the option names, we do this here.
+			if (fPrintOptions)
+				fprintf (stderr, "[Logging ld64 options]\t%s\n", arg);
+
 			if ( (arg[1] == 'L') || (arg[1] == 'F') ) {
 				// previously handled by buildSearchPaths()
 			}
@@ -694,11 +844,15 @@ void Options::parse(int argc, const char* argv[])
 			else if ( arg[1] == 'l' ) {
 				fInputFiles.push_back(findLibrary(&arg[2]));
 			}
-			else if ( strcmp(arg, "-weak-l") == 0 ) {
-				FileInfo info = findLibrary(&arg[2]);
+			// This causes a dylib to be weakly bound at
+			// link time.  This corresponds to weak_import.
+			else if ( strncmp(arg, "-weak-l", 7) == 0 ) {
+				FileInfo info = findLibrary(&arg[7]);
 				info.options.fWeakImport = true;
 				fInputFiles.push_back(info);
 			}
+			// Avoid lazy binding.
+			// ??? Deprecate.
 			else if ( strcmp(arg, "-bind_at_load") == 0 ) {
 				fBindAtLoad = true;
 			}
@@ -708,15 +862,21 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(arg, "-flat_namespace") == 0 ) {
 				fNameSpace = kFlatNameSpace;
 			}
+			// Also sets a bit to ensure dyld causes everything
+			// in the namespace to be flat.
+			// ??? Deprecate
 			else if ( strcmp(arg, "-force_flat_namespace") == 0 ) {
 				fNameSpace = kForceFlatNameSpace;
 			}
+			// Similar to --whole-archive.
 			else if ( strcmp(arg, "-all_load") == 0 ) {
 				fReaderOptions.fFullyLoadArchives = true;
 			}
+			// Similar to --whole-archive, but for all ObjC classes.
 			else if ( strcmp(arg, "-ObjC") == 0 ) {
 				fReaderOptions.fLoadObjcClassesInArchives = true;
 			}
+			// Library versioning.
 			else if ( strcmp(arg, "-dylib_compatibility_version") == 0 ) {
 				fDylibCompatVersion = parseVersionNumber(argv[++i]);
 			}
@@ -727,32 +887,41 @@ void Options::parse(int argc, const char* argv[])
 				parseSectionOrderFile(argv[i+1], argv[i+2], argv[i+3]);
 				i += 3;
 			}
+			// ??? Deprecate segcreate.
+			// -sectcreate puts whole files into a section in the output.
 			else if ( (strcmp(arg, "-sectcreate") == 0) || (strcmp(arg, "-segcreate") == 0) ) {
 				addSection(argv[i+1], argv[i+2], argv[i+3]);
 				i += 3;
 			}
+			// Since we have a full path in binary/library names we need to be able to override it.
 			else if ( (strcmp(arg, "-dylib_install_name") == 0) || (strcmp(arg, "-dylinker_install_name") == 0) ) {
 				fDylibInstallName = argv[++i];
 			}
+			// Sets the base address of the output.
 			else if ( strcmp(arg, "-seg1addr") == 0 ) {
 				fBaseAddress = parseAddress(argv[++i]);
 			}
 			else if ( strcmp(arg, "-e") == 0 ) {
 				fEntryName = argv[++i];
 			}
+			// Same as -@ from the FSF linker.
 			else if ( strcmp(arg, "-filelist") == 0 ) {
 				 loadFileList(argv[++i]);
 			}
 			else if ( strcmp(arg, "-keep_private_externs") == 0 ) {
 				 fKeepPrivateExterns = true;
 			}
+			// ??? Deprecate
 			else if ( strcmp(arg, "-final_output") == 0 ) {
 				 ++i;
 				// ignore for now
 			}
+			// Ensure that all calls to exported symbols go through lazy pointers.  Multi-module
+			// just ensures that this happens for cross object file boundaries.
 			else if ( (strcmp(arg, "-interposable") == 0) || (strcmp(arg, "-multi_module") == 0)) {
 				 fInterposable = true;
 			}
+			// Default for -interposable/-multi_module/-single_module.
 			else if ( strcmp(arg, "-single_module") == 0 ) {
 				 fInterposable = false;
 			}
@@ -768,12 +937,14 @@ void Options::parse(int argc, const char* argv[])
 				fExportMode = kDontExportSome;
 				loadExportFile(argv[++i], "-unexported_symbols_list", fDontExportSymbols);
 			}
+			// ??? Deprecate
 			else if ( strcmp(arg, "-no_arch_warnings") == 0 ) {
 				 fIgnoreOtherArchFiles = true;
 			}
 			else if ( strcmp(arg, "-force_cpusubtype_ALL") == 0 ) {
 				 fForceSubtypeAll = true;
 			}
+			// Similar to -weak-l but uses the absolute path name to the library.
 			else if ( strcmp(arg, "-weak_library") == 0 ) {
 				FileInfo info = findFile(argv[++i]);
 				info.options.fWeakImport = true;
@@ -787,75 +958,119 @@ void Options::parse(int argc, const char* argv[])
 				info.options.fWeakImport = true;
 				fInputFiles.push_back(info);
 			}
+			// ??? Deprecate when we get -Bstatic/-Bdynamic.
 			else if ( strcmp(arg, "-search_paths_first") == 0 ) {
 				fLibrarySearchMode = kSearchDylibAndArchiveInEachDir;
 			}
 			else if ( strcmp(arg, "-undefined") == 0 ) {
 				 setUndefinedTreatment(argv[++i]);
 			}
+			// Debugging output flag.
 			else if ( strcmp(arg, "-arch_multiple") == 0 ) {
 				 fMessagesPrefixedWithArchitecture = true;
 			}
+			// Specify what to do with relocations in read only
+			// sections like .text.  Could be errors, warnings,
+			// or suppressed.  Currently we do nothing with the
+			// flag.
 			else if ( strcmp(arg, "-read_only_relocs") == 0 ) {
-				 setReadOnlyRelocTreatment(argv[++i]);
+				Treatment temp = parseTreatment(argv[++i]);
+
+				if ( temp == kNULL )
+					throw "-read_only_relocs missing [ warning | error | suppress ]";
+				else if ( temp == kInvalid )
+					throw "invalid option to -read_only_relocs [ warning | error | suppress ]";
 			}
+			// Specifies whether or not there are intra section
+			// relocations and what to do when found. Could be
+			// errors, warnings, or suppressed.
 			else if ( strcmp(arg, "-sect_diff_relocs") == 0 ) {
-				 setPICTreatment(argv[++i]);
+				fPICTreatment = parseTreatment(argv[++i]);
+
+				if ( fPICTreatment == kNULL )
+					throw "-sect_diff_relocs missing [ warning | error | suppress ]";
+				else if ( fPICTreatment == kInvalid )
+					throw "invalid option to -sect_diff_relocs [ warning | error | suppress ]";
 			}
+			// Warn, error or make strong a mismatch between weak
+			// and non-weak references.
 			else if ( strcmp(arg, "-weak_reference_mismatches") == 0 ) {
 				 setWeakReferenceMismatchTreatment(argv[++i]);
 			}
+			// For a deployment target of 10.3 and earlier ld64 will
+			// prebind an executable with 0s in all addresses that
+			// are prebound.  This can then be fixed up by update_prebinding
+			// later.  Prebinding is less useful on 10.4 and greater.
 			else if ( strcmp(arg, "-prebind") == 0 ) {
-				  // FIX FIX
+				fPrebind = true;
 			}
 			else if ( strcmp(arg, "-noprebind") == 0 ) {
-				  // FIX FIX
+				fPrebind = false;
 			}
+			// ??? Deprecate
 			else if ( strcmp(arg, "-prebind_allow_overlap") == 0 ) {
-				  // FIX FIX
+				  // Do not handle and suppress warnings always.
 			}
+			// ??? Deprecate
 			else if ( strcmp(arg, "-prebind_all_twolevel_modules") == 0 ) {
-				  // FIX FIX
+				  // Ignore.
 			}
+			// ??? Deprecate
 			else if ( strcmp(arg, "-noprebind_all_twolevel_modules") == 0 ) {
-				  // FIX FIX
+				  // Ignore.
 			}
+			// Sets a bit in the main executable only that causes fix_prebinding
+			// not to run.  This is always set.
 			else if ( strcmp(arg, "-nofixprebinding") == 0 ) {
-				  // FIX FIX
+				  // Ignore.
 			}
+			// This should probably be deprecated when we respect -L and -F
+			// when searching for libraries.
 			else if ( strcmp(arg, "-dylib_file") == 0 ) {
 				 setDylibInstallNameOverride(argv[++i]);
 			}
+			// Allows us to rewrite full paths to be relocatable based on
+			// the path name of the executable.
 			else if ( strcmp(arg, "-executable_path") == 0 ) {
-				 setExecutablePath(argv[++i]);
+				 fExecutablePath = argv[++i];
+				 if ( (fExecutablePath == NULL) || (fExecutablePath[0] == '-') )
+					throw "-executable_path missing <path>";
 			}
+			// ??? Deprecate
+			// Aligns all segments to the power of 2 boundary specified.
 			else if ( strcmp(arg, "-segalign") == 0 ) {
-				// FIX FIX
-				++i; 
+				// Ignore.
+				++i;
 			}
+			// Puts a specified segment at a particular address that must
+			// be a multiple of the segment alignment.
 			else if ( strcmp(arg, "-segaddr") == 0 ) {
 				// FIX FIX
-				i += 2; 
+				i += 2;
 			}
+			// ??? Deprecate when we deprecate split-seg.
 			else if ( strcmp(arg, "-segs_read_only_addr") == 0 ) {
-				// FIX FIX
-				++i; 
+				// Ignore.
+				++i;
 			}
+			// ??? Deprecate when we deprecate split-seg.
 			else if ( strcmp(arg, "-segs_read_write_addr") == 0 ) {
-				// FIX FIX
-				++i; 
+				// Ignore.
+				++i;
 			}
+			// ??? Deprecate when we get rid of basing at build time.
 			else if ( strcmp(arg, "-seg_addr_table") == 0 ) {
-				// FIX FIX
-				++i; 
+				// Ignore.
+				++i;
 			}
+			// ??? Deprecate.
 			else if ( strcmp(arg, "-seg_addr_table_filename") == 0 ) {
-				// FIX FIX
-				++i; 
+				// Ignore.
+				++i;
 			}
 			else if ( strcmp(arg, "-segprot") == 0 ) {
 				// FIX FIX
-				i += 3; 
+				i += 3;
 			}
 			else if ( strcmp(arg, "-pagezero_size") == 0 ) {
 				fZeroPageSize = parseAddress(argv[++i]);
@@ -866,6 +1081,9 @@ void Options::parse(int argc, const char* argv[])
 			}
 			else if ( strcmp(arg, "-stack_size") == 0 ) {
 				fStackSize = parseAddress(argv[++i]);
+			}
+			else if ( strcmp(arg, "-allow_stack_execute") == 0 ) {
+				fExecutableStack = true;
 			}
 			else if ( strcmp(arg, "-sectalign") == 0 ) {
 				addSectionAlignment(argv[i+1], argv[i+2], argv[i+3]);
@@ -888,26 +1106,53 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(arg, "-twolevel_namespace_hints") == 0 ) {
 				// FIX FIX
 			}
+			// Use this flag to set default behavior for deployement targets.
+			else if ( strcmp(arg, "-macosx_version_min") == 0 ) {
+				setVersionMin(argv[++i]);
+			}
+			// This option (unlike -m below) only affects how we warn
+			// on multiple definitions inside dynamic libraries.
 			else if ( strcmp(arg, "-multiply_defined") == 0 ) {
-				// FIX FIX
-				++i;
+				fMultiplyDefinedDynamic = parseTreatment(argv[++i]);
+
+				if ( fMultiplyDefinedDynamic == kNULL )
+					throw "-multiply_defined missing [ warning | error | suppress ]";
+				else if ( fMultiplyDefinedDynamic == kInvalid )
+					throw "invalid option to -multiply_defined [ warning | error | suppress ]";
 			}
 			else if ( strcmp(arg, "-multiply_defined_unused") == 0 ) {
-				// FIX FIX
-				++i;
+				fMultiplyDefinedUnused = parseTreatment(argv[++i]);
+
+				if ( fMultiplyDefinedUnused == kNULL )
+					throw "-multiply_defined_unused missing [ warning | error | suppress ]";
+				else if ( fMultiplyDefinedUnused == kInvalid )
+					throw "invalid option to -multiply_defined_unused [ warning | error | suppress ]";
 			}
 			else if ( strcmp(arg, "-nomultidefs") == 0 ) {
 				 // FIX FIX
 			}
-			else if ( arg[1] == 'y' ) {
-				 // FIX FIX
+			// Display each file in which the argument symbol appears and whether
+			// the file defines or references it.  This option takes an argument
+			// as -y<symbol> note that there is no space.
+			else if ( strncmp(arg, "-y", 2) == 0 ) {
+				const char* name = &arg[2];
+
+				if ( name == NULL )
+					throw "-y missing argument";
+
+				fTraceSymbols.push_back(name);
 			}
+			// Same output as -y, but output <arg> number of undefined symbols only.
 			else if ( strcmp(arg, "-Y") == 0 ) {
-				 ++i;
-				 // FIX FIX
+				char* endptr;
+				fLimitUndefinedSymbols = strtoul (argv[++i], &endptr, 10);
+
+				if(*endptr != '\0')
+					throw "invalid argument for -Y [decimal number]";
 			}
+			// This option affects all objects linked into the final result.
 			else if ( strcmp(arg, "-m") == 0 ) {
-				 // FIX FIX
+				fWarnOnMultiplyDefined = true;
 			}
 			else if ( strcmp(arg, "-whyload") == 0 ) {
 				 // FIX FIX
@@ -918,37 +1163,42 @@ void Options::parse(int argc, const char* argv[])
 					throw "-u missing argument";
 				fInitialUndefines.push_back(name);
 			}
-			else if ( strcmp(arg, "-i") == 0 ) {
-				   // FIX FIX
-			}
 			else if ( strcmp(arg, "-U") == 0 ) {
 				 // FIX FIX
-				 ++i;  
+				 ++i;
 			}
 			else if ( strcmp(arg, "-s") == 0 ) {
-				// FIX FIX
+				fStripLocalSymbols = true;
+				fReaderOptions.fDebugInfoStripping = ObjectFile::ReaderOptions::kDebugInfoNone;
 			}
 			else if ( strcmp(arg, "-x") == 0 ) {
-				// FIX FIX
+				fStripLocalSymbols = true;
 			}
 			else if ( strcmp(arg, "-S") == 0 ) {
-				// FIX FIX
+				fReaderOptions.fDebugInfoStripping = ObjectFile::ReaderOptions::kDebugInfoNone;
 			}
 			else if ( strcmp(arg, "-X") == 0 ) {
 				// FIX FIX
 			}
 			else if ( strcmp(arg, "-Si") == 0 ) {
-				// FIX FIX
+				fReaderOptions.fDebugInfoStripping = ObjectFile::ReaderOptions::kDebugInfoFull;
 			}
 			else if ( strcmp(arg, "-b") == 0 ) {
 				// FIX FIX
 			}
 			else if ( strcmp(arg, "-Sn") == 0 ) {
-				// FIX FIX
+				fReaderOptions.fDebugInfoStripping = ObjectFile::ReaderOptions::kDebugInfoFull;
+			}
+			else if ( strcmp(arg, "-Sp") == 0 ) {
+				fReaderOptions.fDebugInfoStripping = ObjectFile::ReaderOptions::kDebugInfoMinimal;
 			}
 			else if ( strcmp(arg, "-dead_strip") == 0 ) {
-				 // FIX FIX
-				 fprintf(stderr, "ld64: warning -dead_strip not yet supported for 64-bit code\n");
+				//fDeadStrip = kDeadStripOnPlusUnusedInits;
+				 fprintf(stderr, "ld64: warning -dead_strip not yet supported in ld64\n");
+			}
+			else if ( strcmp(arg, "-no_dead_strip_inits_and_terms") == 0 ) {
+				//fDeadStrip = kDeadStripOn;
+				 fprintf(stderr, "ld64: warning -dead_strip not yet supported in ld64\n");
 			}
 			else if ( strcmp(arg, "-w") == 0 ) {
 				// FIX FIX
@@ -976,7 +1226,7 @@ void Options::parse(int argc, const char* argv[])
 			}
 			else if ( strcmp(arg, "-A") == 0 ) {
 				 // FIX FIX
-				 ++i;  
+				 ++i;
 			}
 			else if ( strcmp(arg, "-umbrella") == 0 ) {
 				const char* name = argv[++i];
@@ -985,12 +1235,20 @@ void Options::parse(int argc, const char* argv[])
 				fUmbrellaName = name;
 			}
 			else if ( strcmp(arg, "-allowable_client") == 0 ) {
-				 // FIX FIX
-				 ++i;  
+				const char* name = argv[++i];
+
+				if ( name == NULL )
+					throw "-allowable_client missing argument";
+
+				fAllowableClients.push_back(name);
 			}
 			else if ( strcmp(arg, "-client_name") == 0 ) {
-				 // FIX FIX
-				 ++i;  
+				const char* name = argv[++i];
+
+				if ( name == NULL )
+					throw "-client_name missing argument";
+
+				fClientName = name;
 			}
 			else if ( strcmp(arg, "-sub_umbrella") == 0 ) {
 				const char* name = argv[++i];
@@ -1010,11 +1268,29 @@ void Options::parse(int argc, const char* argv[])
 					throw "-init missing argument";
 				fInitFunctionName = name;
 			}
+			else if ( strcmp(arg, "-dot") == 0 ) {
+				const char* name = argv[++i];
+				if ( name == NULL )
+					throw "-dot missing argument";
+				fDotOutputFile = name;
+			}
 			else if ( strcmp(arg, "-warn_commons") == 0 ) {
 				fWarnCommons = true;
 			}
 			else if ( strcmp(arg, "-commons") == 0 ) {
 				fCommonsMode = parseCommonsTreatment(argv[++i]);
+			}
+			else if ( strcmp(arg, "-keep_relocs") == 0 ) {
+				fKeepRelocations = true;
+			}
+			else if ( strcmp(arg, "-warn_stabs") == 0 ) {
+				fWarnStabs = true;
+			}
+			else if ( strcmp(arg, "-pause") == 0 ) {
+				fPause = true;
+			}
+			else if ( strcmp(arg, "-print_statistics") == 0 ) {
+				fStatistics = true;
 			}
 			else if ( strcmp(arg, "-v") == 0 ) {
 				// previously handled by buildSearchPaths()
@@ -1026,8 +1302,15 @@ void Options::parse(int argc, const char* argv[])
 				++i;
 				// previously handled by buildSearchPaths()
 			}
+			else if ( strcmp(arg, "-no_uuid") == 0 ) {
+				fEmitUUID = false;
+			}
+			// put this last so that it does not interfer with other options starting with 'i'
+			else if ( strncmp(arg, "-i", 2) == 0 ) {
+				fprintf(stderr, "ld64: -i option (indirect symbols) not supported\n");
+			}
 			else {
-				fprintf(stderr, "unknown option: %s\n", arg);
+				throwf("unknown option: %s", arg);
 			}
 		}
 		else {
@@ -1036,22 +1319,22 @@ void Options::parse(int argc, const char* argv[])
 	}
 }
 
-
-
-// 
-// -syslibroot <path> is used for SDK support.  
+//
+// -syslibroot <path> is used for SDK support.
 // The rule is that all search paths (both explicit and default) are
 // checked to see if they exist in the SDK.  If so, that path is
 // replaced with the sdk prefixed path.  If not, that search path
 // is used as is.  If multiple -syslibroot options are specified
 // their directory structures are logically overlayed and files
 // from sdks specified earlier on the command line used before later ones.
-// 
+
 void Options::buildSearchPaths(int argc, const char* argv[])
 {
 	bool addStandardLibraryDirectories = true;
 	std::vector<const char*> libraryPaths;
 	std::vector<const char*> frameworkPaths;
+	libraryPaths.reserve(10);
+	frameworkPaths.reserve(10);
 	// scan through argv looking for -L, -F, -Z, and -syslibroot options
 	for(int i=0; i < argc; ++i) {
 		if ( (argv[i][0] == '-') && (argv[i][1] == 'L') )
@@ -1078,13 +1361,14 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 	if ( addStandardLibraryDirectories ) {
 		libraryPaths.push_back("/usr/lib");
 		libraryPaths.push_back("/usr/local/lib");
-		
+
 		frameworkPaths.push_back("/Library/Frameworks/");
 		frameworkPaths.push_back("/Network/Library/Frameworks/");
 		frameworkPaths.push_back("/System/Library/Frameworks/");
 	}
-	
+
 	// now merge sdk and library paths to make real search paths
+	fLibrarySearchPaths.reserve(libraryPaths.size()*(fSDKPaths.size()+1));
 	for (std::vector<const char*>::iterator it = libraryPaths.begin(); it != libraryPaths.end(); it++) {
 		const char* libDir = *it;
 		bool sdkOverride = false;
@@ -1092,10 +1376,11 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 			char betterLibDir[PATH_MAX];
 			if ( strstr(libDir, "/..") != NULL ) {
 				if ( realpath(libDir, betterLibDir) != NULL )
-					libDir = betterLibDir;
+					libDir = strdup(betterLibDir);
 			}
 			const int libDirLen = strlen(libDir);
 			for (std::vector<const char*>::iterator sdkit = fSDKPaths.begin(); sdkit != fSDKPaths.end(); sdkit++) {
+				// ??? Should be using string here.
 				const char* sdkDir = *sdkit;
 				const int sdkDirLen = strlen(sdkDir);
 				char newPath[libDirLen + sdkDirLen+4];
@@ -1110,11 +1395,12 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 				}
 			}
 		}
-		if ( !sdkOverride ) 
+		if ( !sdkOverride )
 			fLibrarySearchPaths.push_back(libDir);
 	}
-	
+
 	// now merge sdk and framework paths to make real search paths
+	fFrameworkSearchPaths.reserve(frameworkPaths.size()*(fSDKPaths.size()+1));
 	for (std::vector<const char*>::iterator it = frameworkPaths.begin(); it != frameworkPaths.end(); it++) {
 		const char* frameworkDir = *it;
 		bool sdkOverride = false;
@@ -1122,10 +1408,11 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 			char betterFrameworkDir[PATH_MAX];
 			if ( strstr(frameworkDir, "/..") != NULL ) {
 				if ( realpath(frameworkDir, betterFrameworkDir) != NULL )
-					frameworkDir = betterFrameworkDir;
+					frameworkDir = strdup(betterFrameworkDir);
 			}
 			const int frameworkDirLen = strlen(frameworkDir);
 			for (std::vector<const char*>::iterator sdkit = fSDKPaths.begin(); sdkit != fSDKPaths.end(); sdkit++) {
+				// ??? Should be using string here
 				const char* sdkDir = *sdkit;
 				const int sdkDirLen = strlen(sdkDir);
 				char newPath[frameworkDirLen + sdkDirLen+4];
@@ -1140,16 +1427,20 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 				}
 			}
 		}
-		if ( !sdkOverride ) 
+		if ( !sdkOverride )
 			fFrameworkSearchPaths.push_back(frameworkDir);
 	}
-	
+
 	if ( fVerbose ) {
 		fprintf(stderr,"Library search paths:\n");
-		for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin(); it != fLibrarySearchPaths.end(); it++)
+		for (std::vector<const char*>::iterator it = fLibrarySearchPaths.begin();
+			 it != fLibrarySearchPaths.end();
+			 it++)
 			fprintf(stderr,"\t%s\n", *it);
 		fprintf(stderr,"Framework search paths:\n");
-		for (std::vector<const char*>::iterator it = fFrameworkSearchPaths.begin(); it != fFrameworkSearchPaths.end(); it++)
+		for (std::vector<const char*>::iterator it = fFrameworkSearchPaths.begin();
+			 it != fFrameworkSearchPaths.end();
+			 it++)
 			fprintf(stderr,"\t%s\n", *it);
 	}
 }
@@ -1157,19 +1448,34 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 // this is run before the command line is parsed
 void Options::parsePreCommandLineEnvironmentSettings()
 {
-	if ( getenv("RC_TRACE_ARCHIVES") != NULL)
+	if ((getenv("LD_TRACE_ARCHIVES") != NULL)
+		|| (getenv("RC_TRACE_ARCHIVES") != NULL))
 	    fReaderOptions.fTraceArchives = true;
-		
-	if ( getenv("RC_TRACE_DYLIBS") != NULL) {
+
+	if ((getenv("LD_TRACE_DYLIBS") != NULL)
+		|| (getenv("RC_TRACE_DYLIBS") != NULL)) {
 	    fReaderOptions.fTraceDylibs = true;
 		fReaderOptions.fTraceIndirectDylibs = true;
 	}
+
+	if (getenv("RC_TRACE_DYLIB_SEARCHING") != NULL) {
+	    fTraceDylibSearching = true;
+	}
+
+	if (getenv("LD_PRINT_OPTIONS") != NULL)
+		fPrintOptions = true;
+
+	if (fReaderOptions.fTraceDylibs || fReaderOptions.fTraceArchives)
+		fReaderOptions.fTraceOutputFile = getenv("LD_TRACE_FILE");
 }
 
 // this is run after the command line is parsed
 void Options::parsePostCommandLineEnvironmentSettings()
 {
-
+	// when building a dynamic main executable, default any use of @executable_path to output path
+	if ( fExecutablePath == NULL && (fOutputKind == kDynamicExecutable) ) {
+		fExecutablePath = fOutputFile;
+	}
 }
 
 void Options::checkIllegalOptionCombinations()
@@ -1187,7 +1493,7 @@ void Options::checkIllegalOptionCombinations()
 				throw "can't use -undefined warning or suppress with -twolevel_namespace";
 			break;
 	}
-	
+
 	// unify -sub_umbrella with dylibs
 	for (std::vector<const char*>::iterator it = fSubUmbellas.begin(); it != fSubUmbellas.end(); it++) {
 		const char* subUmbrella = *it;
@@ -1206,7 +1512,7 @@ void Options::checkIllegalOptionCombinations()
 		if ( ! found )
 			fprintf(stderr, "ld64 warning: -sub_umbrella %s does not match a supplied dylib\n", subUmbrella);
 	}
-	
+
 	// unify -sub_library with dylibs
 	for (std::vector<const char*>::iterator it = fSubLibraries.begin(); it != fSubLibraries.end(); it++) {
 		const char* subLibrary = *it;
@@ -1228,17 +1534,17 @@ void Options::checkIllegalOptionCombinations()
 		if ( ! found )
 			fprintf(stderr, "ld64 warning: -sub_library %s does not match a supplied dylib\n", subLibrary);
 	}
-	
+
 	// sync reader options
 	if ( fNameSpace != kTwoLevelNameSpace )
 		fReaderOptions.fFlatNamespace = true;
 
 	// check -stack_addr
-	if ( fStackAddr != 0 ) { 
+	if ( fStackAddr != 0 ) {
 		switch (fArchitecture) {
 			case CPU_TYPE_I386:
 			case CPU_TYPE_POWERPC:
-				if ( fStackAddr > 0xFFFFFFFF ) 
+				if ( fStackAddr > 0xFFFFFFFF )
 					throw "-stack_addr must be < 4G for 32-bit processes";
 				break;
 			case CPU_TYPE_POWERPC64:
@@ -1249,13 +1555,13 @@ void Options::checkIllegalOptionCombinations()
 		if ( fStackSize  == 0 )
 			throw "-stack_addr must be used with -stack_size";
 	}
-	
+
 	// check -stack_size
-	if ( fStackSize != 0 ) { 
+	if ( fStackSize != 0 ) {
 		switch (fArchitecture) {
 			case CPU_TYPE_I386:
 			case CPU_TYPE_POWERPC:
-				if ( fStackSize > 0xFFFFFFFF ) 
+				if ( fStackSize > 0xFFFFFFFF )
 					throw "-stack_size must be < 4G for 32-bit processes";
 				if ( fStackAddr == 0 ) {
 					fprintf(stderr, "ld64 warning: -stack_addr not specified, using the default 0xC0000000\n");
@@ -1274,7 +1580,7 @@ void Options::checkIllegalOptionCombinations()
 		switch ( fOutputKind ) {
 			case Options::kDynamicExecutable:
 			case Options::kStaticExecutable:
-				// custom stack size only legeal when building main executable
+				// custom stack size only legal when building main executable
 				break;
 			case Options::kDynamicLibrary:
 			case Options::kDynamicBundle:
@@ -1283,15 +1589,36 @@ void Options::checkIllegalOptionCombinations()
 				throw "-stack_size option can only be used when linking a main executable";
 		}
 	}
-	
+
+	// check that -allow_stack_execute is only used with main executables
+	if ( fExecutableStack ) {
+		switch ( fOutputKind ) {
+			case Options::kDynamicExecutable:
+			case Options::kStaticExecutable:
+				// -allow_stack_execute size only legal when building main executable
+				break;
+			case Options::kDynamicLibrary:
+			case Options::kDynamicBundle:
+			case Options::kObjectFile:
+			case Options::kDyld:
+				throw "-allow_stack_execute option can only be used when linking a main executable";
+		}
+	}
+
+	// check -client_name is only used when -bundle is specified
+	if ( (fClientName != NULL) && (fOutputKind != Options::kDynamicBundle) )
+		throw "-client_name can only be used with -bundle";
+
 	// check -init is only used when building a dylib
 	if ( (fInitFunctionName != NULL) && (fOutputKind != Options::kDynamicLibrary) )
 		throw "-init can only be used with -dynamiclib";
-		
+
 	// make sure all required exported symbols exist
-	for (NameSet::iterator it=fExportSymbols.begin(); it != fExportSymbols.end(); it++)
-		fInitialUndefines.push_back(*it);
-		
+	for (NameSet::iterator it=fExportSymbols.begin(); it != fExportSymbols.end(); it++) {
+		const char* name = *it;
+		// never export .eh symbols
+		if ( strcmp(&name[strlen(name)-3], ".eh") != 0 )
+			fInitialUndefines.push_back(name);
+	}
+
 }
-
-

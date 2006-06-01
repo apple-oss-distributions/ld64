@@ -1,5 +1,6 @@
-/*
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+/* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
+ *
+ * Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -48,9 +49,11 @@ public:
 	virtual										~Reader();
 	
 	virtual const char*								getPath()								{ return fPath; }
+	virtual time_t									getModificationTime()					{ return 0; }
+	virtual DebugInfoKind							getDebugInfoKind()						{ return ObjectFile::Reader::kDebugInfoNone; }
 	virtual std::vector<class ObjectFile::Atom*>&	getAtoms()								{ return fAtoms; }
 	virtual std::vector<class ObjectFile::Atom*>*	getJustInTimeAtomsFor(const char* name) { return NULL; }
-	virtual std::vector<ObjectFile::StabsInfo>*		getStabsDebugInfo()						{ return NULL; }
+	virtual std::vector<Stab>*						getStabs()								{ return NULL; }
 
 private:
 	const char*										fPath;
@@ -61,17 +64,13 @@ private:
 class Atom : public ObjectFile::Atom {
 public:
 	virtual ObjectFile::Reader*					getFile() const				{ return &fOwner; }
+	virtual bool								getTranslationUnitSource(const char** dir, const char** name) const { return false; }
 	virtual const char*							getName() const				{ return NULL; }
 	virtual const char*							getDisplayName() const;
 	virtual Scope								getScope() const			{ return ObjectFile::Atom::scopeTranslationUnit; }
-	virtual bool								isTentativeDefinition() const { return false; }
-	virtual bool								isWeakDefinition() const	{ return false; }
-	virtual bool								isCoalesableByName() const	{ return false; }
-	virtual bool								isCoalesableByValue() const { return false; }
+	virtual DefinitionKind						getDefinitionKind() const	{ return kRegularDefinition; }
+	virtual SymbolTableInclusion				getSymbolTableInclusion() const { return ObjectFile::Atom::kSymbolTableNotIn; }
 	virtual bool								isZeroFill() const			{ return false; }
-	virtual bool								dontDeadStrip() const		{ return true; }
-	virtual bool								dontStripName() const		{ return false; }
-	virtual bool								isImportProxy() const		{ return false; }
 	virtual uint64_t							getSize() const				{ return fFileLength; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return fgEmptyReferenceList; }
 	virtual bool								mustRemainInSection() const { return false; }
@@ -79,20 +78,17 @@ public:
 	virtual Segment&							getSegment() const			{ return fSegment; }
 	virtual bool								requiresFollowOnAtom() const{ return false; }
 	virtual ObjectFile::Atom&					getFollowOnAtom() const		{ return *((ObjectFile::Atom*)NULL); }
-	virtual std::vector<ObjectFile::StabsInfo>*	getStabsDebugInfo() const	{ return NULL; }
+	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const			{ return NULL; }
 	virtual uint8_t								getAlignment() const		{ return 4; }
-	virtual WeakImportSetting					getImportWeakness() const	{ return ObjectFile::Atom::kWeakUnset; }
 	virtual void								copyRawContent(uint8_t buffer[]) const;
-	virtual void								writeContent(bool finalLinkedImage, ObjectFile::ContentWriter&) const;
 
 	virtual void								setScope(Scope)				{ }
-	virtual void								setImportWeakness(bool)		{ }
 
 protected:
 	friend class Reader;
 	
 											Atom(Reader& owner, Segment& segment, const char* sectionName, const uint8_t fileContent[], uint64_t fileLength) 
-												: fOwner(owner), fSegment(segment), fSectionName(sectionName), fFileContent(fileContent), fFileLength(fileLength) {}
+												: fOwner(owner), fSegment(segment), fSectionName(sectionName), fFileContent(fileContent), fFileLength(fileLength) { setDontDeadStrip(); }
 	virtual									~Atom() {}
 	
 	Reader&									fOwner;
@@ -132,12 +128,6 @@ void Atom::copyRawContent(uint8_t buffer[]) const
 {
 	memcpy(buffer, fFileContent, fFileLength);
 }
-
-void Atom::writeContent(bool finalLinkedImage, ObjectFile::ContentWriter& writer) const
-{
-	writer.write(0, fFileContent, fFileLength);
-}
-
 
 Reader* MakeReader(const char* segmentName, const char* sectionName, const char* path, const uint8_t fileContent[], uint64_t fileLength)
 {
