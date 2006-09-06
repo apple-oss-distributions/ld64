@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,27 +23,21 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-
 #
-# The point of this test is to verify a .o file can round-trip
-# through ld -r correctly.  The ObjectDump utility is used
-# dump a "canonical" textual representation of a .o file.
-# The before and after .o files are then diff'ed.
-# No differences means this test passes
-#
+# The point of this test is a sanity check that ld
+# -bundle_loader works, and _bar is found in the executable
+# and not in libbar.dylib
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} test.c -c -o test.${ARCH}.o
-	${LD} -arch ${ARCH} -r -keep_private_externs test.${ARCH}.o -o test-r.${ARCH}.o
-	${OBJECTDUMP} -no_content test.${ARCH}.o > test.${ARCH}.o.dump
-	#grep "plus" test.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${OBJECTDUMP} -no_content test-r.${ARCH}.o > test-r.${ARCH}.o.dump
-	#grep "plus" test-r.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${PASS_IFF} diff test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	${CC} ${CCFLAGS} bar.c -dynamiclib -o libbar.dylib
+	${CC} ${CCFLAGS} main.c bar.c -o main
+	${CC} ${CCFLAGS} bundle.c -bundle -bundle_loader main libbar.dylib -o bundle.bundle
+	${FAIL_IF_BAD_MACHO} bundle.bundle
+	nm -m bundle.bundle | grep _bar | grep "from executable" | ${PASS_IFF_STDIN}
 
 clean:
-	rm -rf test.${ARCH}.o test-r.${ARCH}.o test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	rm libbar.dylib main bundle.bundle
 	
 

@@ -39,10 +39,11 @@ void throwf (const char* format, ...) __attribute__ ((noreturn));
 class DynamicLibraryOptions
 {
 public:
-	DynamicLibraryOptions() : fWeakImport(false), fReExport(false), fInstallPathOverride(NULL) {}
+	DynamicLibraryOptions() : fWeakImport(false), fReExport(false), fBundleLoader(false), fInstallPathOverride(NULL) {}
 
 	bool		fWeakImport;
 	bool		fReExport;
+	bool		fBundleLoader;
 	const char* fInstallPathOverride;
 };
 
@@ -70,7 +71,7 @@ public:
 										  kWeakReferenceMismatchNonWeak };
 	enum CommonsMode { kCommonsIgnoreDylibs, kCommonsOverriddenByDylibs, kCommonsConflictsDylibsError };
 	enum DeadStripMode { kDeadStripOff, kDeadStripOn, kDeadStripOnPlusUnusedInits };
-	enum VersionMin { k10_1, k10_2, k10_3, k10_4, k10_5 };
+	enum VersionMin { kMinUnset, k10_1, k10_2, k10_3, k10_4, k10_5 };
 
 	struct FileInfo {
 		const char*				path;
@@ -113,6 +114,7 @@ public:
 	bool						keepPrivateExterns();	// only for kObjectFile
 	bool						interposable();			// only for kDynamicLibrary
 	bool						hasExportRestrictList();
+	bool						allGlobalsAreDeadStripRoots();
 	bool						shouldExport(const char*);
 	bool						ignoreOtherArchInputFiles();
 	bool						forceCpuSubtypeAll();
@@ -138,6 +140,7 @@ public:
 	uint64_t					customStackAddr();
 	bool						hasExecutableStack();
 	std::vector<const char*>&	initialUndefines();
+	bool						printWhyLive(const char* name);
 	uint32_t					minimumHeaderPad();
 	std::vector<ExtraSection>&	extraSections();
 	std::vector<SectionAlignment>&	sectionAlignments();
@@ -150,6 +153,8 @@ public:
 	bool						warnStabs();
 	bool						pauseAtEnd() { return fPause; }
 	bool						printStatistics() { return fStatistics; }
+	bool						printArchPrefix() { return fMessagesPrefixedWithArchitecture; }
+	bool						makeTentativeDefinitionsReal() { return fMakeTentativeDefinitionsReal; }
 
 private:
 	class CStringEquals
@@ -186,6 +191,7 @@ private:
 	void						addSectionAlignment(const char* segment, const char* section, const char* alignment);
 	CommonsMode					parseCommonsTreatment(const char* mode);
 	Treatment					parseTreatment(const char* treatment);
+	void						reconfigureDefaults();
 
 
 
@@ -228,6 +234,7 @@ private:
 	const char*							fInitFunctionName;
 	const char*							fDotOutputFile;
 	const char*							fExecutablePath;
+	const char*							fBundleLoader;
 	uint64_t							fZeroPageSize;
 	uint64_t							fStackSize;
 	uint64_t							fStackAddr;
@@ -243,7 +250,9 @@ private:
 	bool								fPause;
 	bool								fStatistics;
 	bool								fPrintOptions;
+	bool								fMakeTentativeDefinitionsReal;
 	std::vector<const char*>			fInitialUndefines;
+	NameSet								fWhyLive;
 	std::vector<const char*>			fTraceSymbols;
 	unsigned long						fLimitUndefinedSymbols;
 	std::vector<ExtraSection>			fExtraSections;

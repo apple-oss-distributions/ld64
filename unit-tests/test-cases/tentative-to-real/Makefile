@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -25,25 +25,20 @@ include ${TESTROOT}/include/common.makefile
 
 
 #
-# The point of this test is to verify a .o file can round-trip
-# through ld -r correctly.  The ObjectDump utility is used
-# dump a "canonical" textual representation of a .o file.
-# The before and after .o files are then diff'ed.
-# No differences means this test passes
+# The point of this test is to verify that -r -d
+# will transform a tentative definition into a real one.
 #
 
 run: all
 
 all:
 	${CC} ${CCFLAGS} test.c -c -o test.${ARCH}.o
-	${LD} -arch ${ARCH} -r -keep_private_externs test.${ARCH}.o -o test-r.${ARCH}.o
-	${OBJECTDUMP} -no_content test.${ARCH}.o > test.${ARCH}.o.dump
-	#grep "plus" test.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${OBJECTDUMP} -no_content test-r.${ARCH}.o > test-r.${ARCH}.o.dump
-	#grep "plus" test-r.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${PASS_IFF} diff test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	${LD} -arch ${ARCH} -r test.${ARCH}.o -o test-r.${ARCH}.o
+	${OBJECTDUMP} test-r.${ARCH}.o | grep tentative | ${PASS_IFF_STDIN}
+	${LD} -arch ${ARCH} -r -d test.${ARCH}.o -o test-r-d.${ARCH}.o
+	${OBJECTDUMP} test-r-d.${ARCH}.o | grep tentative | ${PASS_IFF_EMPTY}
 
 clean:
-	rm -rf test.${ARCH}.o test-r.${ARCH}.o test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	rm -rf test.${ARCH}.o test-r.${ARCH}.o 
 	
 

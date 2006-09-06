@@ -39,6 +39,9 @@ struct uuid_command {
 };
 #endif
 
+#ifndef S_16BYTE_LITERALS
+	#define S_16BYTE_LITERALS 0xE
+#endif
 
 #include "FileAbstraction.hpp"
 #include "Architectures.hpp"
@@ -130,7 +133,7 @@ public:
 	void			set_cmdsize(uint32_t value)		INLINE { E::set32(segment.fields.cmdsize, value); }
 
 	const char*		segname() const					INLINE { return segment.fields.segname; }
-	void			set_segname(const char* value)	INLINE { memcpy(&segment.fields.segname, value, 16); }
+	void			set_segname(const char* value)	INLINE { strncpy(segment.fields.segname, value, 16); }
 	
 	uint64_t		vmaddr() const					INLINE { return P::getP(segment.fields.vmaddr); }
 	void			set_vmaddr(uint64_t value)		INLINE { P::setP(segment.fields.vmaddr, value); }
@@ -179,10 +182,10 @@ template <typename P>
 class macho_section {
 public:
 	const char*		sectname() const				INLINE { return section.fields.sectname; }
-	void			set_sectname(const char* value)	INLINE { memcpy(&section.fields.sectname, value, 16); }
+	void			set_sectname(const char* value)	INLINE { strncpy(section.fields.sectname, value, 16); }
 	
 	const char*		segname() const					INLINE { return section.fields.segname; }
-	void			set_segname(const char* value)	INLINE { memcpy(&section.fields.segname, value, 16); }
+	void			set_segname(const char* value)	INLINE { strncpy(section.fields.segname, value, 16); }
 	
 	uint64_t		addr() const					INLINE { return P::getP(section.fields.addr); }
 	void			set_addr(uint64_t value)		INLINE { P::setP(section.fields.addr, value); }

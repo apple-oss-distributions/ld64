@@ -48,21 +48,23 @@ Options::Options(int argc, const char* argv[])
 	: fOutputFile("a.out"), fArchitecture(0), fOutputKind(kDynamicExecutable), fBindAtLoad(false),
 	  fStripLocalSymbols(false),  fKeepPrivateExterns(false),
 	  fInterposable(false), fIgnoreOtherArchFiles(false), fForceSubtypeAll(false), fDeadStrip(kDeadStripOff),
-	  fVersionMin(k10_1),fNameSpace(kTwoLevelNameSpace),
+	  fVersionMin(kMinUnset),fNameSpace(kTwoLevelNameSpace),
 	  fDylibCompatVersion(0), fDylibCurrentVersion(0), fDylibInstallName(NULL), fEntryName("start"), fBaseAddress(0),
 	  fExportMode(kExportDefault), fLibrarySearchMode(kSearchAllDirsForDylibsThenAllDirsForArchives),
 	  fUndefinedTreatment(kUndefinedError), fMessagesPrefixedWithArchitecture(false), fPICTreatment(kError),
 	  fWeakReferenceMismatchTreatment(kWeakReferenceMismatchError), fMultiplyDefinedDynamic(kWarning),
 	  fMultiplyDefinedUnused(kSuppress), fWarnOnMultiplyDefined(false), fClientName(NULL),
-	  fUmbrellaName(NULL), fInitFunctionName(NULL), fDotOutputFile(NULL), fExecutablePath(NULL),
-	  fZeroPageSize(0x1000), fStackSize(0), fStackAddr(0), fExecutableStack(false), fMinimumHeaderPad(0),
+	  fUmbrellaName(NULL), fInitFunctionName(NULL), fDotOutputFile(NULL), fExecutablePath(NULL), fBundleLoader(NULL),
+	  fZeroPageSize(ULLONG_MAX), fStackSize(0), fStackAddr(0), fExecutableStack(false), fMinimumHeaderPad(0),
 	  fCommonsMode(kCommonsIgnoreDylibs), fWarnCommons(false), fVerbose(false), fKeepRelocations(false),
 	  fEmitUUID(true),fWarnStabs(false),
-	  fTraceDylibSearching(false), fPause(false), fStatistics(false), fPrintOptions(false)
+	  fTraceDylibSearching(false), fPause(false), fStatistics(false), fPrintOptions(false),
+	  fMakeTentativeDefinitionsReal(false)
 {
 	this->parsePreCommandLineEnvironmentSettings();
 	this->parse(argc, argv);
 	this->parsePostCommandLineEnvironmentSettings();
+	this->reconfigureDefaults();
 	this->checkIllegalOptionCombinations();
 }
 
@@ -253,6 +255,11 @@ std::vector<const char*>& Options::initialUndefines()
 	return fInitialUndefines;
 }
 
+bool Options::printWhyLive(const char* symbolName)
+{
+	return ( fWhyLive.find(symbolName) != fWhyLive.end() );
+}
+
 std::vector<const char*>& Options::traceSymbols()
 {
 	return fTraceSymbols;
@@ -271,6 +278,26 @@ const char*	Options::dotOutputFile()
 bool Options::hasExportRestrictList()
 {
 	return (fExportMode != kExportDefault);
+}
+
+bool Options::allGlobalsAreDeadStripRoots()
+{
+	// -exported_symbols_list means globals are not exported by default
+	if ( fExportMode == kExportSome ) 
+		return false;
+	//
+	switch ( fOutputKind ) {
+		case Options::kDynamicExecutable:
+		case Options::kStaticExecutable:
+			// by default unused globals in a main executable are stripped
+			return false;
+		case Options::kDynamicLibrary:
+		case Options::kDynamicBundle:
+		case Options::kObjectFile:
+		case Options::kDyld:
+			return true;
+	}
+	return false;
 }
 
 uint32_t Options::minimumHeaderPad()
@@ -346,6 +373,8 @@ void Options::parseArch(const char* architecture)
 		fArchitecture = CPU_TYPE_POWERPC64;
 	else if ( strcmp(architecture, "i386") == 0 )
 		fArchitecture = CPU_TYPE_I386;
+	else if ( strcmp(architecture, "x86_64") == 0 )
+		fArchitecture = CPU_TYPE_X86_64;
 	else
 		throw "-arch followed by unknown architecture name";
 }
@@ -512,18 +541,41 @@ Options::FileInfo Options::findFile(const char* path)
 
 void Options::loadFileList(const char* fileOfPaths)
 {
-	FILE* file = fopen(fileOfPaths, "r");
-	if ( file == NULL )
-		throwf("-filelist file not found: %s\n", fileOfPaths);
+	FILE* file;
+	const char* comma = strrchr(fileOfPaths, ',');
+	const char* prefix = NULL;
+	if ( comma != NULL ) {
+		prefix = comma+1;
+		int realFileOfPathsLen = comma-fileOfPaths;
+		char realFileOfPaths[realFileOfPathsLen+1];
+		strncpy(realFileOfPaths,fileOfPaths, realFileOfPathsLen);
+		realFileOfPaths[realFileOfPathsLen] = '\0';
+		file = fopen(realFileOfPaths, "r");
+		if ( file == NULL )
+			throwf("-filelist file not found: %s\n", realFileOfPaths);
+	}
+	else {
+		file = fopen(fileOfPaths, "r");
+		if ( file == NULL )
+			throwf("-filelist file not found: %s\n", fileOfPaths);
+	}
 
-	char path[1024];
+	char path[PATH_MAX];
 	while ( fgets(path, 1024, file) != NULL ) {
-		path[1023] = '\0';
+		path[PATH_MAX-1] = '\0';
 		char* eol = strchr(path, '\n');
 		if ( eol != NULL )
 			*eol = '\0';
-
-		fInputFiles.push_back(findFile(path));
+		if ( prefix != NULL ) {
+			char builtPath[strlen(prefix)+strlen(path)+2];
+			strcpy(builtPath, prefix);
+			strcat(builtPath, "/");
+			strcat(builtPath, path);
+			fInputFiles.push_back(findFile(builtPath));
+		}
+		else {
+			fInputFiles.push_back(findFile(path));
+		}
 	}
 	fclose(file);
 }
@@ -636,18 +688,30 @@ void Options::setVersionMin(const char* version)
 	if ( version == NULL )
 		throw "-macosx_version_min argument missing";
 
-	if ( strcmp(version, "10.1") == 0 )
-		fVersionMin = k10_1;
-	else if ( strcmp(version, "10.2") == 0)
-		fVersionMin = k10_2;
-	else if ( strcmp(version, "10.3") == 0)
-		fVersionMin = k10_3;
-	else if ( strcmp(version, "10.4") == 0)
-		fVersionMin = k10_4;
-	else if ( strcmp(version, "10.5") == 0)
-		fVersionMin = k10_5;
-	else
-		fprintf(stderr, "ld64: unknown option to -macosx_version_min");
+	if ( (strncmp(version, "10.", 3) == 0) && isdigit(version[3]) ) {
+		int num = version[3] - '0';
+		switch ( num ) {
+			case 0:
+			case 1:
+				fVersionMin = k10_1;
+				break;
+			case 2:
+				fVersionMin = k10_2;
+				break;
+			case 3:
+				fVersionMin = k10_3;
+				break;
+			case 4:
+				fVersionMin = k10_4;
+				break;
+			default:
+				fVersionMin = k10_5;
+				break;
+			}
+	}
+	else {
+		fprintf(stderr, "ld64: unknown option to -macosx_version_min not 10.x");
+	}
 }
 
 void Options::setWeakReferenceMismatchTreatment(const char* treatment)
@@ -898,7 +962,7 @@ void Options::parse(int argc, const char* argv[])
 				fDylibInstallName = argv[++i];
 			}
 			// Sets the base address of the output.
-			else if ( strcmp(arg, "-seg1addr") == 0 ) {
+			else if ( (strcmp(arg, "-seg1addr") == 0) || (strcmp(arg, "-image_base") == 0) ) {
 				fBaseAddress = parseAddress(argv[++i]);
 			}
 			else if ( strcmp(arg, "-e") == 0 ) {
@@ -1074,7 +1138,10 @@ void Options::parse(int argc, const char* argv[])
 			}
 			else if ( strcmp(arg, "-pagezero_size") == 0 ) {
 				fZeroPageSize = parseAddress(argv[++i]);
-				fZeroPageSize &= (-4096); // page align
+				uint64_t temp = fZeroPageSize & (-4096); // page align
+				if ( fZeroPageSize != temp )
+					fprintf(stderr, "ld64: warning, -pagezero_size not page aligned, rounding down\n");
+				 fZeroPageSize = temp;
 			}
 			else if ( strcmp(arg, "-stack_addr") == 0 ) {
 				fStackAddr = parseAddress(argv[++i]);
@@ -1097,8 +1164,12 @@ void Options::parse(int argc, const char* argv[])
 				i += 2;
 			}
 			else if ( strcmp(arg, "-bundle_loader") == 0 ) {
-				// FIX FIX
-				++i;
+				fBundleLoader = argv[++i];
+				if ( (fBundleLoader == NULL) || (fBundleLoader[0] == '-') )
+					throw "-bundle_loader missing <path>";
+				FileInfo info = findFile(fBundleLoader);
+				info.options.fBundleLoader = true;
+				fInputFiles.push_back(info);
 			}
 			else if ( strcmp(arg, "-private_bundle") == 0 ) {
 				// FIX FIX
@@ -1154,8 +1225,14 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(arg, "-m") == 0 ) {
 				fWarnOnMultiplyDefined = true;
 			}
-			else if ( strcmp(arg, "-whyload") == 0 ) {
-				 // FIX FIX
+			else if ( (strcmp(arg, "-why_load") == 0) || (strcmp(arg, "-whyload") == 0) ) {
+				 fReaderOptions.fWhyLoad = true;
+			}
+			else if ( strcmp(arg, "-why_live") == 0 ) {
+				 const char* name = argv[++i];
+				if ( name == NULL )
+					throw "-why_live missing symbol name argument";
+				fWhyLive.insert(name);
 			}
 			else if ( strcmp(arg, "-u") == 0 ) {
 				const char* name = argv[++i];
@@ -1193,12 +1270,10 @@ void Options::parse(int argc, const char* argv[])
 				fReaderOptions.fDebugInfoStripping = ObjectFile::ReaderOptions::kDebugInfoMinimal;
 			}
 			else if ( strcmp(arg, "-dead_strip") == 0 ) {
-				//fDeadStrip = kDeadStripOnPlusUnusedInits;
-				 fprintf(stderr, "ld64: warning -dead_strip not yet supported in ld64\n");
+				fDeadStrip = kDeadStripOnPlusUnusedInits;
 			}
 			else if ( strcmp(arg, "-no_dead_strip_inits_and_terms") == 0 ) {
-				//fDeadStrip = kDeadStripOn;
-				 fprintf(stderr, "ld64: warning -dead_strip not yet supported in ld64\n");
+				fDeadStrip = kDeadStripOn;
 			}
 			else if ( strcmp(arg, "-w") == 0 ) {
 				// FIX FIX
@@ -1292,6 +1367,9 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(arg, "-print_statistics") == 0 ) {
 				fStatistics = true;
 			}
+			else if ( strcmp(arg, "-d") == 0 ) {
+				fMakeTentativeDefinitionsReal = true;
+			}
 			else if ( strcmp(arg, "-v") == 0 ) {
 				// previously handled by buildSearchPaths()
 			}
@@ -1318,6 +1396,8 @@ void Options::parse(int argc, const char* argv[])
 		}
 	}
 }
+
+
 
 //
 // -syslibroot <path> is used for SDK support.
@@ -1476,6 +1556,64 @@ void Options::parsePostCommandLineEnvironmentSettings()
 	if ( fExecutablePath == NULL && (fOutputKind == kDynamicExecutable) ) {
 		fExecutablePath = fOutputFile;
 	}
+	
+}
+
+void Options::reconfigureDefaults()
+{
+	// sync reader options
+	switch ( fOutputKind ) {
+		case Options::kObjectFile:
+			fReaderOptions.fForFinalLinkedImage = false;
+			break;
+		case Options::kDynamicExecutable:
+		case Options::kStaticExecutable:
+		case Options::kDynamicLibrary:
+		case Options::kDynamicBundle:
+		case Options::kDyld:
+			fReaderOptions.fForFinalLinkedImage = true;
+			break;
+	}
+
+	// set default min OS version
+	if ( fVersionMin == kMinUnset ) {
+		switch ( fArchitecture ) {
+			case CPU_TYPE_POWERPC:
+				fVersionMin = k10_2;
+				break;
+			case CPU_TYPE_I386:
+			case CPU_TYPE_POWERPC64:
+			case CPU_TYPE_X86_64:
+				fVersionMin = k10_4;
+			default:
+				// architecture not specified
+				fVersionMin = k10_4;
+				break;
+		}
+	}
+
+	// adjust min based on architecture
+	switch ( fArchitecture ) {
+		case CPU_TYPE_I386:
+			if ( fVersionMin < k10_4 ) {
+				//fprintf(stderr, "ld64 warning: -macosx_version_min should be 10.4 or later for i386\n");
+				fVersionMin = k10_4;
+			}
+			break;
+		case CPU_TYPE_POWERPC64:
+			if ( fVersionMin < k10_4 ) {
+				//fprintf(stderr, "ld64 warning: -macosx_version_min should be 10.4 or later for ppc64\n");
+				fVersionMin = k10_4;
+			}
+			break;
+		case CPU_TYPE_X86_64:
+			if ( fVersionMin < k10_4 ) {
+				//fprintf(stderr, "ld64 warning: -macosx_version_min should be 10.4 or later for x86_64\n");
+				fVersionMin = k10_4;
+			}
+			break;
+	}
+	
 }
 
 void Options::checkIllegalOptionCombinations()
@@ -1522,7 +1660,7 @@ void Options::checkIllegalOptionCombinations()
 			const char* lastSlash = strrchr(info.path, '/');
 			if ( lastSlash == NULL )
 				lastSlash = info.path - 1;
-			const char* dot = strchr(lastSlash, '.');
+			const char* dot = strchr(&lastSlash[1], '.');
 			if ( dot == NULL )
 				dot = &lastSlash[strlen(lastSlash)];
 			if ( strncmp(&lastSlash[1], subLibrary, dot-lastSlash-1) == 0 ) {
@@ -1548,6 +1686,7 @@ void Options::checkIllegalOptionCombinations()
 					throw "-stack_addr must be < 4G for 32-bit processes";
 				break;
 			case CPU_TYPE_POWERPC64:
+			case CPU_TYPE_X86_64:
 				break;
 		}
 		if ( (fStackAddr & -4096) != fStackAddr )
@@ -1564,14 +1703,15 @@ void Options::checkIllegalOptionCombinations()
 				if ( fStackSize > 0xFFFFFFFF )
 					throw "-stack_size must be < 4G for 32-bit processes";
 				if ( fStackAddr == 0 ) {
-					fprintf(stderr, "ld64 warning: -stack_addr not specified, using the default 0xC0000000\n");
 					fStackAddr = 0xC0000000;
 				}
+				if ( (fStackAddr > 0xB0000000) && ((fStackAddr-fStackSize) < 0xB0000000) )
+					fprintf(stderr, "ld64 warning: custom stack placement overlaps and will disable shared region\n");
 				break;
 			case CPU_TYPE_POWERPC64:
+			case CPU_TYPE_X86_64:
 				if ( fStackAddr == 0 ) {
-					fprintf(stderr, "ld64 warning: -stack_addr not specified, using the default 0x0008000000000000\n");
-					fStackAddr = 0x0008000000000000LL;
+					fStackAddr = 0x0007FFFF00000000LL;
 				}
 				break;
 		}
@@ -1613,6 +1753,14 @@ void Options::checkIllegalOptionCombinations()
 	if ( (fInitFunctionName != NULL) && (fOutputKind != Options::kDynamicLibrary) )
 		throw "-init can only be used with -dynamiclib";
 
+	// check -bundle_loader only used with -bundle
+	if ( (fBundleLoader != NULL) && (fOutputKind != Options::kDynamicBundle) )
+		throw "-bundle_loader can only be used with -bundle";
+
+	// check -d can only be used with -r
+	if ( fMakeTentativeDefinitionsReal && (fOutputKind != Options::kObjectFile) )
+		throw "-d can only be used with -r";
+	
 	// make sure all required exported symbols exist
 	for (NameSet::iterator it=fExportSymbols.begin(); it != fExportSymbols.end(); it++) {
 		const char* name = *it;
@@ -1620,5 +1768,51 @@ void Options::checkIllegalOptionCombinations()
 		if ( strcmp(&name[strlen(name)-3], ".eh") != 0 )
 			fInitialUndefines.push_back(name);
 	}
+	
+	// make sure that -init symbol exist
+	if ( fInitFunctionName != NULL )
+		fInitialUndefines.push_back(fInitFunctionName);
+
+	if ( fZeroPageSize == ULLONG_MAX ) {
+		// zero page size not specified on command line, set default
+		switch (fArchitecture) {
+			case CPU_TYPE_I386:
+			case CPU_TYPE_POWERPC:
+				// first 4KB for 32-bit architectures
+				fZeroPageSize = 0x1000;
+				break;
+			case CPU_TYPE_POWERPC64:
+				// first 4GB for ppc64 on 10.5
+				if ( fVersionMin >= k10_5 )
+					fZeroPageSize = 0x100000000ULL;
+				else
+					fZeroPageSize = 0x1000;	// 10.4 dyld may not be able to handle >4GB zero page
+				break;
+			case CPU_TYPE_X86_64:
+				// first 4GB for x86_64 on all OS's
+				fZeroPageSize = 0x100000000ULL;
+				break;
+			default:
+				// if -arch not used, default to 4K zero-page
+				fZeroPageSize = 0x1000;
+		}
+	}
+	else {
+		switch ( fOutputKind ) {
+			case Options::kDynamicExecutable:
+			case Options::kStaticExecutable:
+				// -pagezero_size size only legal when building main executable
+				break;
+			case Options::kDynamicLibrary:
+			case Options::kDynamicBundle:
+			case Options::kObjectFile:
+			case Options::kDyld:
+				throw "-pagezero_size option can only be used when linking a main executable";
+		}	
+	}
+
+	// -dead_strip and -r are incompatible
+	if ( (fDeadStrip != kDeadStripOff) && (fOutputKind == Options::kObjectFile) )
+		throw "-r and -dead_strip cannot be used together\n";
 
 }

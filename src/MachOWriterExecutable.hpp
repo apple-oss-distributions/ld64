@@ -189,6 +189,7 @@ private:
 	void						adjustLinkEditSections();
 	void						buildObjectFileFixups();
 	void						buildExecutableFixups();
+	uint64_t					relocAddressInFinalLinkedImage(uint64_t address, const ObjectFile::Atom* atom) const;
 	bool						referenceRequiresRuntimeFixUp(const ObjectFile::Reference* ref, bool slideable) const;
 	void						fixUpReferenceFinal(const ObjectFile::Reference* ref, const ObjectFile::Atom* inAtom, uint8_t buffer[]) const;
 	void						fixUpReferenceRelocatable(const ObjectFile::Reference* ref, const ObjectFile::Atom* inAtom, uint8_t buffer[]) const;
@@ -207,7 +208,9 @@ private:
 	uint8_t						sectionIndexForStab(const ObjectFile::Reader::Stab& stab);
 	void						addStabs(uint32_t startIndex);
 	RelocKind					relocationNeededInFinalLinkedImage(const ObjectFile::Atom& target) const;
-	bool						illegalRelocInFinalLinkedImage(uint8_t kind, bool slideable);
+	bool						illegalRelocInFinalLinkedImage(const ObjectFile::Reference&, bool slideable);
+	bool						mightNeedPadSegment();
+	void						scanForAbsoluteReferences();
 
 
 	struct DirectLibrary {
@@ -253,6 +256,7 @@ private:
 	class UUIDLoadCommandAtom<A>*				    fUUIDAtom;
 	std::vector<class ObjectFile::Atom*>			fWriterSynthesizedAtoms;
 	std::vector<SegmentInfo*>						fSegmentInfos;
+	class SegmentInfo*								fPadSegmentInfo;
 	class ObjectFile::Atom*							fEntryPoint;
 	class ObjectFile::Atom*							fDyldHelper;
 	std::vector<DirectLibrary>						fDirectLibraries;
@@ -266,6 +270,7 @@ private:
 	class SymbolTableLinkEditAtom<A>*				fSymbolTableAtom;
 	class IndirectTableLinkEditAtom<A>*				fIndirectTableAtom;
 	class StringsLinkEditAtom<A>*					fStringsAtom;
+	class PageZeroAtom<A>*							fPageZeroAtom;
 	macho_nlist<P>*									fSymbolTable;
 	std::vector<macho_relocation_info<P> >			fSectionRelocs;
 	std::vector<macho_relocation_info<P> >			fInternalRelocs;
@@ -290,7 +295,9 @@ private:
 	bool											fHasWeakExports;
 	bool											fReferencesWeakImports;
 	bool											fSeenFollowOnReferences;
+	bool											fWritableSegmentPastFirst4GB;
 	std::map<const ObjectFile::Atom*,bool>			fWeakImportMap;
+	SegmentInfo*									fFirstWritableSegment;
 };
 
 
@@ -311,6 +318,7 @@ public:
 	static Segment								fgStackSegment;
 	static Segment								fgImportSegment;
 	static Segment								fgDataSegment;
+	
 private:
 	const char*					fName;
 	const bool					fReadable;
@@ -332,7 +340,7 @@ class WriterAtom : public ObjectFile::Atom
 {
 public:
 	enum Kind { zeropage, machHeaderApp, machHeaderDylib, machHeaderBundle, machHeaderObject, loadCommands, undefinedProxy };
-											WriterAtom(Writer<A>& writer, Segment& segment) : fWriter(writer), fSegment(segment) { setDontDeadStrip(); }
+											WriterAtom(Writer<A>& writer, Segment& segment) : fWriter(writer), fSegment(segment) { }
 
 	virtual ObjectFile::Reader*				getFile() const					{ return &fWriter; }
 	virtual bool							getTranslationUnitSource(const char** dir, const char** name) const { return false; }
@@ -341,6 +349,7 @@ public:
 	virtual Scope							getScope() const				{ return ObjectFile::Atom::scopeTranslationUnit; }
 	virtual DefinitionKind					getDefinitionKind() const		{ return kRegularDefinition; }
 	virtual SymbolTableInclusion			getSymbolTableInclusion() const	{ return ObjectFile::Atom::kSymbolTableNotIn; }
+	virtual	bool							dontDeadStrip() const			{ return true; }
 	virtual bool							isZeroFill() const				{ return false; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return fgEmptyReferenceList; }
 	virtual bool							mustRemainInSection() const		{ return true; }
@@ -371,16 +380,20 @@ template <typename A>
 class PageZeroAtom : public WriterAtom<A>
 {
 public:
-											PageZeroAtom(Writer<A>& writer) : WriterAtom<A>(writer, Segment::fgPageZeroSegment) {}
+											PageZeroAtom(Writer<A>& writer) : WriterAtom<A>(writer, Segment::fgPageZeroSegment),
+																			fSize(fWriter.fOptions.zeroPageSize()) {}
 	virtual const char*						getDisplayName() const	{ return "page zero content"; }
 	virtual bool							isZeroFill() const		{ return true; }
-	virtual uint64_t						getSize() const 		{ return fWriter.fOptions.zeroPageSize(); }
+	virtual uint64_t						getSize() const 		{ return fSize; }
 	virtual const char*						getSectionName() const	{ return "._zeropage"; }
 	virtual uint8_t							getAlignment() const	{ return 12; }
+	void									setSize(uint64_t size)	{ fSize = size; }
 private:
 	using WriterAtom<A>::fWriter;
 	typedef typename A::P					P;
+	uint64_t								fSize;
 };
+
 
 template <typename A>
 class DsoHandleAtom : public WriterAtom<A>
@@ -457,13 +470,13 @@ public:
 	void									computeSize();
 	void									setup();
 	unsigned int							commandCount()			{ return fCommandCount; }
-	void									assignFileOffsets();
 private:
 	using WriterAtom<A>::fWriter;
 	typedef typename A::P					P;
 	unsigned int							fCommandCount;
 	uint32_t								fSize;
 };
+
 
 template <typename A>
 class SymbolTableLoadCommandsAtom : public LoadCommandAtom<A>
@@ -858,6 +871,26 @@ private:
 	std::vector<ObjectFile::Reference*>		fReferences;
 };
 
+template <typename A>
+class StubHelperAtom : public WriterAtom<A>
+{
+public:
+											StubHelperAtom(Writer<A>& writer, ObjectFile::Atom& target, ObjectFile::Atom& lazyPointer);
+	virtual const char*						getName() const				{ return fName; }
+	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
+	virtual uint8_t							getAlignment() const		{ return 2; }
+	virtual uint64_t						getSize() const;
+	virtual const char*						getSectionName() const		{ return "__stub_helper"; }
+	virtual std::vector<ObjectFile::Reference*>&  getReferences() const	{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
+	virtual void							copyRawContent(uint8_t buffer[]) const;
+	ObjectFile::Atom*						getTarget()					{ return &fTarget; }
+private:
+	static const char*						stubName(const char* importName);
+	using WriterAtom<A>::fWriter;
+	const char*								fName;
+	ObjectFile::Atom&						fTarget;
+	std::vector<ObjectFile::Reference*>		fReferences;
+};
 
 template <typename A>
 class LazyPointerAtom : public WriterAtom<A>
@@ -956,9 +989,9 @@ struct ExportSorter
 template <typename A>
 Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile::DyLibUsed>& dynamicLibraries)
 	: ExecutableFile::Writer(dynamicLibraries), fFilePath(strdup(path)), fOptions(options), fLoadCommandsSection(NULL),
-	  fLoadCommandsSegment(NULL), fLargestAtomSize(1),
+	  fLoadCommandsSegment(NULL), fPadSegmentInfo(NULL), fPageZeroAtom(NULL), fLargestAtomSize(1), 
 	  fEmitVirtualSections(false), fHasWeakExports(false), fReferencesWeakImports(false),
-	  fSeenFollowOnReferences(false)
+	  fSeenFollowOnReferences(false), fWritableSegmentPastFirst4GB(false), fFirstWritableSegment(NULL)
 {
 	int permissions = 0777;
 	if ( fOptions.outputKind() == Options::kObjectFile )
@@ -975,7 +1008,7 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 	switch ( fOptions.outputKind() ) {
 		case Options::kDynamicExecutable:
 		case Options::kStaticExecutable:
-			fWriterSynthesizedAtoms.push_back(new PageZeroAtom<A>(*this));
+			fWriterSynthesizedAtoms.push_back(fPageZeroAtom = new PageZeroAtom<A>(*this));
 			if ( fOptions.outputKind() == Options::kDynamicExecutable )
 				fWriterSynthesizedAtoms.push_back(new DsoHandleAtom<A>(*this));
 			fWriterSynthesizedAtoms.push_back(new MachHeaderAtom<A>(*this));
@@ -1045,7 +1078,10 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 				const unsigned int libCount = dynamicLibraries.size();
 				for (unsigned int i=0; i < libCount; ++i) {
 					ExecutableFile::DyLibUsed& dylibInfo = dynamicLibraries[i];
-					if ( dylibInfo.indirect ) {
+					if ( dylibInfo.options.fBundleLoader ) {
+						fLibraryToOrdinal[dylibInfo.reader] = EXECUTABLE_ORDINAL;
+					}
+					else if ( dylibInfo.indirect ) {
 						// find ordinal of direct reader
 						if ( fOptions.nameSpace() == Options::kTwoLevelNameSpace ) {
 							bool found = false;
@@ -1069,7 +1105,7 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 							dylibInstallPath = dylibInfo.options.fInstallPathOverride;
 						for (unsigned int seenLib=0; seenLib < i; ++seenLib) {
 							ExecutableFile::DyLibUsed& seenDylibInfo = dynamicLibraries[seenLib];
-							if ( !seenDylibInfo.indirect ) {
+							if ( !seenDylibInfo.indirect && !seenDylibInfo.options.fBundleLoader ) {
 								const char* seenDylibInstallPath = seenDylibInfo.reader->getInstallPath();
 								if ( seenDylibInfo.options.fInstallPathOverride != NULL )
 									seenDylibInstallPath = dylibInfo.options.fInstallPathOverride;
@@ -1148,6 +1184,11 @@ Writer<A>::~Writer()
 }
 
 
+// for ppc64, -mdynamic-no-pic only works in low 2GB, so we might need to split the zeropage into two segments
+template <>bool Writer<ppc64>::mightNeedPadSegment() { return (fOptions.zeroPageSize() >= 0x80000000ULL); }
+template <typename A> bool Writer<A>::mightNeedPadSegment() { return false; }
+
+
 template <typename A>
 ObjectFile::Atom* Writer<A>::getUndefinedProxyAtom(const char* name)
 {
@@ -1189,31 +1230,41 @@ uint64_t Writer<A>::write(std::vector<class ObjectFile::Atom*>& atoms,
 	fEntryPoint = entryPointAtom;
 	fDyldHelper = dyldHelperAtom;
 
-	// Set for create UUID
-	if (createUUID)
-		fUUIDAtom->emit();
+	try {
+		// Set for create UUID
+		if (createUUID)
+			fUUIDAtom->emit();
 
-	// create inter-library stubs
-	synthesizeStubs();
+		// check for mdynamic-no-pic codegen which force code into low 4GB
+		scanForAbsoluteReferences();
 
-	// create SegmentInfo and SectionInfo objects and assign all atoms to a section
-	partitionIntoSections();
+		// create inter-library stubs
+		synthesizeStubs();
 
-	// segment load command can now be sized and padding can be set
-	adjustLoadCommandsAndPadding();
+		// create SegmentInfo and SectionInfo objects and assign all atoms to a section
+		partitionIntoSections();
 
-	// assign each section a file offset
-	assignFileOffsets();
+		// segment load command can now be sized and padding can be set
+		adjustLoadCommandsAndPadding();
 
-	// if need to add branch islands, reassign file offsets
-	if ( addBranchIslands() )
+		// assign each section a file offset
 		assignFileOffsets();
 
-	// build symbol table and relocations
-	buildLinkEdit();
+		// if need to add branch islands, reassign file offsets
+		if ( addBranchIslands() )
+			assignFileOffsets();
 
-	// write everything
-	return writeAtoms();
+		// build symbol table and relocations
+		buildLinkEdit();
+
+		// write everything
+		return writeAtoms();
+	} catch (...) {
+		// clean up if any errors
+		close(fFileDescriptor);
+		(void)unlink(fFilePath);
+		throw;
+	}
 }
 
 template <typename A>
@@ -1239,12 +1290,17 @@ template <typename A>
 void Writer<A>::setExportNlist(const ObjectFile::Atom* atom, macho_nlist<P>* entry)
 {
 	// set n_type
-	entry->set_n_type(N_EXT | N_SECT);
-	if ( (atom->getScope() == ObjectFile::Atom::scopeLinkageUnit) && (fOptions.outputKind() == Options::kObjectFile) ) {
-		if ( fOptions.keepPrivateExterns() )
-			entry->set_n_type(N_EXT | N_SECT | N_PEXT);
+	if ( atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableInAsAbsolute ) {
+		entry->set_n_type(N_EXT | N_ABS);
 	}
-
+	else {
+		entry->set_n_type(N_EXT | N_SECT);
+		if ( (atom->getScope() == ObjectFile::Atom::scopeLinkageUnit) && (fOptions.outputKind() == Options::kObjectFile) ) {
+			if ( fOptions.keepPrivateExterns() )
+				entry->set_n_type(N_EXT | N_SECT | N_PEXT);
+		}
+	}
+	
 	// set n_sect (section number of implementation )
 	uint8_t sectionIndex = atom->getSection()->getIndex();
 	entry->set_n_sect(sectionIndex);
@@ -1416,7 +1472,7 @@ void Writer<A>::collectExportedAndImportedAndLocalAtoms()
 					fImportedAtoms.push_back(atom);
 					break;
 				case ObjectFile::Atom::kTentativeDefinition:
-					if ( fOptions.outputKind() == Options::kObjectFile ) {
+					if ( (fOptions.outputKind() == Options::kObjectFile) && !fOptions.makeTentativeDefinitionsReal() ) {
 						fImportedAtoms.push_back(atom);
 						break;
 					}
@@ -1445,7 +1501,7 @@ uint64_t Writer<A>::valueForStab(const ObjectFile::Reader::Stab& stab)
 {
 	switch ( stab.type ) {
 		case N_FUN:
-			if ( stab.other == 0 ) {
+			if ( (stab.string == NULL) || (strlen(stab.string) == 0) ) {
 				// end of function N_FUN has size
 				return stab.atom->getSize();
 			}
@@ -1470,7 +1526,20 @@ uint64_t Writer<A>::valueForStab(const ObjectFile::Reader::Stab& stab)
 		case N_ENSYM:
 			return stab.atom->getSize();
 		case N_SO:
-			return 0;
+			if ( stab.atom == NULL ) {
+				return 0;
+			}
+			else {
+				if ( (stab.string == NULL) || (strlen(stab.string) == 0) ) {
+					// end of translation unit N_SO has address of end of last atom
+					return getAtomLoadAddress(stab.atom) + stab.atom->getSize();
+				}
+				else {
+					// start of translation unit N_SO has address of end of first atom
+					return getAtomLoadAddress(stab.atom);
+				}
+			}
+			break;
 		default:
 			return stab.value;
 	}
@@ -1505,7 +1574,10 @@ uint32_t Writer<A>::stringOffsetForStab(const ObjectFile::Reader::Stab& stab)
 template <typename A>
 uint8_t Writer<A>::sectionIndexForStab(const ObjectFile::Reader::Stab& stab)
 {
-	if ( stab.atom != NULL ) 
+	// in FUN stabs, n_sect field is 0 for start FUN and 1 for end FUN
+	if ( stab.type == N_FUN )
+		return stab.other;
+	else if ( stab.atom != NULL ) 
 		return stab.atom->getSection()->getIndex();
 	else
 		return stab.other;
@@ -1571,6 +1643,104 @@ void Writer<A>::buildFixups()
 	}
 }
 
+template <>
+uint32_t Writer<x86_64>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Reference* ref)
+{
+	ObjectFile::Atom& target = ref->getTarget();
+	bool external = (target.getSymbolTableInclusion() != ObjectFile::Atom::kSymbolTableNotIn);
+	uint32_t symbolIndex = external ? this->symbolIndex(target) : target.getSection()->getIndex();
+	uint32_t address = atom->getSectionOffset()+ref->getFixUpOffset();
+	macho_relocation_info<P> reloc1;
+	macho_relocation_info<P> reloc2;
+	x86_64::ReferenceKinds kind = (x86_64::ReferenceKinds)ref->getKind();
+
+	switch ( kind ) {
+		case x86_64::kNoFixUp:
+		case x86_64::kFollowOn:
+			return 0;
+
+		case x86_64::kPointer:
+		case x86_64::kPointerWeakImport:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(false);
+			reloc1.set_r_length(3);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_UNSIGNED);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPointerDiff32:
+		case x86_64::kPointerDiff:	
+			{
+			ObjectFile::Atom& fromTarget = ref->getFromTarget();
+			bool fromExternal = (fromTarget.getSymbolTableInclusion() != ObjectFile::Atom::kSymbolTableNotIn);
+			uint32_t fromSymbolIndex = fromExternal ? this->symbolIndex(fromTarget) : fromTarget.getSection()->getIndex();
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(false);
+			reloc1.set_r_length(kind==x86_64::kPointerDiff32 ? 2 : 3);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_UNSIGNED);
+			reloc2.set_r_address(address);
+			reloc2.set_r_symbolnum(fromSymbolIndex);
+			reloc2.set_r_pcrel(false);
+			reloc2.set_r_length(kind==x86_64::kPointerDiff32 ? 2 : 3);
+			reloc2.set_r_extern(fromExternal);
+			reloc2.set_r_type(X86_64_RELOC_SUBTRACTOR);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc2);
+			return 2;
+			}
+
+		case x86_64::kBranchPCRel32:
+		case x86_64::kBranchPCRel32WeakImport:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_BRANCH);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32:
+		case x86_64::kPCRel32_1:
+		case x86_64::kPCRel32_2:
+		case x86_64::kPCRel32_4:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_SIGNED);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32GOT:
+		case x86_64::kPCRel32GOTWeakImport:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_GOT);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32GOTLoad:
+		case x86_64::kPCRel32GOTLoadWeakImport:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_GOT_LOAD);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+	}
+	return 0;
+}
 
 template <>
 uint32_t Writer<x86>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Reference* ref)
@@ -1606,6 +1776,7 @@ uint32_t Writer<x86>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Refere
 
 		case x86::kPointer:
 		case x86::kPointerWeakImport:
+		case x86::kAbsolute32:
 			if ( !isExtern && (ref->getTargetOffset() != 0) ) {
 				// use scattered reloc is target offset is non-zero
 				sreloc1->set_r_scattered(true);
@@ -2031,9 +2202,8 @@ void Writer<A>::buildObjectFileFixups()
 								//fprintf(stderr, "stub %s ==> %s ==> %s ==> index:%u\n", atom->getDisplayName(), stubTarget.getDisplayName(), stubTargetTarget.getDisplayName(), undefinedSymbolIndex);
 							}
 							else {
-								if ( curSection->fAllNonLazyPointers
-									 && (ref->getTarget().getScope() == ObjectFile::Atom::scopeLinkageUnit)
-									 && !fOptions.keepPrivateExterns() )
+								// only use INDIRECT_SYMBOL_LOCAL in non-lazy-pointers for atoms that won't be in symbol table
+								if ( curSection->fAllNonLazyPointers && (ref->getTarget().getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn) )
 									undefinedSymbolIndex = INDIRECT_SYMBOL_LOCAL;
 								else
 									undefinedSymbolIndex = this->symbolIndex(ref->getTarget());
@@ -2067,7 +2237,7 @@ void Writer<A>::buildObjectFileFixups()
 								relocIndex += this->addObjectRelocs(atom, ref);
 							}
 						}
-						else {
+						else if ( ref->getKind() != A::kNoFixUp ) {
 							relocIndex += this->addObjectRelocs(atom, ref);
 						}
 					}
@@ -2091,9 +2261,9 @@ void Writer<A>::buildObjectFileFixups()
 }
 
 template <>
-bool Writer<ppc>::illegalRelocInFinalLinkedImage(uint8_t kind, bool slideable)
+bool Writer<ppc>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& ref, bool slideable)
 {
-	switch ( kind ) {
+	switch ( ref.getKind() ) {
 		case ppc::kAbsLow16:
 		case ppc::kAbsLow14:
 		case ppc::kAbsHigh16:
@@ -2106,9 +2276,9 @@ bool Writer<ppc>::illegalRelocInFinalLinkedImage(uint8_t kind, bool slideable)
 
 
 template <>
-bool Writer<ppc64>::illegalRelocInFinalLinkedImage(uint8_t kind, bool slideable)
+bool Writer<ppc64>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& ref, bool slideable)
 {
-	switch ( kind ) {
+	switch ( ref.getKind() ) {
 		case ppc::kAbsLow16:
 		case ppc::kAbsLow14:
 		case ppc::kAbsHigh16:
@@ -2120,11 +2290,31 @@ bool Writer<ppc64>::illegalRelocInFinalLinkedImage(uint8_t kind, bool slideable)
 }
 
 template <>
-bool Writer<x86>::illegalRelocInFinalLinkedImage(uint8_t kind, bool slideable)
+bool Writer<x86>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& ref, bool slideable)
 {
+	if ( ref.getKind() == x86::kAbsolute32 ) {
+		switch ( ref.getTarget().getDefinitionKind() ) {
+			case ObjectFile::Atom::kTentativeDefinition:
+			case ObjectFile::Atom::kRegularDefinition:
+				// illegal in dylibs/bundles, until we support TEXT relocs 
+				return slideable;
+			case ObjectFile::Atom::kWeakDefinition:
+				// illegal if an exported weak symbol, until we support TEXT relocs
+				return this->shouldExport(ref.getTarget());
+			case ObjectFile::Atom::kExternalDefinition:
+			case ObjectFile::Atom::kExternalWeakDefinition:
+				// illegal until we support TEXT relocs
+				return true;
+		}
+	}
 	return false;
 }
 
+template <>
+bool Writer<x86_64>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& ref, bool slideable)
+{
+	return false;
+}
 
 
 template <typename A>
@@ -2160,6 +2350,64 @@ typename Writer<A>::RelocKind Writer<A>::relocationNeededInFinalLinkedImage(cons
 	}
 	return kRelocNone;
 }
+
+template <typename A>
+uint64_t Writer<A>::relocAddressInFinalLinkedImage(uint64_t address, const ObjectFile::Atom* atom) const
+{
+	// for 32-bit architectures, the r_address field in relocs
+	// for final linked images is the offset from the base address
+	uint64_t result = address - fOptions.baseAddress();
+	if ( result > 0x7FFFFFFF ) {
+		throwf("image too large: address can't fit in 31-bit r_address field in %s from %s",
+			atom->getDisplayName(), atom->getFile()->getPath());
+	}
+	return result;
+}
+
+template <>
+uint64_t Writer<x86_64>::relocAddressInFinalLinkedImage(uint64_t address, const ObjectFile::Atom* atom)  const
+{
+	// for x86_64, the r_address field in relocs for final linked images 
+	// is the offset from the start address of the first writable segment
+	uint64_t result = address - fFirstWritableSegment->fBaseAddress;
+	if ( result > 0xFFFFFFFF ) {
+		throwf("image too large: address can't fit in 32-bit r_address field in %s from %s",
+			atom->getDisplayName(), atom->getFile()->getPath());
+	}
+	return result;
+}
+
+template <>
+uint64_t Writer<ppc64>::relocAddressInFinalLinkedImage(uint64_t address, const ObjectFile::Atom* atom)  const
+{
+	// for ppc64, the Mac OS X 10.4 dyld assumes r_address is always the offset from the base address.  
+	// the 10.5 dyld, iterprets the r_address as:
+	//   1) an offset from the base address, iff there are no writable segments with a address > 4GB from base address, otherwise
+	//   2) an offset from the base address of the first writable segment
+	// For dyld, r_address is always the offset from the base address
+	uint64_t result;
+	bool badFor10_4 = false;
+	if ( fWritableSegmentPastFirst4GB ) {
+		if ( fOptions.macosxVersionMin() < Options::k10_5 )
+			badFor10_4 = true;
+		result = address - fFirstWritableSegment->fBaseAddress;
+		if ( result > 0xFFFFFFFF ) {
+			throwf("image too large: address can't fit in 32-bit r_address field in %s from %s",
+				atom->getDisplayName(), atom->getFile()->getPath());
+		}
+	}
+	else {
+		result = address - fOptions.baseAddress();
+		if ( (fOptions.macosxVersionMin() < Options::k10_5) && (result > 0x7FFFFFFF) )
+			badFor10_4 = true;
+	}
+	if ( badFor10_4 ) {
+			throwf("image or pagezero_size too large for Mac OS X 10.4: address can't fit in 31-bit r_address field for %s from %s",
+				atom->getDisplayName(), atom->getFile()->getPath());
+	}
+	return result;
+}
+
 
 template <typename A>
 void Writer<A>::buildExecutableFixups()
@@ -2212,7 +2460,7 @@ void Writer<A>::buildExecutableFixups()
 								if ( fDyldHelper != NULL )
 									sectionNum = ((SectionInfo*)(fDyldHelper->getSection()))->getIndex();
 								//fprintf(stderr, "lazy pointer reloc, section index=%u, section name=%s\n", sectionNum, curSection->fSectionName);
-								pblaReloc.set_r_address(atom->getAddress()-fOptions.baseAddress());
+								pblaReloc.set_r_address(relocAddressInFinalLinkedImage(atom->getAddress(), atom));
 								pblaReloc.set_r_symbolnum(sectionNum);
 								pblaReloc.set_r_pcrel(false);
 								pblaReloc.set_r_length();
@@ -2223,7 +2471,8 @@ void Writer<A>::buildExecutableFixups()
 						}
  						else if ( ref->getKind() == A::kPointer ) {
 							if ( slideable && ((curSegment->fInitProtection & VM_PROT_WRITE) == 0) ) {
-								throwf("pointer in read-only segment not allowed in slidable image, used in %s from %s", atom->getDisplayName(), atom->getFile()->getPath());
+								throwf("pointer in read-only segment not allowed in slidable image, used in %s from %s",
+										atom->getDisplayName(), atom->getFile()->getPath());
 							}
 							switch ( this->relocationNeededInFinalLinkedImage(ref->getTarget()) ) {
 								case kRelocNone:
@@ -2237,7 +2486,7 @@ void Writer<A>::buildExecutableFixups()
 										// special case _mh_dylib_header and friends which are not in any real section
 										if ( (sectionNum ==0) && sectInfo->fVirtualSection && (strcmp(sectInfo->fSectionName, "._mach_header") == 0) )
 											sectionNum = 1;
-										internalReloc.set_r_address(atom->getAddress()+ref->getFixUpOffset()-fOptions.baseAddress());
+										internalReloc.set_r_address(this->relocAddressInFinalLinkedImage(atom->getAddress() + ref->getFixUpOffset(), atom));
 										internalReloc.set_r_symbolnum(sectionNum);
 										internalReloc.set_r_pcrel(false);
 										internalReloc.set_r_length();
@@ -2249,7 +2498,7 @@ void Writer<A>::buildExecutableFixups()
 								case kRelocExternal:
 									{
 										macho_relocation_info<P> externalReloc;
-										externalReloc.set_r_address(atom->getAddress()+ref->getFixUpOffset()-fOptions.baseAddress());
+										externalReloc.set_r_address(this->relocAddressInFinalLinkedImage(atom->getAddress() + ref->getFixUpOffset(), atom));
 										externalReloc.set_r_symbolnum(this->symbolIndex(ref->getTarget()));
 										externalReloc.set_r_pcrel(false);
 										externalReloc.set_r_length();
@@ -2260,7 +2509,7 @@ void Writer<A>::buildExecutableFixups()
 									break;
 							}
 						}
-						else if ( this->illegalRelocInFinalLinkedImage(ref->getKind(), slideable) ) {
+						else if ( this->illegalRelocInFinalLinkedImage(*ref, slideable) ) {
 							throwf("absolute addressing (perhaps -mdynamic-no-pic) used in %s from %s not allowed in slidable image", atom->getDisplayName(), atom->getFile()->getPath());
 						}
 					}
@@ -2307,6 +2556,13 @@ void Writer<x86>::writeNoOps(uint32_t from, uint32_t to)
 		::pwrite(fFileDescriptor, &x86Nop, 1, p);
 }
 
+template <>
+void Writer<x86_64>::writeNoOps(uint32_t from, uint32_t to)
+{
+	uint8_t x86Nop = 0x90;
+	for (uint32_t p=from; p < to; ++p)
+		::pwrite(fFileDescriptor, &x86Nop, 1, p);
+}
 
 template <typename A>
 uint64_t Writer<A>::writeAtoms()
@@ -2380,7 +2636,8 @@ uint64_t Writer<A>::writeAtoms()
 						catch (const char* msg) {
 							throwf("%s in %s from %s", msg, atom->getDisplayName(), atom->getFile()->getPath());
 						}
-						//fprintf(stderr, "writing 0x%08X -> 0x%08X (addr=0x%llX, size=0x%llX), atom %s\n", offset, end, atom->getAddress(), atom->getSize(), atom->getDisplayName());
+						//fprintf(stderr, "writing 0x%08X -> 0x%08X (addr=0x%llX, size=0x%llX), atom %s from %s\n", 
+						//	offset, end, atom->getAddress(), atom->getSize(), atom->getDisplayName(), atom->getFile()->getPath());
 						// write out
 						::pwrite(fFileDescriptor, buffer, atom->getSize(), offset);
 					}
@@ -2389,6 +2646,7 @@ uint64_t Writer<A>::writeAtoms()
 		}
 	}
 	delete [] buffer;
+	close(fFileDescriptor);
 	return end;
 }
 
@@ -2397,6 +2655,8 @@ template <>
 void Writer<x86>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const ObjectFile::Atom* inAtom, uint8_t buffer[]) const
 {
 	uint32_t* fixUp = (uint32_t*)&buffer[ref->getFixUpOffset()];
+	const int64_t bl_twoGigLimit = 0x7FFFFFFF;
+	int64_t displacement;
 	switch ( (x86::ReferenceKinds)(ref->getKind()) ) {
 		case x86::kNoFixUp:
 		case x86::kFollowOn:
@@ -2405,12 +2665,12 @@ void Writer<x86>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 		case x86::kPointerWeakImport:
 		case x86::kPointer:
 			{
-				if ( ref->getTarget().getDefinitionKind() != ObjectFile::Atom::kRegularDefinition ) {
+				if ( this->relocationNeededInFinalLinkedImage(ref->getTarget()) == kRelocExternal ) {
 					// external realocation ==> pointer contains addend
 					LittleEndian::set32(*fixUp, ref->getTargetOffset());
 				}
 				else {
-					// internal relocation => pointer contains target address
+					// pointer contains target address
 					//printf("Atom::fixUpReferenceFinal() target.name=%s, target.address=0x%08llX\n", target.getDisplayName(), target.getAddress());
 					LittleEndian::set32(*fixUp, ref->getTarget().getAddress() + ref->getTargetOffset());
 				}
@@ -2422,7 +2682,7 @@ void Writer<x86>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 			break;
 		case x86::kPCRel32WeakImport:
 		case x86::kPCRel32:
-			int64_t displacement = 0;
+			displacement = 0;
 			switch ( ref->getTarget().getDefinitionKind() ) {
 				case ObjectFile::Atom::kRegularDefinition:
 				case ObjectFile::Atom::kWeakDefinition:
@@ -2435,12 +2695,26 @@ void Writer<x86>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 					displacement = 0;
 					break;
 			}
-			const int64_t bl_twoGigLimit = 0x7FFFFFFF;
 			if ( (displacement > bl_twoGigLimit) || (displacement < (-bl_twoGigLimit)) ) {
 				//fprintf(stderr, "call out of range from %s in %s to %s in %s\n", this->getDisplayName(), this->getFile()->getPath(), target.getDisplayName(), target.getFile()->getPath());
 				throw "rel32 out of range";
 			}
 			LittleEndian::set32(*fixUp, (int32_t)displacement);
+			break;
+		case x86::kAbsolute32:
+			switch ( ref->getTarget().getDefinitionKind() ) {
+				case ObjectFile::Atom::kRegularDefinition:
+				case ObjectFile::Atom::kWeakDefinition:
+				case ObjectFile::Atom::kTentativeDefinition:
+					// pointer contains target address
+					LittleEndian::set32(*fixUp, ref->getTarget().getAddress() + ref->getTargetOffset());
+					break;
+				case ObjectFile::Atom::kExternalDefinition:
+				case ObjectFile::Atom::kExternalWeakDefinition:
+					// external realocation ==> pointer contains addend
+					LittleEndian::set32(*fixUp, ref->getTargetOffset());
+					break;
+			}
 			break;
 	}
 }
@@ -2451,12 +2725,14 @@ void Writer<x86>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref, co
 	uint32_t* fixUp = (uint32_t*)&buffer[ref->getFixUpOffset()];
 	bool isExternal = ( (ref->getTarget().getDefinitionKind() != ObjectFile::Atom::kRegularDefinition)
 						&& shouldExport(ref->getTarget()) );
-	switch (ref->getKind()) {
+	switch ( (x86::ReferenceKinds)(ref->getKind()) ) {
 		case x86::kNoFixUp:
 		case x86::kFollowOn:
 			// do nothing
 			break;
 		case x86::kPointer:
+		case x86::kPointerWeakImport:
+		case x86::kAbsolute32:
 			{
 				if ( isExternal ) {
 					// external realocation ==> pointer contains addend
@@ -2480,6 +2756,7 @@ void Writer<x86>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref, co
 					(ref->getTarget().getAddress() + ref->getTargetOffset()) - (ref->getFromTarget().getAddress() + ref->getFromTargetOffset()) );
 			break;
 		case x86::kPCRel32:
+		case x86::kPCRel32WeakImport:
 			int64_t displacement = 0;
 			if ( isExternal )
 				displacement = ref->getTargetOffset() - (inAtom->getAddress() + ref->getFixUpOffset() + 4);
@@ -2495,6 +2772,160 @@ void Writer<x86>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref, co
 	}
 }
 
+template <>
+void Writer<x86_64>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const ObjectFile::Atom* inAtom, uint8_t buffer[]) const
+{
+	const int64_t twoGigLimit		  = 0x7FFFFFFF;
+	uint64_t* fixUp = (uint64_t*)&buffer[ref->getFixUpOffset()];
+	int64_t displacement = 0;
+	switch ( (x86_64::ReferenceKinds)(ref->getKind()) ) {
+		case x86_64::kNoFixUp:
+		case x86_64::kFollowOn:
+			// do nothing
+			break;
+		case x86_64::kPointerWeakImport:
+		case x86_64::kPointer:
+			{
+				//fprintf(stderr, "fixUpReferenceFinal: %s reference to %s\n", this->getDisplayName(), target.getDisplayName());
+				if ( this->relocationNeededInFinalLinkedImage(ref->getTarget()) == kRelocExternal ) {
+					// external realocation ==> pointer contains addend
+					LittleEndian::set64(*fixUp, ref->getTargetOffset());
+				}
+				else {
+					// internal relocation
+					// pointer contains target address
+					//printf("Atom::fixUpReferenceFinal) target.name=%s, target.address=0x%08llX\n", target.getDisplayName(), target.getAddress());
+					LittleEndian::set64(*fixUp, ref->getTarget().getAddress() + ref->getTargetOffset());
+				}
+			}
+			break;
+		case x86_64::kPointerDiff32:
+				displacement = (ref->getTarget().getAddress() + ref->getTargetOffset()) - (ref->getFromTarget().getAddress() + ref->getFromTargetOffset());
+				if ( (displacement > twoGigLimit) || (displacement < (-twoGigLimit)) )
+					throw "32-bit pointer difference out of range";
+				LittleEndian::set32(*((uint32_t*)fixUp), (uint32_t)displacement);
+				break;
+		case x86_64::kPointerDiff:
+				LittleEndian::set64(*fixUp,
+					(ref->getTarget().getAddress() + ref->getTargetOffset()) - (ref->getFromTarget().getAddress() + ref->getFromTargetOffset()) );
+				break;
+		case x86_64::kBranchPCRel32WeakImport:
+		case x86_64::kBranchPCRel32:
+		case x86_64::kPCRel32:
+		case x86_64::kPCRel32_1:
+		case x86_64::kPCRel32_2:
+		case x86_64::kPCRel32_4:
+		case x86_64::kPCRel32GOT:
+		case x86_64::kPCRel32GOTWeakImport:
+		case x86_64::kPCRel32GOTLoad:
+		case x86_64::kPCRel32GOTLoadWeakImport:
+			switch ( ref->getTarget().getDefinitionKind() ) {
+				case ObjectFile::Atom::kRegularDefinition:
+				case ObjectFile::Atom::kWeakDefinition:
+				case ObjectFile::Atom::kTentativeDefinition:
+					displacement = (ref->getTarget().getAddress() + (int32_t)ref->getTargetOffset()) - (inAtom->getAddress() + ref->getFixUpOffset() + 4);
+					break;
+				case ObjectFile::Atom::kExternalDefinition:
+				case ObjectFile::Atom::kExternalWeakDefinition:
+					throw "codegen problem, can't use rel32 to external symbol";
+					break;
+			}
+			switch ( ref->getKind() ) {
+				case x86_64::kPCRel32_1:
+					displacement -= 1;
+					break;
+				case x86_64::kPCRel32_2:
+					displacement -= 2;
+					break;
+				case x86_64::kPCRel32_4:
+					displacement -= 4;
+					break;
+			}
+			if ( (displacement > twoGigLimit) || (displacement < (-twoGigLimit)) ) {
+				//fprintf(stderr, "call out of range from %s in %s to %s in %s\n", this->getDisplayName(), this->getFile()->getPath(), target.getDisplayName(), target.getFile()->getPath());
+				throw "rel32 out of range";
+			}
+			LittleEndian::set32(*((uint32_t*)fixUp), (int32_t)displacement);
+			break;
+	}
+}
+
+template <>
+void Writer<x86_64>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref, const ObjectFile::Atom* inAtom, uint8_t buffer[]) const
+{
+	const int64_t twoGigLimit		  = 0x7FFFFFFF;
+	bool external = (ref->getTarget().getSymbolTableInclusion() != ObjectFile::Atom::kSymbolTableNotIn);
+	uint64_t* fixUp = (uint64_t*)&buffer[ref->getFixUpOffset()];
+	int64_t displacement = 0;
+	int32_t temp32;
+	switch ( (x86_64::ReferenceKinds)(ref->getKind()) ) {
+		case x86_64::kNoFixUp:
+		case x86_64::kFollowOn:
+			// do nothing
+			break;
+		case x86_64::kPointer:
+		case x86_64::kPointerWeakImport:
+			{
+				if ( external ) {
+					// external realocation ==> pointer contains addend
+					LittleEndian::set64(*fixUp, ref->getTargetOffset());
+				}
+				else {
+					// internal relocation ==> pointer contains target address
+					LittleEndian::set64(*fixUp, ref->getTarget().getAddress() + ref->getTargetOffset());
+				}
+			}
+			break;
+		case x86_64::kPointerDiff32:
+				// addend in content
+				LittleEndian::set32(*((uint32_t*)fixUp), ref->getTargetOffset() - ref->getFromTargetOffset() );
+			break;
+		case x86_64::kPointerDiff:
+				// addend in content
+				LittleEndian::set64(*fixUp, ref->getTargetOffset() - ref->getFromTargetOffset() );
+			break;
+		case x86_64::kBranchPCRel32:
+		case x86_64::kBranchPCRel32WeakImport:
+		case x86_64::kPCRel32:
+		case x86_64::kPCRel32_1:
+		case x86_64::kPCRel32_2:
+		case x86_64::kPCRel32_4:
+			// turn unsigned 64-bit target offset in signed 32-bit offset, since that is what source originally had
+			temp32 = ref->getTargetOffset();
+			if ( external ) {
+				// extern relocation contains addend
+				displacement = temp32;
+			}
+			else {
+				// internal relocations contain delta to target address
+				displacement = (ref->getTarget().getAddress() + temp32) - (inAtom->getAddress() + ref->getFixUpOffset() + 4);
+			}
+			switch ( ref->getKind() ) {
+				case x86_64::kPCRel32_1:
+					displacement -= 1;
+					break;
+				case x86_64::kPCRel32_2:
+					displacement -= 2;
+					break;
+				case x86_64::kPCRel32_4:
+					displacement -= 4;
+					break;
+			}
+			if ( (displacement > twoGigLimit) || (displacement < (-twoGigLimit)) ) {
+				//fprintf(stderr, "call out of range from %s in %s to %s in %s\n", this->getDisplayName(), this->getFile()->getPath(), target.getDisplayName(), target.getFile()->getPath());
+				throw "rel32 out of range";
+			}
+			LittleEndian::set32(*((uint32_t*)fixUp), (int32_t)displacement);
+			break;
+		case x86_64::kPCRel32GOT:
+		case x86_64::kPCRel32GOTLoad:
+		case x86_64::kPCRel32GOTWeakImport:
+		case x86_64::kPCRel32GOTLoadWeakImport:
+			// contains addend (usually zero)
+			LittleEndian::set32(*((uint32_t*)fixUp), (uint32_t)(ref->getTargetOffset()));
+			break;
+	}
+}
 
 template <>
 void Writer<ppc>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const ObjectFile::Atom* inAtom, uint8_t buffer[]) const
@@ -2559,6 +2990,13 @@ void Writer<A>::fixUpReference_powerpc(const ObjectFile::Reference* ref, const O
 					if ( fDyldHelper == NULL )
 						throw "symbol dyld_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
 					P::setP(*fixUpPointer, fDyldHelper->getAddress());
+				}
+				else if ( !finalLinkedImage && ((SectionInfo*)inAtom->getSection())->fAllNonLazyPointers ) {
+					// indirect symbol table has INDIRECT_SYMBOL_LOCAL, so we must put address in content
+					if  ( ref->getTarget().getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn )
+						P::setP(*fixUpPointer, targetAddr);
+					else
+						P::setP(*fixUpPointer, 0);
 				}
 				else if ( relocateableExternal ) {
 					// external realocation ==> pointer contains addend
@@ -2724,6 +3162,11 @@ bool Writer<x86>::stubableReferenceKind(uint8_t kind)
 	return (kind == x86::kPCRel32 || kind == x86::kPCRel32WeakImport);
 }
 
+template <>
+bool Writer<x86_64>::stubableReferenceKind(uint8_t kind)
+{
+	return (kind == x86_64::kBranchPCRel32 || kind == x86_64::kBranchPCRel32WeakImport);
+}
 
 template <>
 bool Writer<ppc>::weakImportReferenceKind(uint8_t kind)
@@ -2743,6 +3186,18 @@ bool Writer<x86>::weakImportReferenceKind(uint8_t kind)
 	return (kind == x86::kPCRel32WeakImport || kind == x86::kPointerWeakImport);
 }
 
+template <>
+bool Writer<x86_64>::weakImportReferenceKind(uint8_t kind)
+{
+	switch ( kind ) {
+		case x86_64::kPointerWeakImport:
+		case x86_64::kBranchPCRel32WeakImport:
+		case x86_64::kPCRel32GOTWeakImport:
+		case x86_64::kPCRel32GOTLoadWeakImport:
+			return true;
+	}
+	return false;
+}
 
 
 template <>
@@ -2763,6 +3218,52 @@ bool Writer<x86>::GOTReferenceKind(uint8_t kind)
 	return false;
 }
 
+template <>
+bool Writer<x86_64>::GOTReferenceKind(uint8_t kind)
+{
+	switch ( kind ) {
+		case x86_64::kPCRel32GOT:
+		case x86_64::kPCRel32GOTWeakImport:
+		case x86_64::kPCRel32GOTLoad:
+		case x86_64::kPCRel32GOTLoadWeakImport:
+			return true;
+	}
+	return false;
+}
+
+template <typename A>
+void Writer<A>::scanForAbsoluteReferences()
+{
+	// do nothing
+}
+
+// for ppc64 look for any -mdynamic-no-pic codegen
+template <>
+void  Writer<ppc64>::scanForAbsoluteReferences()
+{
+	// only do this for main executable
+	if ( mightNeedPadSegment() && (fPageZeroAtom != NULL) ) {
+		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
+			ObjectFile::Atom* atom = *it;
+			std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
+			for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
+				ObjectFile::Reference* ref = *rit;
+				switch (ref->getKind()) {
+					case ppc64::kAbsLow16:
+					case ppc64::kAbsLow14:
+					case ppc64::kAbsHigh16:
+					case ppc64::kAbsHigh16AddLow:
+						//fprintf(stderr, "found -mdyanmic-no-pic codegen in %s in %s\n", atom->getDisplayName(), atom->getFile()->getPath());
+						// shrink page-zero and add pad segment to compensate
+						fPadSegmentInfo = new SegmentInfo();
+						strcpy(fPadSegmentInfo->fName, "__4BGFILL");
+						fPageZeroAtom->setSize(0x1000);
+						return;
+				}
+			}
+		}
+	}
+}
 
 
 template <typename A>
@@ -2770,10 +3271,10 @@ void Writer<A>::synthesizeStubs()
 {
 	switch ( fOptions.outputKind() ) {
 		case Options::kStaticExecutable:
-		case Options::kDyld:
 		case Options::kObjectFile:
 			// these output kinds never have stubs
 			return;
+		case Options::kDyld:
 		case Options::kDynamicLibrary:
 		case Options::kDynamicBundle:
 		case Options::kDynamicExecutable:
@@ -2841,7 +3342,7 @@ void Writer<A>::synthesizeStubs()
 					nlp = pos->second;
 				}
 				// alter reference to use non lazy pointer instead
-				ref->setTarget(*nlp, 0);
+				ref->setTarget(*nlp, ref->getTargetOffset());
 			}
 		}
 	}
@@ -2922,7 +3423,9 @@ void Writer<A>::synthesizeStubs()
 			ObjectFile::Atom* atom = *it;
 			ObjectFile::Section* nextSection = atom->getSection();
 			if ( nextSection != curSection ) {
-				if ( (prevAtom != NULL) && (strcmp(prevAtom->getSectionName(), "__dyld") == 0) ) {
+				if ( (prevAtom != NULL) 
+					&& ((strcmp(prevAtom->getSectionName(), "__dyld") == 0) 
+					|| ((fOptions.outputKind() == Options::kDyld) && (strcmp(prevAtom->getSectionName(), "__data") == 0))) ) {
 					// found end of __dyld section, insert lazy pointers here
 					fAllAtoms->insert(it, fAllSynthesizedNonLazyPointers.begin(), fAllSynthesizedNonLazyPointers.end());
 					inserted = true;
@@ -2966,7 +3469,8 @@ void Writer<A>::partitionIntoSections()
 				strcpy(currentSectionInfo->fSegmentName, atom->getSegment().getName());
 				currentSectionInfo->fAlignment = atom->getAlignment();
 				currentSectionInfo->fAllZeroFill = atom->isZeroFill();
-				currentSectionInfo->fVirtualSection = ( (currentSectionInfo->fSectionName[0] == '.') || (oneSegmentCommand && (atom->getDefinitionKind()==ObjectFile::Atom::kTentativeDefinition)) );
+				currentSectionInfo->fVirtualSection = ( (currentSectionInfo->fSectionName[0] == '.') || 
+						(oneSegmentCommand && (atom->getDefinitionKind()==ObjectFile::Atom::kTentativeDefinition)) && !fOptions.makeTentativeDefinitionsReal() );
 				if ( !currentSectionInfo->fVirtualSection || fEmitVirtualSections )
 					currentSectionInfo->setIndex(sectionIndex++);
 				currentSegmentInfo->fSections.push_back(currentSectionInfo);
@@ -3088,6 +3592,12 @@ bool Writer<x86>::addBranchIslands()
 	return false;
 }
 
+template <>
+bool Writer<x86_64>::addBranchIslands()
+{
+	// x86 branches can reach entire 4G size of largest image
+	return false;
+}
 
 template <>
 inline uint8_t Writer<ppc>::branch24Reference()
@@ -3343,7 +3853,10 @@ void Writer<A>::assignFileOffsets()
 			
 			// adjust file offset to match address
 			if ( prevSection != NULL ) {
-				fileOffset = (address - prevSection->getBaseAddress()) + prevSection->fFileOffset;
+				if ( finalLinkedImage || !prevSection->fVirtualSection )
+					fileOffset = (address - prevSection->getBaseAddress()) + prevSection->fFileOffset;
+				else
+					fileOffset = ( (fileOffset+alignment-1) & (-alignment) );
 			}
 			
 			// update section info
@@ -3357,7 +3870,8 @@ void Writer<A>::assignFileOffsets()
 				throwf("zero-fill section %s not at end of segment", curSection->fSectionName);
 			
 			// update running pointers
-			address += curSection->fSize;
+			if ( finalLinkedImage || !curSection->fVirtualSection )
+				address += curSection->fSize;
 			fileOffset += curSection->fSize;
 			
 			// update segment info
@@ -3382,11 +3896,10 @@ void Writer<A>::assignFileOffsets()
 				nextContiguousAddress = (curSegment->fBaseAddress+curSegment->fSize+4095) & (-4096);
 		}
 	}
-
+			
 	// check for segment overlaps caused by user specified fixed segments (e.g. __PAGEZERO, __UNIXSTACK)
 	if ( haveFixedSegments ) {
 		int segCount = fSegmentInfos.size();
-		
 		for(int i=0; i < segCount; ++i) {
 			SegmentInfo* segment1 = fSegmentInfos[i];
 			
@@ -3404,7 +3917,7 @@ void Writer<A>::assignFileOffsets()
 							throwf("segments overlap: %s (0x%08llX + 0x%08llX) and %s (0x%08llX + 0x%08llX)",
 								segment1->fName, segment1->fBaseAddress, segment1->fSize, segment2->fName, segment2->fBaseAddress, segment2->fSize);
 					}
-					else {
+					else if ( (segment1->fSize != 0) && (segment2->fSize != 0) ) {
 							throwf("segments overlap: %s (0x%08llX + 0x%08llX) and %s (0x%08llX + 0x%08llX)",
 								segment1->fName, segment1->fBaseAddress, segment1->fSize, segment2->fName, segment2->fBaseAddress, segment2->fSize);
 					}
@@ -3412,6 +3925,18 @@ void Writer<A>::assignFileOffsets()
 			}
 		}
 	}
+
+	// set up fFirstWritableSegment and fWritableSegmentPastFirst4GB
+	for (std::vector<SegmentInfo*>::iterator segit = fSegmentInfos.begin(); segit != fSegmentInfos.end(); ++segit) {
+		SegmentInfo* curSegment = *segit;
+		if ( (curSegment->fInitProtection & VM_PROT_WRITE) != 0 ) {
+			if ( fFirstWritableSegment == NULL )
+				fFirstWritableSegment = curSegment;
+			if ( (curSegment->fBaseAddress + curSegment->fSize - fOptions.baseAddress()) >= 0x100000000LL )
+				fWritableSegmentPastFirst4GB = true;
+		}
+	}
+	
 }
 
 template <typename A>
@@ -3426,6 +3951,21 @@ void Writer<A>::adjustLinkEditSections()
 	const unsigned int sectionCount = lastSeg->fSections.size();
 	uint64_t fileOffset = lastSeg->fSections[firstLinkEditSectionIndex]->fFileOffset;
 	uint64_t address = lastSeg->fSections[firstLinkEditSectionIndex]->getBaseAddress();
+	if ( fPadSegmentInfo != NULL ) {
+		// insert __4GBFILL segment into segments vector before LINKEDIT
+		for(std::vector<SegmentInfo*>::iterator it = fSegmentInfos.begin(); it != fSegmentInfos.end(); ++it) {
+			if ( *it == lastSeg ) {
+				fSegmentInfos.insert(it, fPadSegmentInfo);
+				break;
+			}
+		}
+		// adjust  __4GBFILL segment to span from end of last segment to zeroPageSize
+		fPadSegmentInfo->fSize = fOptions.zeroPageSize() - address;
+		fPadSegmentInfo->fBaseAddress = address;
+		// adjust LINKEDIT to start at zeroPageSize
+		address = fOptions.zeroPageSize();
+		lastSeg->fBaseAddress = fOptions.zeroPageSize();
+	}
 	for (unsigned int i=firstLinkEditSectionIndex; i < sectionCount; ++i) {
 		std::vector<class ObjectFile::Atom*>& atoms = lastSeg->fSections[i]->fAtoms;
 		const unsigned int atomCount = atoms.size();
@@ -3442,6 +3982,7 @@ void Writer<A>::adjustLinkEditSections()
 			if ( size > fLargestAtomSize )
 				fLargestAtomSize = size;
 		}
+		//fprintf(stderr, "setting: lastSeg->fSections[%d]->fSize = 0x%08llX\n", i, sectionOffset);
 		lastSeg->fSections[i]->fSize = sectionOffset;
 		fileOffset += sectionOffset;
 		address += sectionOffset;
@@ -3636,6 +4177,13 @@ void MachHeaderAtom<x86>::setHeaderInfo(macho_header<x86::P>& header) const
 	header.set_cpusubtype(CPU_SUBTYPE_I386_ALL);
 }
 
+template <>
+void MachHeaderAtom<x86_64>::setHeaderInfo(macho_header<x86_64::P>& header) const
+{
+	header.set_magic(MH_MAGIC_64);
+	header.set_cputype(CPU_TYPE_X86_64);
+	header.set_cpusubtype(CPU_SUBTYPE_X86_64_ALL);
+}
 
 template <typename A>
 CustomStackAtom<A>::CustomStackAtom(Writer<A>& writer)
@@ -3666,6 +4214,11 @@ bool CustomStackAtom<x86>::stackGrowsDown()
 	return true;
 }
 
+template <>
+bool CustomStackAtom<x86_64>::stackGrowsDown()
+{
+	return true;
+}
 
 template <typename A>
 void SegmentLoadCommandsAtom<A>::computeSize()
@@ -3684,6 +4237,10 @@ void SegmentLoadCommandsAtom<A>::computeSize()
 	}
 	fSize = size;
 	fCommandCount = segCount;
+	if ( fWriter.fPadSegmentInfo != NULL ) {
+		++fCommandCount;
+		fSize += sizeof(macho_segment_command<P>);
+	}
 }
 
 template <>
@@ -3704,6 +4261,11 @@ uint64_t LoadCommandAtom<x86>::alignedSize(uint64_t size)
 	return ((size+3) & (-4));	// 4-byte align all load commands for 32-bit mach-o
 }
 
+template <>
+uint64_t LoadCommandAtom<x86_64>::alignedSize(uint64_t size)
+{
+	return ((size+7) & (-8));	// 8-byte align all load commands for 64-bit mach-o
+}
 
 
 template <typename A>
@@ -3766,7 +4328,7 @@ void SegmentLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 					sect->set_reserved1(sectInfo->fIndirectSymbolOffset);
 				}
 				else if ( sectInfo->fAllStubs ) {
-					sect->set_flags(S_SYMBOL_STUBS);
+					sect->set_flags(S_SYMBOL_STUBS | S_ATTR_SOME_INSTRUCTIONS | S_ATTR_PURE_INSTRUCTIONS);
 					sect->set_reserved1(sectInfo->fIndirectSymbolOffset);
 					sect->set_reserved2(sectInfo->fSize / sectInfo->fAtoms.size());
 				}
@@ -3802,8 +4364,14 @@ void SegmentLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 				else if ( (strcmp(sectInfo->fSectionName, "__literal8") == 0) && (strcmp(sectInfo->fSegmentName, "__TEXT") == 0) ) {
 					sect->set_flags(S_8BYTE_LITERALS);
 				}
+				else if ( (strcmp(sectInfo->fSectionName, "__literal16") == 0) && (strcmp(sectInfo->fSegmentName, "__TEXT") == 0) ) {
+					sect->set_flags(S_16BYTE_LITERALS);
+				}
 				else if ( (strcmp(sectInfo->fSectionName, "__message_refs") == 0) && (strcmp(sectInfo->fSegmentName, "__OBJC") == 0) ) {
 					sect->set_flags(S_LITERAL_POINTERS);
+				}
+				else if ( (strncmp(sectInfo->fSectionName, "__text", 6) == 0) && (strcmp(sectInfo->fSegmentName, "__TEXT") == 0) ) {
+					sect->set_flags(S_REGULAR | S_ATTR_SOME_INSTRUCTIONS | S_ATTR_PURE_INSTRUCTIONS);
 				}
 			}
 		}
@@ -4070,6 +4638,11 @@ uint64_t ThreadsLoadCommandsAtom<x86>::getSize() const
 	return this->alignedSize(16 + 16*4);	// base size + i386_THREAD_STATE_COUNT * 4
 }
 
+template <>
+uint64_t ThreadsLoadCommandsAtom<x86_64>::getSize() const
+{
+	return this->alignedSize(16 + x86_THREAD_STATE64_COUNT * 4); 
+}
 
 template <>
 void ThreadsLoadCommandsAtom<ppc>::copyRawContent(uint8_t buffer[]) const
@@ -4101,7 +4674,7 @@ void ThreadsLoadCommandsAtom<ppc64>::copyRawContent(uint8_t buffer[]) const
 	cmd->set_count(76);				// PPC_THREAD_STATE64_COUNT;
 	cmd->set_thread_register(0, start);
 	if ( fWriter.fOptions.hasCustomStack() )
-		cmd->set_thread_register(6, fWriter.fOptions.customStackAddr());	// r1
+		cmd->set_thread_register(3, fWriter.fOptions.customStackAddr());	// r1
 }
 
 template <>
@@ -4121,6 +4694,21 @@ void ThreadsLoadCommandsAtom<x86>::copyRawContent(uint8_t buffer[]) const
 }
 
 
+template <>
+void ThreadsLoadCommandsAtom<x86_64>::copyRawContent(uint8_t buffer[]) const
+{
+	uint64_t size = this->getSize();
+	uint64_t start = fWriter.getAtomLoadAddress(fWriter.fEntryPoint);
+	bzero(buffer, size);
+	macho_thread_command<x86_64::P>* cmd = (macho_thread_command<x86_64::P>*)buffer;
+	cmd->set_cmd(LC_UNIXTHREAD);
+	cmd->set_cmdsize(size);
+	cmd->set_flavor(x86_THREAD_STATE64);			
+	cmd->set_count(x86_THREAD_STATE64_COUNT);	
+	cmd->set_thread_register(16, start);		// rip 
+	if ( fWriter.fOptions.hasCustomStack() )
+		cmd->set_thread_register(7, fWriter.fOptions.customStackAddr());	// uesp
+}
 
 
 template <typename A>
@@ -4343,7 +4931,7 @@ bool StubAtom<ppc64>::pic() const
 	// This usually only happens when a large zero-page is requested
 	switch ( fWriter.fOptions.outputKind() ) {
 		case Options::kDynamicExecutable:
-			return (fWriter.fOptions.zeroPageSize() > 4096);
+			return (fWriter.fPageZeroAtom->getSize() > 4096);
 		case Options::kDynamicLibrary:
 		case Options::kDynamicBundle:
 			return true;
@@ -4406,6 +4994,15 @@ StubAtom<x86>::StubAtom(Writer<x86>& writer, ObjectFile::Atom& target)
 	writer.fAllSynthesizedStubs.push_back(this);
 }
 
+template <>
+StubAtom<x86_64>::StubAtom(Writer<x86_64>& writer, ObjectFile::Atom& target)
+ : WriterAtom<x86_64>(writer, Segment::fgTextSegment), fName(stubName(target.getName())), fTarget(target)
+{
+	writer.fAllSynthesizedStubs.push_back(this);
+
+	LazyPointerAtom<x86_64>* lp = new LazyPointerAtom<x86_64>(writer, target);
+	fReferences.push_back(new WriterReference<x86_64>(2, x86_64::kPCRel32, lp));
+}
 
 template <typename A>
 const char* StubAtom<A>::stubName(const char* name)
@@ -4433,6 +5030,11 @@ uint64_t StubAtom<x86>::getSize() const
 	return 5;
 }
 
+template <>
+uint64_t StubAtom<x86_64>::getSize() const
+{
+	return 6;
+}
 
 template <>
 uint8_t StubAtom<x86>::getAlignment() const
@@ -4493,6 +5095,23 @@ void StubAtom<x86>::copyRawContent(uint8_t buffer[]) const
 	buffer[4] = 0xF4;
 }
 
+template <>
+void StubAtom<x86_64>::copyRawContent(uint8_t buffer[]) const
+{
+	buffer[0] = 0xFF;		// jmp *foo$lazy_pointer(%rip)
+	buffer[1] = 0x25;
+	buffer[2] = 0x00;
+	buffer[3] = 0x00;
+	buffer[4] = 0x00;
+	buffer[5] = 0x00;
+}
+
+// x86_64 stubs are 7 bytes and need no alignment
+template <>
+uint8_t StubAtom<x86_64>::getAlignment() const
+{
+	return 0;
+}
 
 template <>
 const char*	StubAtom<ppc>::getSectionName() const
@@ -4514,6 +5133,60 @@ const char*	StubAtom<x86>::getSectionName() const
 
 
 
+template <>
+StubHelperAtom<x86_64>::StubHelperAtom(Writer<x86_64>& writer, ObjectFile::Atom& target, ObjectFile::Atom& lazyPointer)
+ : WriterAtom<x86_64>(writer, Segment::fgTextSegment), fName(stubName(target.getName())), fTarget(target)
+{
+	writer.fAllSynthesizedStubHelpers.push_back(this);
+
+	fReferences.push_back(new WriterReference<x86_64>(3, x86_64::kPCRel32, &lazyPointer));
+	fReferences.push_back(new WriterReference<x86_64>(8, x86_64::kPCRel32, writer.fDyldHelper));
+	if ( writer.fDyldHelper == NULL )
+		throw "symbol dyld_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
+}
+
+template <>
+uint64_t StubHelperAtom<x86_64>::getSize() const
+{
+	return 12;
+}
+
+template <>
+void StubHelperAtom<x86_64>::copyRawContent(uint8_t buffer[]) const
+{
+	buffer[0]  = 0x4C;		// lea foo$lazy_ptr(%rip),%r11
+	buffer[1]  = 0x8D;
+	buffer[2]  = 0x1D;
+	buffer[3]  = 0x00;
+	buffer[4]  = 0x00;
+	buffer[5]  = 0x00;
+	buffer[6]  = 0x00;
+	buffer[7]  = 0xE9;		// jmp dyld_stub_binding_helper
+	buffer[8]  = 0x00;
+	buffer[9]  = 0x00;
+	buffer[10] = 0x00;
+	buffer[11] = 0x00;
+}
+
+template <typename A>
+const char* StubHelperAtom<A>::stubName(const char* name)
+{
+	char* buf;
+	asprintf(&buf, "%s$stubHelper", name);
+	return buf;
+}
+
+
+// specialize lazy pointer for x86_64 to initially pointer to stub helper
+template <>
+LazyPointerAtom<x86_64>::LazyPointerAtom(Writer<x86_64>& writer, ObjectFile::Atom& target)
+ : WriterAtom<x86_64>(writer, Segment::fgDataSegment), fName(lazyPointerName(target.getName())), fTarget(target)
+{
+	writer.fAllSynthesizedLazyPointers.push_back(this);
+
+	StubHelperAtom<x86_64>* helper = new StubHelperAtom<x86_64>(writer, target, *this);
+	fReferences.push_back(new WriterReference<x86_64>(0, x86_64::kPointer, helper));
+}
 
 
 template <typename A>

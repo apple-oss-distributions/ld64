@@ -21,14 +21,17 @@ OTOOL = otool
 ifeq (${ARCH},ppc64)
 OTOOL = otool64
 endif
+ifeq (${ARCH},x86_64)
+OTOOL = otool64
+endif
 
 
 CC		 = gcc-4.0 -arch ${ARCH}
-CCFLAGS = -Wall -g -std=c99
+CCFLAGS = -Wall -std=c99
 ASMFLAGS =
 
 CXX		  = g++-4.0 -arch ${ARCH}
-CXXFLAGS = -Wall -g
+CXXFLAGS = -Wall
 
 RM      = rm
 RMFLAGS = -rf

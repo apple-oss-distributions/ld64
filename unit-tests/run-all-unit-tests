@@ -3,7 +3,7 @@
 # cd into test-cases directory
 cd `echo "$0" | sed 's/run-all-unit-tests/test-cases/'`
 
-all_archs="ppc ppc64 i386"
+all_archs="ppc ppc64 i386 x86_64"
 
 for arch in $all_archs
 do

@@ -289,15 +289,16 @@ static ObjectFile::Reader* createReader(const char* path, const ObjectFile::Read
 	if ( fd == -1 )
 		throwf("cannot open file: %s", path);
 	::fstat(fd, &stat_buf);
-	uint8_t* p = (uint8_t*)::mmap(NULL, stat_buf.st_size, PROT_READ, MAP_FILE, fd, 0);
+	uint8_t* p = (uint8_t*)::mmap(NULL, stat_buf.st_size, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, 0);
 	::close(fd);
 	const mach_header* mh = (mach_header*)p;
 	if ( mh->magic == OSSwapBigToHostInt32(FAT_MAGIC) ) {
 		const struct fat_header* fh = (struct fat_header*)p;
 		const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
-		for (unsigned long i=0; i < fh->nfat_arch; ++i) {
-			if ( archs[i].cputype == sPreferredArch ) {
-				p = p + archs[i].offset;
+		for (unsigned long i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
+			fprintf(stderr, "archs[i].cputype = %X\n", archs[i].cputype);
+			if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)sPreferredArch ) {
+				p = p + OSSwapBigToHostInt32(archs[i].offset);
 				mh = (struct mach_header*)p;
 			}
 		}
@@ -308,6 +309,8 @@ static ObjectFile::Reader* createReader(const char* path, const ObjectFile::Read
 		return mach_o::relocatable::Reader<ppc>::make(p, path, 0, options);
 	else if ( mach_o::relocatable::Reader<ppc64>::validFile(p) )
 		return mach_o::relocatable::Reader<ppc64>::make(p, path, 0, options);
+	else if ( mach_o::relocatable::Reader<x86_64>::validFile(p) )
+		return mach_o::relocatable::Reader<x86_64>::make(p, path, 0, options);
 	throwf("not a mach-o object file: %s", path);
 }
 
@@ -336,6 +339,8 @@ int main(int argc, const char* argv[])
 						sPreferredArch = CPU_TYPE_POWERPC;
 					else if ( strcmp(arch, "i386") == 0 )
 						sPreferredArch = CPU_TYPE_I386;
+					else if ( strcmp(arch, "x86_64") == 0 )
+						sPreferredArch = CPU_TYPE_X86_64;
 					else 
 						throwf("unknown architecture %s", arch);
 				}

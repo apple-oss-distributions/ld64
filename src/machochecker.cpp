@@ -32,6 +32,9 @@
 #include <mach-o/loader.h>
 #include <mach-o/fat.h>
 #include <mach-o/stab.h>
+#include <mach-o/reloc.h>
+#include <mach-o/ppc/reloc.h>
+#include <mach-o/x86_64/reloc.h>
 
 #include <vector>
 
@@ -74,6 +77,11 @@ private:
 	void										checkSection(const macho_segment_command<P>* segCmd, const macho_section<P>* sect);
 	uint8_t										loadCommandSizeMask();
 	void										checkIndirectSymbolTable();
+	void										checkRelocations();
+	void										checkExternalReloation(const macho_relocation_info<P>* reloc);
+	void										checkLocalReloation(const macho_relocation_info<P>* reloc);
+	pint_t										relocBase();
+	bool										addressInWritableSegment(pint_t address);
 
 	const char*									fPath;
 	const macho_header<P>*						fHeader;
@@ -84,7 +92,14 @@ private:
 	uint32_t									fSymbolCount;
 	const uint32_t*								fIndirectTable;
 	uint32_t									fIndirectTableCount;
-
+	const macho_relocation_info<P>*				fLocalRelocations;
+	uint32_t									fLocalRelocationsCount;
+	const macho_relocation_info<P>*				fExternalRelocations;
+	uint32_t									fExternalRelocationsCount;
+	pint_t										fRelocBase;
+	bool										fWriteableSegmentWithAddrOver4G;
+	const macho_segment_command<P>*				fFirstSegment;
+	const macho_segment_command<P>*				fFirstWritableSegment;
 };
 
 
@@ -143,16 +158,36 @@ bool MachOChecker<x86>::validFile(const uint8_t* fileContent)
 	return false;
 }
 
+template <>
+bool MachOChecker<x86_64>::validFile(const uint8_t* fileContent)
+{	
+	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	if ( header->magic() != MH_MAGIC_64 )
+		return false;
+	if ( header->cputype() != CPU_TYPE_X86_64 )
+		return false;
+	switch (header->filetype()) {
+		case MH_EXECUTE:
+		case MH_DYLIB:
+		case MH_BUNDLE:
+		case MH_DYLINKER:
+			return true;
+	}
+	return false;
+}
 
 
 template <> uint8_t MachOChecker<ppc>::loadCommandSizeMask()	{ return 0x03; }
 template <> uint8_t MachOChecker<ppc64>::loadCommandSizeMask()	{ return 0x07; }
 template <> uint8_t MachOChecker<x86>::loadCommandSizeMask()	{ return 0x03; }
+template <> uint8_t MachOChecker<x86_64>::loadCommandSizeMask() { return 0x07; }
 
 
 template <typename A>
 MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, const char* path)
- : fHeader(NULL), fLength(fileLength), fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fIndirectTableCount(0)
+ : fHeader(NULL), fLength(fileLength), fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fIndirectTableCount(0),
+ fLocalRelocations(NULL),  fLocalRelocationsCount(0),  fExternalRelocations(NULL),  fExternalRelocationsCount(0),
+ fRelocBase(0), fWriteableSegmentWithAddrOver4G(false), fFirstSegment(NULL), fFirstWritableSegment(NULL)
 {
 	// sanity check
 	if ( ! validFile(fileContent) )
@@ -169,6 +204,7 @@ MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, c
 	
 	checkIndirectSymbolTable();
 
+	checkRelocations();
 }
 
 
@@ -284,6 +320,12 @@ void MachOChecker<A>::checkLoadCommands()
 			// keep LINKEDIT segment 
 			if ( strcmp(segCmd->segname(), "__LINKEDIT") == 0 )
 				linkEditSegment = segCmd;
+
+			// cache interesting segments
+			if ( fFirstSegment == NULL )
+				fFirstSegment = segCmd;
+			if ( (fFirstWritableSegment == NULL) && ((segCmd->initprot() & VM_PROT_WRITE) != 0) )
+				fFirstWritableSegment = segCmd;
 				
 			// check section ranges
 			const macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
@@ -364,6 +406,22 @@ void MachOChecker<A>::checkLoadCommands()
 						throw "indirect symbol table not in __LINKEDIT";
 					if ( (dsymtab->indirectsymoff()+fIndirectTableCount*8) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
 						throw "indirect symbol table not in __LINKEDIT";
+					fLocalRelocationsCount = dsymtab->nlocrel();
+					if ( fLocalRelocationsCount != 0 ) {
+						fLocalRelocations = (const macho_relocation_info<P>*)((char*)fHeader + dsymtab->locreloff());
+						if ( dsymtab->locreloff() < linkEditSegment->fileoff() )
+							throw "local relocations not in __LINKEDIT";
+						if ( (dsymtab->locreloff()+fLocalRelocationsCount*sizeof(macho_relocation_info<P>)) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+							throw "local relocations not in __LINKEDIT";
+					}
+					fExternalRelocationsCount = dsymtab->nextrel();
+					if ( fExternalRelocationsCount != 0 ) {
+						fExternalRelocations = (const macho_relocation_info<P>*)((char*)fHeader + dsymtab->extreloff());
+						if ( dsymtab->extreloff() < linkEditSegment->fileoff() )
+							throw "local relocations not in __LINKEDIT";
+						if ( (dsymtab->extreloff()+fExternalRelocationsCount*sizeof(macho_relocation_info<P>)) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+							throw "local relocations not in __LINKEDIT";
+					}
 				}
 				break;
 		}
@@ -374,7 +432,7 @@ void MachOChecker<A>::checkLoadCommands()
 	if ( fStrings == NULL )
 		throw "missing symbol table";
 	
-	
+	fRelocBase = this->relocBase();
 	
 }
 
@@ -430,6 +488,177 @@ void MachOChecker<A>::checkIndirectSymbolTable()
 }
 
 
+
+template <>
+ppc::P::uint_t MachOChecker<ppc>::relocBase()
+{
+	if ( fHeader->flags() & MH_SPLIT_SEGS )
+		return fFirstWritableSegment->vmaddr();
+	else
+		return fFirstSegment->vmaddr();
+}
+
+template <>
+ppc64::P::uint_t MachOChecker<ppc64>::relocBase()
+{
+	if ( fWriteableSegmentWithAddrOver4G ) 
+		return fFirstWritableSegment->vmaddr();
+	else
+		return fFirstSegment->vmaddr();
+}
+
+template <>
+x86::P::uint_t MachOChecker<x86>::relocBase()
+{
+	if ( fHeader->flags() & MH_SPLIT_SEGS )
+		return fFirstWritableSegment->vmaddr();
+	else
+		return fFirstSegment->vmaddr();
+}
+
+template <>
+x86_64::P::uint_t MachOChecker<x86_64>::relocBase()
+{
+	// check for split-seg
+	return fFirstWritableSegment->vmaddr();
+}
+
+
+template <typename A>
+bool MachOChecker<A>::addressInWritableSegment(pint_t address)
+{
+	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((uint8_t*)fHeader + sizeof(macho_header<P>));
+	const uint32_t cmd_count = fHeader->ncmds();
+	const macho_load_command<P>* cmd = cmds;
+	for (uint32_t i = 0; i < cmd_count; ++i) {
+		if ( cmd->cmd() == macho_segment_command<P>::CMD ) {
+			const macho_segment_command<P>* segCmd = (const macho_segment_command<P>*)cmd;
+			if ( (segCmd->initprot() & VM_PROT_WRITE) != 0 ) {
+				if ( (address >= segCmd->vmaddr()) && (address < segCmd->vmaddr()+segCmd->vmsize()) )
+					return true;
+			}
+		}
+		cmd = (const macho_load_command<P>*)(((uint8_t*)cmd)+cmd->cmdsize());
+	}
+	return false;
+}
+
+
+template <>
+void MachOChecker<ppc>::checkExternalReloation(const macho_relocation_info<P>* reloc)
+{
+	// FIX
+}
+
+template <>
+void MachOChecker<ppc64>::checkExternalReloation(const macho_relocation_info<P>* reloc)
+{
+	if ( reloc->r_length() != 3 ) 
+		throw "bad external relocation length";
+	if ( reloc->r_type() != GENERIC_RELOC_VANILLA ) 
+		throw "unknown external relocation type";
+	if ( reloc->r_pcrel() != 0 ) 
+		throw "bad external relocation pc_rel";
+	if ( reloc->r_extern() == 0 )
+		throw "local relocation found with external relocations";
+	if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+		throw "local relocation address not in writable segment";
+	// FIX: check r_symbol
+}
+
+template <>
+void MachOChecker<x86>::checkExternalReloation(const macho_relocation_info<P>* reloc)
+{
+	// FIX
+}
+
+
+template <>
+void MachOChecker<x86_64>::checkExternalReloation(const macho_relocation_info<P>* reloc)
+{
+	if ( reloc->r_length() != 3 ) 
+		throw "bad external relocation length";
+	if ( reloc->r_type() != X86_64_RELOC_UNSIGNED ) 
+		throw "unknown external relocation type";
+	if ( reloc->r_pcrel() != 0 ) 
+		throw "bad external relocation pc_rel";
+	if ( reloc->r_extern() == 0 ) 
+		throw "local relocation found with external relocations";
+	if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+		throw "exernal relocation address not in writable segment";
+	// FIX: check r_symbol
+}
+
+template <>
+void MachOChecker<ppc>::checkLocalReloation(const macho_relocation_info<P>* reloc)
+{
+	if ( reloc->r_address() & R_SCATTERED ) {
+		// scattered
+		const macho_scattered_relocation_info<P>* sreloc = (const macho_scattered_relocation_info<P>*)reloc;
+		// FIX
+	
+	}
+	else {
+		// FIX
+		if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+			throw "local relocation address not in writable segment";
+	}
+}
+
+
+template <>
+void MachOChecker<ppc64>::checkLocalReloation(const macho_relocation_info<P>* reloc)
+{
+	if ( reloc->r_length() != 3 ) 
+		throw "bad local relocation length";
+	if ( reloc->r_type() != GENERIC_RELOC_VANILLA ) 
+		throw "unknown local relocation type";
+	if ( reloc->r_pcrel() != 0 ) 
+		throw "bad local relocation pc_rel";
+	if ( reloc->r_extern() != 0 ) 
+		throw "external relocation found with local relocations";
+	if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+		throw "local relocation address not in writable segment";
+}
+
+template <>
+void MachOChecker<x86>::checkLocalReloation(const macho_relocation_info<P>* reloc)
+{
+	// FIX
+}
+
+template <>
+void MachOChecker<x86_64>::checkLocalReloation(const macho_relocation_info<P>* reloc)
+{
+	if ( reloc->r_length() != 3 ) 
+		throw "bad local relocation length";
+	if ( reloc->r_type() != X86_64_RELOC_UNSIGNED ) 
+		throw "unknown local relocation type";
+	if ( reloc->r_pcrel() != 0 ) 
+		throw "bad local relocation pc_rel";
+	if ( reloc->r_extern() != 0 ) 
+		throw "external relocation found with local relocations";
+	if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+		throw "local relocation address not in writable segment";
+}
+
+
+
+template <typename A>
+void MachOChecker<A>::checkRelocations()
+{
+	const macho_relocation_info<P>* const externRelocsEnd = &fExternalRelocations[fExternalRelocationsCount];
+	for (const macho_relocation_info<P>* reloc = fExternalRelocations; reloc < externRelocsEnd; ++reloc) {
+		this->checkExternalReloation(reloc);
+	}
+	
+	const macho_relocation_info<P>* const localRelocsEnd = &fLocalRelocations[fLocalRelocationsCount];
+	for (const macho_relocation_info<P>* reloc = fLocalRelocations; reloc < localRelocsEnd; ++reloc) {
+		this->checkLocalReloation(reloc);
+	}
+}
+
+
 static void check(const char* path)
 {
 	struct stat stat_buf;
@@ -440,7 +669,9 @@ static void check(const char* path)
 			throw "cannot open file";
 		::fstat(fd, &stat_buf);
 		uint32_t length = stat_buf.st_size;
-		uint8_t* p = (uint8_t*)::mmap(NULL, stat_buf.st_size, PROT_READ, MAP_FILE, fd, 0);
+		uint8_t* p = (uint8_t*)::mmap(NULL, stat_buf.st_size, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, 0);
+		if ( p == ((uint8_t*)(-1)) )
+			throw "cannot map file";
 		::close(fd);
 		const mach_header* mh = (mach_header*)p;
 		if ( mh->magic == OSSwapBigToHostInt32(FAT_MAGIC) ) {
@@ -465,6 +696,12 @@ static void check(const char* path)
 					else
 						throw "in universal file, ppc64 slice does not contain ppc64 mach-o";
 				}
+				else if ( archs[i].cputype == CPU_TYPE_X86_64 ) {
+					if ( MachOChecker<x86_64>::validFile(p + archs[i].offset) )
+						MachOChecker<x86_64>::make(p + archs[i].offset, archs[i].size, path);
+					else
+						throw "in universal file, x86_64 slice does not contain x86_64 mach-o";
+				}
 				else {
 						throw "in universal file, unknown architecture slice";
 				}
@@ -478,6 +715,9 @@ static void check(const char* path)
 		}
 		else if ( MachOChecker<ppc64>::validFile(p) ) {
 			MachOChecker<ppc64>::make(p, length, path);
+		}
+		else if ( MachOChecker<x86_64>::validFile(p) ) {
+			MachOChecker<x86_64>::make(p, length, path);
 		}
 		else {
 			throw "not a known file type";

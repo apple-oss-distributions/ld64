@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -24,26 +24,25 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 
+PWD = $(shell pwd)
+
 #
-# The point of this test is to verify a .o file can round-trip
-# through ld -r correctly.  The ObjectDump utility is used
-# dump a "canonical" textual representation of a .o file.
-# The before and after .o files are then diff'ed.
-# No differences means this test passes
+# The point of this test is to check the two forms of the'
+#  -filelist option
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} test.c -c -o test.${ARCH}.o
-	${LD} -arch ${ARCH} -r -keep_private_externs test.${ARCH}.o -o test-r.${ARCH}.o
-	${OBJECTDUMP} -no_content test.${ARCH}.o > test.${ARCH}.o.dump
-	#grep "plus" test.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${OBJECTDUMP} -no_content test-r.${ARCH}.o > test-r.${ARCH}.o.dump
-	#grep "plus" test-r.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${PASS_IFF} diff test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	${CC} ${CCFLAGS} -c hello.c -o hello-${ARCH}.o
+	echo "${PWD}/hello-${ARCH}.o" > "${PWD}/filelist1"
+	cd /tmp && ${CC} ${CCFLAGS} -arch ${ARCH} -filelist "${PWD}/filelist1"  -o "${PWD}/hello-${ARCH}"
+	${FAIL_IF_BAD_MACHO} hello-${ARCH}
+	echo "hello-${ARCH}.o" > "${PWD}/filelist2"
+	cd /tmp && ${CC} ${CCFLAGS}  -arch ${ARCH} -filelist "${PWD}/filelist2,${PWD}" -o "${PWD}/hello-${ARCH}"
+	${PASS_IFF_GOOD_MACHO} hello-${ARCH}
 
 clean:
-	rm -rf test.${ARCH}.o test-r.${ARCH}.o test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	rm  hello-${ARCH} hello-${ARCH}.o filelist1 filelist2
 	
 

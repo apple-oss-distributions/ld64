@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,27 +23,30 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-
 #
-# The point of this test is to verify a .o file can round-trip
-# through ld -r correctly.  The ObjectDump utility is used
-# dump a "canonical" textual representation of a .o file.
-# The before and after .o files are then diff'ed.
-# No differences means this test passes
+# The point of this test is a sanity check -dead_strip
+#
+# 1) in a main executable, dead globals are removed
+# 2) in a dylib/bundle with -exported_symbols_list, dead globals are removed
+# 3) in a dylib/bundle without -exported_symbols_list, dead globals are *not* removed
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} test.c -c -o test.${ARCH}.o
-	${LD} -arch ${ARCH} -r -keep_private_externs test.${ARCH}.o -o test-r.${ARCH}.o
-	${OBJECTDUMP} -no_content test.${ARCH}.o > test.${ARCH}.o.dump
-	#grep "plus" test.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${OBJECTDUMP} -no_content test-r.${ARCH}.o > test-r.${ARCH}.o.dump
-	#grep "plus" test-r.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${PASS_IFF} diff test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	${CC} ${CCFLAGS} main.c deadwood.c -dead_strip -o main-${ARCH}
+	${FAIL_IF_BAD_MACHO} main-${ARCH}
+	nm -j main-${ARCH} | egrep 'dead_wood|dead_door' | ${FAIL_IF_STDIN}
+	${CC} ${CCFLAGS} -dynamiclib main.c deadwood.c -dead_strip -exported_symbols_list main.exp -o dylib-${ARCH}
+	${FAIL_IF_BAD_MACHO} dylib-${ARCH}
+	nm -j dylib-${ARCH} | grep dead | ${FAIL_IF_STDIN}
+	${CC} ${CCFLAGS} -dynamiclib main.c deadwood.c -dead_strip -o dylib2-${ARCH}
+	${FAIL_IF_BAD_MACHO} dylib2-${ARCH}
+	nm -j dylib2-${ARCH} | grep dead_door_knob | ${FAIL_IF_EMPTY}
+	nm -j dylib2-${ARCH} | grep deadwood | ${PASS_IFF_EMPTY}
+	
 
 clean:
-	rm -rf test.${ARCH}.o test-r.${ARCH}.o test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	rm -rf main-${ARCH} dylib-${ARCH} dylib2-${ARCH}
 	
 

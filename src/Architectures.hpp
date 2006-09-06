@@ -56,9 +56,19 @@ struct x86
 	typedef Pointer32<LittleEndian>		P;
 	
 	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff, 
-							kPCRel32, kPCRel32WeakImport };
+							kPCRel32, kPCRel32WeakImport, kAbsolute32 };
 };
 
+struct x86_64
+{
+	typedef Pointer64<LittleEndian>		P;
+	
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff, kPointerDiff32, 
+							kPCRel32, kPCRel32_1, kPCRel32_2, kPCRel32_4,
+							kBranchPCRel32, kBranchPCRel32WeakImport,
+							kPCRel32GOTLoad, kPCRel32GOTLoadWeakImport,
+							kPCRel32GOT, kPCRel32GOTWeakImport };
+};
 
 
 

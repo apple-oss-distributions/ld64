@@ -385,10 +385,11 @@ std::vector<class ObjectFile::Atom*>* Reader<A>::getJustInTimeAtomsFor(const cha
 		if ( result != NULL ) {
 			const Entry* member = (Entry*)&fFileContent[E::get32(result->ran_off)];
 			if ( fInstantiatedEntries.count(member) == 0 ) {
+				if ( fOptions.fWhyLoad )
+					printf("%s forced load of %s(%s)\n", name, this->getPath(), member->getName());
 				// only return these atoms once
 				fInstantiatedEntries.insert(member);
 				ObjectFile::Reader* r = makeObjectReaderForMember(member);
-				//fprintf(stderr, "%s found in %s(%s)\n", name, this->getPath(), member->getName());
 				return new std::vector<class ObjectFile::Atom*>(r->getAtoms());
 			}
 		}

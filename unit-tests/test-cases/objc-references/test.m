@@ -1,4 +1,5 @@
-/*
+/* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
+ *
  * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
@@ -20,35 +21,32 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+ 
+#include <Foundation/Foundation.h>
 
 
-	.text
-	.align 2
-	
-	.globl _foo
-	.globl _foo2
-	.globl _foo3
-_foo:
-_foo2:
-_foo3:
-		nop
-		
-		
-		
-	.align 2
-_bar:
-		nop
-		
-		
-	.align 2
-	.globl _xx
-	.globl __xx
-_xx:
-__xx:
-		nop
-		
-		
-	.align 2
-_ok:
-		nop
-		
+@interface Foo : NSObject
+- (NSString*) foo;
+@end
+
+
+@implementation Foo
+- (NSString*) foo
+{
+	return [NSString stringWithUTF8String:"hello"];
+}
+@end
+
+
+@interface Bar : NSData
+- (NSArray*) bar;
+@end
+
+
+@implementation Bar
+- (NSArray*) bar
+{
+	return [NSArray array];
+}
+@end
+

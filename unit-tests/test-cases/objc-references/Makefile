@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -25,25 +25,24 @@ include ${TESTROOT}/include/common.makefile
 
 
 #
-# The point of this test is to verify a .o file can round-trip
-# through ld -r correctly.  The ObjectDump utility is used
-# dump a "canonical" textual representation of a .o file.
-# The before and after .o files are then diff'ed.
-# No differences means this test passes
+# The point of this test is to verify an Objective-C object file
+# is parsed to find the proper class references
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} test.c -c -o test.${ARCH}.o
-	${LD} -arch ${ARCH} -r -keep_private_externs test.${ARCH}.o -o test-r.${ARCH}.o
-	${OBJECTDUMP} -no_content test.${ARCH}.o > test.${ARCH}.o.dump
-	#grep "plus" test.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${OBJECTDUMP} -no_content test-r.${ARCH}.o > test-r.${ARCH}.o.dump
-	#grep "plus" test-r.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${PASS_IFF} diff test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	${CC} ${CCFLAGS} test.m -c -o test.${ARCH}.o
+	${LD} -arch ${ARCH} -r test.${ARCH}.o -o test-r.${ARCH}.o
+	nm test-r.${ARCH}.o | grep '.objc_class_name_NSObject' | ${FAIL_IF_EMPTY} 
+	nm test-r.${ARCH}.o | grep '.objc_class_name_NSData'   | ${FAIL_IF_EMPTY} 
+	nm test-r.${ARCH}.o | grep '.objc_class_name_NSArray'  | ${FAIL_IF_EMPTY} 
+	nm test-r.${ARCH}.o | grep '.objc_class_name_NSString' | ${PASS_IFF_STDIN} 
 
 clean:
-	rm -rf test.${ARCH}.o test-r.${ARCH}.o test.${ARCH}.o.dump test-r.${ARCH}.o.dump
-	
+	rm -rf test.${ARCH}.o test.${ARCH}.o.dump
+		
 
+	#${OBJECTDUMP} -no_content test.${ARCH}.o > test.${ARCH}.o.dump
+	#grep '.objc_class_name_NSObject' test.${ARCH}.o.dump | ${FAIL_IF_EMPTY} 
+	#grep '.objc_class_name_NSString' test.${ARCH}.o.dump | ${PASS_IFF_STDIN} 

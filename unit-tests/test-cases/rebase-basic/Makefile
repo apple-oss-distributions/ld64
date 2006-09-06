@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,27 +23,24 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-
 #
-# The point of this test is to verify a .o file can round-trip
-# through ld -r correctly.  The ObjectDump utility is used
-# dump a "canonical" textual representation of a .o file.
-# The before and after .o files are then diff'ed.
-# No differences means this test passes
+# The point of this test is to see that a dylib 
+# run through the rebase tool is the same as if
+# the dylib was originally built at that address
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} test.c -c -o test.${ARCH}.o
-	${LD} -arch ${ARCH} -r -keep_private_externs test.${ARCH}.o -o test-r.${ARCH}.o
-	${OBJECTDUMP} -no_content test.${ARCH}.o > test.${ARCH}.o.dump
-	#grep "plus" test.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${OBJECTDUMP} -no_content test-r.${ARCH}.o > test-r.${ARCH}.o.dump
-	#grep "plus" test-r.${ARCH}.o.dump | ${FAIL_IF_STDIN}
-	${PASS_IFF} diff test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	${CC} -arch ${ARCH} -c foo.c -o foo.${ARCH}.o
+	${CC} -arch ${ARCH} -c bar.m -o bar.${ARCH}.o
+	${CC} -arch ${ARCH} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -o libfoo.${ARCH}.dylib -framework Foundation -single_module -mmacosx-version-min=10.5
+	${CC} -arch ${ARCH} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -o libfoo-alt.${ARCH}.dylib -framework Foundation -single_module -mmacosx-version-min=10.5 -seg1addr 0x12340000 -install_name libfoo.${ARCH}.dylib
+	rebase -arch ${ARCH} -low_address 0x12340000 libfoo.${ARCH}.dylib
+	${FAIL_IF_BAD_MACHO} libfoo.${ARCH}.dylib
+	${PASS_IFF} diff libfoo.${ARCH}.dylib libfoo-alt.${ARCH}.dylib
 
 clean:
-	rm -rf test.${ARCH}.o test-r.${ARCH}.o test.${ARCH}.o.dump test-r.${ARCH}.o.dump
+	rm foo.${ARCH}.o bar.${ARCH}.o libfoo.${ARCH}.dylib libfoo-alt.${ARCH}.dylib
 	
 
