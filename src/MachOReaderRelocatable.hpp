@@ -1820,6 +1820,7 @@ Reference<x86_64>* Reader<x86_64>::makeReferenceToEH(const char* ehName, pint_t 
 	return NULL;
 }
 
+
 template <typename A>
 AtomAndOffset Reader<A>::findAtomAndOffset(uint32_t addr)
 {
@@ -2701,23 +2702,59 @@ bool Reader<x86_64>::addRelocReference(const macho_section<x86_64::P>* sect, con
 				makeReference(x86_64::kPointer, srcAddr, dstAddr);
 			break;
 		case X86_64_RELOC_SIGNED:
+		case X86_64_RELOC_SIGNED_1:
+		case X86_64_RELOC_SIGNED_2:
+		case X86_64_RELOC_SIGNED_4:
 			if ( ! reloc->r_pcrel() )
 				throw "not pcrel and X86_64_RELOC_SIGNED not supported";
 			if ( reloc->r_length() != 2 ) 
 				throw "length != 2 and X86_64_RELOC_SIGNED not supported";
 			kind = x86_64::kPCRel32;
 			dstAddr = (int64_t)((int32_t)(E::get32(*fixUpPtr)));
-			if ( dstAddr == (uint64_t)(-1) ) {
-				dstAddr = 0;
-				kind = x86_64::kPCRel32_1;
-			}
-			else if ( dstAddr == (uint64_t)(-2) ) {
-				dstAddr = 0;
-				kind = x86_64::kPCRel32_2;
-			}
-			else if ( dstAddr == (uint64_t)(-4) ) {
-				dstAddr = 0;
-				kind = x86_64::kPCRel32_4;
+			switch ( reloc->r_type() ) {
+				case X86_64_RELOC_SIGNED:
+					if ( reloc->r_extern() ) {
+						// Support older relocations
+						if ( dstAddr == (uint64_t)(-1) ) {
+							kind = x86_64::kPCRel32_1;
+							dstAddr = 0;
+						}
+						else if ( dstAddr == (uint64_t)(-2) ) {
+							kind = x86_64::kPCRel32_2;
+							dstAddr = 0;
+						}
+						else if ( dstAddr == (uint64_t)(-4) ) {
+							kind = x86_64::kPCRel32_4;
+							dstAddr = 0;
+						}
+					}
+					break;
+				case X86_64_RELOC_SIGNED_1:
+					if ( reloc->r_extern() ) {
+						dstAddr = 0;
+					} else {
+						dstAddr += 1;
+					}
+					kind = x86_64::kPCRel32_1;
+					break;
+				case X86_64_RELOC_SIGNED_2:
+					if ( reloc->r_extern() ) {
+						dstAddr = 0;
+					} else {
+						dstAddr += 2;
+					}
+					kind = x86_64::kPCRel32_2;
+					break;
+				case X86_64_RELOC_SIGNED_4:
+					if ( reloc->r_extern() ) {
+						dstAddr = 0;
+					} else {
+						dstAddr += 4;
+					}
+					kind = x86_64::kPCRel32_4;
+					break;
+				default:
+					break;
 			}
 			if ( reloc->r_extern() ) 
 				makeReferenceToSymbol(kind, srcAddr, targetSymbol, dstAddr);
@@ -3134,6 +3171,7 @@ const char* Reference<x86_64>::getDescription() const
 
 	return temp;
 }
+
 
 
 }; // namespace relocatable

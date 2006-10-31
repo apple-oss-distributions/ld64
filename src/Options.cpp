@@ -29,7 +29,6 @@
 #include <fcntl.h>
 #include <vector>
 
-
 #include "Options.h"
 
 void throwf(const char* format, ...)

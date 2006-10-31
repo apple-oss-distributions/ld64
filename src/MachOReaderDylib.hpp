@@ -503,6 +503,7 @@ bool Reader<x86_64>::validFile(const uint8_t* fileContent, bool executableOrDyli
 
 
 
+
 }; // namespace dylib
 }; // namespace mach_o
 

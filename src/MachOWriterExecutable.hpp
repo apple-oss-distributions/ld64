@@ -1705,15 +1705,42 @@ uint32_t Writer<x86_64>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Ref
 			return 1;
 
 		case x86_64::kPCRel32:
-		case x86_64::kPCRel32_1:
-		case x86_64::kPCRel32_2:
-		case x86_64::kPCRel32_4:
 			reloc1.set_r_address(address);
 			reloc1.set_r_symbolnum(symbolIndex);
 			reloc1.set_r_pcrel(true);
 			reloc1.set_r_length(2);
 			reloc1.set_r_extern(external);
 			reloc1.set_r_type(X86_64_RELOC_SIGNED);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32_1:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_SIGNED_1);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32_2:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_SIGNED_2);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32_4:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_SIGNED_4);
 			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
 			return 1;
 
@@ -1741,6 +1768,7 @@ uint32_t Writer<x86_64>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Ref
 	}
 	return 0;
 }
+
 
 template <>
 uint32_t Writer<x86>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Reference* ref)
@@ -3200,6 +3228,7 @@ bool Writer<x86_64>::weakImportReferenceKind(uint8_t kind)
 }
 
 
+
 template <>
 bool Writer<ppc>::GOTReferenceKind(uint8_t kind)
 {
@@ -3230,6 +3259,7 @@ bool Writer<x86_64>::GOTReferenceKind(uint8_t kind)
 	}
 	return false;
 }
+
 
 template <typename A>
 void Writer<A>::scanForAbsoluteReferences()
@@ -3598,6 +3628,7 @@ bool Writer<x86_64>::addBranchIslands()
 	// x86 branches can reach entire 4G size of largest image
 	return false;
 }
+
 
 template <>
 inline uint8_t Writer<ppc>::branch24Reference()
@@ -4185,6 +4216,7 @@ void MachHeaderAtom<x86_64>::setHeaderInfo(macho_header<x86_64::P>& header) cons
 	header.set_cpusubtype(CPU_SUBTYPE_X86_64_ALL);
 }
 
+
 template <typename A>
 CustomStackAtom<A>::CustomStackAtom(Writer<A>& writer)
  : WriterAtom<A>(writer, Segment::fgStackSegment)
@@ -4219,6 +4251,7 @@ bool CustomStackAtom<x86_64>::stackGrowsDown()
 {
 	return true;
 }
+
 
 template <typename A>
 void SegmentLoadCommandsAtom<A>::computeSize()
@@ -4266,7 +4299,6 @@ uint64_t LoadCommandAtom<x86_64>::alignedSize(uint64_t size)
 {
 	return ((size+7) & (-8));	// 8-byte align all load commands for 64-bit mach-o
 }
-
 
 template <typename A>
 void SegmentLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
