@@ -7,6 +7,9 @@ use Cwd qw(realpath);
 
 my @args = @ARGV;
 
+$ENV{'LD_NO_CLASSSIC_LINKER'} = '1';
+$ENV{'LD_NO_CLASSSIC_LINKER_STATIC'} = '1';
+
 my $makefiles =
 {
     'makefile' => undef,

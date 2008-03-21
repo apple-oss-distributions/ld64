@@ -32,10 +32,9 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} -gdwarf-2 hello.c -Wl,-S -o dwarf-hello-${ARCH} 
+	#${CC} ${CCFLAGS} -gdwarf-2 hello.c -o dwarf-hello-${ARCH} 
 	${FAIL_IF_BAD_MACHO} dwarf-hello-${ARCH}
-	nm -ap dwarf-hello-${ARCH} | grep -e "-" | ${PASS_IFF_EMPTY}
+	nm -ap dwarf-hello-${ARCH} | grep -e " - " | ${PASS_IFF_EMPTY}
 
 clean:
-	rm -rf dwarf-hello-${ARCH} 
-	
-
+	rm -rf dwarf-hello-*

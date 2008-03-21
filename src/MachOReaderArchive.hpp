@@ -52,13 +52,13 @@ class Reader : public ObjectFile::Reader
 {
 public:
 	static bool										validFile(const uint8_t* fileContent, uint64_t fileLength);
-	static Reader<A>*								make(const uint8_t* fileContent, uint64_t fileLength, const char* path,
-														time_t modTime, const ObjectFile::ReaderOptions& options)
-														{ return new Reader<A>(fileContent, fileLength, path, modTime, options); }
+													Reader(const uint8_t fileContent[], uint64_t fileLength,
+															const char* path, time_t modTime, 
+															const ObjectFile::ReaderOptions& options, uint32_t ordinalBase);
 	virtual											~Reader() {}
 
 	virtual const char*								getPath()			{ return fPath; }
-	virtual time_t									getModificationTime(){ return 0; }
+	virtual time_t									getModificationTime(){ return fModTime; }
 	virtual DebugInfoKind							getDebugInfoKind()	{ return ObjectFile::Reader::kDebugInfoNone; }
 	virtual std::vector<class ObjectFile::Atom*>&	getAtoms();
 	virtual std::vector<class ObjectFile::Atom*>*	getJustInTimeAtomsFor(const char* name);
@@ -89,10 +89,6 @@ private:
 	typedef typename A::P							P;
 	typedef typename A::P::E						E;
 
-													Reader(const uint8_t fileContent[], uint64_t fileLength,
-															const char* path, time_t modTime, const ObjectFile::ReaderOptions& options);
-	const struct ranlib*							ranlibBinarySearch(const char* name);
-	const struct ranlib*							ranlibLinearSearch(const char* name);
 	const struct ranlib*							ranlibHashSearch(const char* name);
 	ObjectFile::Reader*								makeObjectReaderForMember(const Entry* member);
 	void											dumpTableOfContents();
@@ -101,6 +97,7 @@ private:
 	const char*										fPath;
 	time_t											fModTime;
 	const ObjectFile::ReaderOptions&				fOptions;
+	uint32_t										fOrdinalBase;
 	const uint8_t*									fFileContent;
 	uint64_t										fFileLength;
 	const struct ranlib*							fTableOfContents;
@@ -157,10 +154,10 @@ template <typename A>
 time_t	Reader<A>::Entry::getModTime() const
 {
 	char temp[14];
-	strncpy(temp, this->ar_size, 12);
+	strncpy(temp, this->ar_date, 12);
 	temp[12] = '\0';
 	char* endptr;
-	return (time_t)strtol(temp, &endptr, 12);
+	return (time_t)strtol(temp, &endptr, 10);
 }
 
 
@@ -220,9 +217,10 @@ bool Reader<A>::validFile(const uint8_t* fileContent, uint64_t fileLength)
 }
 
 template <typename A>
-Reader<A>::Reader(const uint8_t fileContent[], uint64_t fileLength, const char* path, time_t modTime, const ObjectFile::ReaderOptions& options)
- : fPath(NULL), fModTime(modTime), fOptions(options), fFileContent(NULL), fTableOfContents(NULL), fTableOfContentCount(0),
-   fStringPool(NULL)
+Reader<A>::Reader(const uint8_t fileContent[], uint64_t fileLength, const char* path, time_t modTime, 
+					const ObjectFile::ReaderOptions& options, uint32_t ordinalBase)
+ : fPath(NULL), fModTime(modTime), fOptions(options), fOrdinalBase(ordinalBase), fFileContent(NULL), 
+	fTableOfContents(NULL), fTableOfContentCount(0), fStringPool(NULL)
 {
 	fPath = strdup(path);
 	fFileContent = fileContent;
@@ -230,6 +228,10 @@ Reader<A>::Reader(const uint8_t fileContent[], uint64_t fileLength, const char* 
 
 	if ( strncmp((const char*)fileContent, "!<arch>\n", 8) != 0 )
 		throw "not an archive";
+
+	// write out path for -whatsloaded option
+	if ( options.fLogAllFiles )
+		printf("%s\n", path);
 
 	if ( !options.fFullyLoadArchives ) {
 		const Entry* const firstMember = (Entry*)&fFileContent[8];
@@ -261,20 +263,15 @@ ObjectFile::Reader* Reader<A>::makeObjectReaderForMember(const Entry* member)
 	strcat(memberPath, ")");
 	//fprintf(stderr, "using %s from %s\n", memberName, fPath);
 	try {
-		ObjectFile::Reader* obj = mach_o::relocatable::Reader<A>::make(member->getContent(), memberPath, fModTime, fOptions);
-		unsigned int objIndex = 0;
-		for (class std::set<const class Entry*>::iterator it=fPossibleEntries.begin(); it != fPossibleEntries.end(); it++, objIndex++) {
-			if ( *it == member )
-				break;
-		}
-		obj->setSortOrder((fSortOrder<<16) + objIndex);
-		//fprintf(stderr, "%s order = 0x%08X, index=%u\n", memberPath, obj->getSortOrder(), objIndex);
-		return obj;
+		// offset the ordinals in this mach-o .o file, so that atoms layout in same order as in archive
+		uint32_t ordinalBase = 	fOrdinalBase + (uint8_t*)member - fFileContent;
+		return new typename mach_o::relocatable::Reader<A>::Reader(member->getContent(), memberPath, member->getModTime(), fOptions, ordinalBase);
 	}
 	catch (const char* msg) {
 		throwf("in %s, %s", memberPath, msg);
 	}
 }
+
 
 template <typename A>
 std::vector<class ObjectFile::Atom*>&	Reader<A>::getAtoms()
@@ -283,15 +280,33 @@ std::vector<class ObjectFile::Atom*>&	Reader<A>::getAtoms()
 		// build vector of all atoms from all .o files in this archive
 		const Entry* const start = (Entry*)&fFileContent[8];
 		const Entry* const end = (Entry*)&fFileContent[fFileLength];
-		unsigned int objIndex = 0;
 		for (const Entry* p=start; p < end; p = p->getNext()) {
 			const char* memberName = p->getName();
 			if ( (p==start) && ((strcmp(memberName, SYMDEF_SORTED) == 0) || (strcmp(memberName, SYMDEF) == 0)) )
 				continue;
+			if ( fOptions.fWhyLoad )
+				printf("-all_load forced load of %s(%s)\n", this->getPath(), memberName);
 			ObjectFile::Reader* r = this->makeObjectReaderForMember(p);
-			r->setSortOrder((fSortOrder<<16) + objIndex++);
 			std::vector<class ObjectFile::Atom*>&	atoms = r->getAtoms();
 			fAllAtoms.insert(fAllAtoms.end(), atoms.begin(), atoms.end());
+		}
+		return fAllAtoms;
+	}
+	else if ( fOptions.fLoadAllObjcObjectsFromArchives ) {
+		// build vector of all atoms from all .o files containing objc classes in this archive
+		for(class NameToEntryMap::iterator it = fHashTable.begin(); it != fHashTable.end(); ++it) {
+			if ( (strncmp(it->first, ".objc_c", 7) == 0) || (strncmp(it->first, "_OBJC_CLASS_$_", 14) == 0) ) {
+				const Entry* member = (Entry*)&fFileContent[E::get32(it->second->ran_off)];
+				if ( fInstantiatedEntries.count(member) == 0 ) {
+					if ( fOptions.fWhyLoad )
+						printf("-ObjC forced load of %s(%s)\n", this->getPath(), member->getName());
+					// only return these atoms once
+					fInstantiatedEntries.insert(member);
+					ObjectFile::Reader* r = makeObjectReaderForMember(member);
+					std::vector<class ObjectFile::Atom*>&	atoms = r->getAtoms();
+					fAllAtoms.insert(fAllAtoms.end(), atoms.begin(), atoms.end());
+				}
+			}
 		}
 		return fAllAtoms;
 	}
@@ -301,42 +316,6 @@ std::vector<class ObjectFile::Atom*>&	Reader<A>::getAtoms()
 	}
 }
 
-
-template <typename A>
-ConstRanLibPtr Reader<A>::ranlibBinarySearch(const char* key)
-{
-	const struct ranlib* base = fTableOfContents;
-	for (uint32_t n = fTableOfContentCount; n > 0; n /= 2) {
-		const struct ranlib* pivot = &base[n/2];
-		const char* pivotStr = &fStringPool[E::get32(pivot->ran_un.ran_strx)];
-		int cmp = strcmp(key, pivotStr);
-		if ( cmp == 0 )
-			return pivot;
-		if ( cmp > 0 ) {
-			// key > pivot
-			// move base to symbol after pivot
-			base = &pivot[1];
-			--n;
-		}
-		else {
-			// key < pivot
-			// keep same base
-		}
-	}
-	return NULL;
-}
-
-template <typename A>
-ConstRanLibPtr Reader<A>::ranlibLinearSearch(const char* key)
-{
-	for (uint32_t i = 0; i < fTableOfContentCount; ++i) {
-		const struct ranlib* entry = &fTableOfContents[i];
-		const char* entryName = &fStringPool[E::get32(entry->ran_un.ran_strx)];
-		if ( strcmp(key, entryName) == 0 )
-			return entry;
-	}
-	return NULL;
-}
 
 template <typename A>
 ConstRanLibPtr  Reader<A>::ranlibHashSearch(const char* name)

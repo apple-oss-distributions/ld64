@@ -110,11 +110,15 @@ sub process_entry
     {
 	if($line =~ m/^(PASS|XPASS|FAIL|XFAIL).+/)
 	{
-	    printf "%-40s %s\n", $test_name, $line;
 	    $total_count++;
 	    if($line =~ m/^PASS.+/)
 	    {
 		$pass_count++;
+	    }
+	    else
+	    {
+		# only print failure lines
+		printf "%-40s %s\n", $test_name, $line;
 	    }
 	    $seen_result = 1;
 	}

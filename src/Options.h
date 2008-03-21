@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005-2007 Apple  Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -39,12 +39,11 @@ void throwf (const char* format, ...) __attribute__ ((noreturn));
 class DynamicLibraryOptions
 {
 public:
-	DynamicLibraryOptions() : fWeakImport(false), fReExport(false), fBundleLoader(false), fInstallPathOverride(NULL) {}
+	DynamicLibraryOptions() : fWeakImport(false), fReExport(false), fBundleLoader(false) {}
 
 	bool		fWeakImport;
 	bool		fReExport;
 	bool		fBundleLoader;
-	const char* fInstallPathOverride;
 };
 
 //
@@ -71,7 +70,8 @@ public:
 										  kWeakReferenceMismatchNonWeak };
 	enum CommonsMode { kCommonsIgnoreDylibs, kCommonsOverriddenByDylibs, kCommonsConflictsDylibsError };
 	enum DeadStripMode { kDeadStripOff, kDeadStripOn, kDeadStripOnPlusUnusedInits };
-	enum VersionMin { kMinUnset, k10_1, k10_2, k10_3, k10_4, k10_5 };
+	enum UUIDMode { kUUIDNone, kUUIDRandom, kUUIDContent };
+	enum LocalSymbolHandling { kLocalSymbolsAll, kLocalSymbolsNone, kLocalSymbolsSelectiveInclude, kLocalSymbolsSelectiveExclude };
 
 	struct FileInfo {
 		const char*				path;
@@ -94,13 +94,34 @@ public:
 		uint8_t					alignment;
 	};
 
+	struct OrderedSymbol {
+		const char*				symbolName;
+		const char*				objectFileName;
+	};
+
+	struct SegmentStart {
+		const char*				name;
+		uint64_t				address;
+	};
+	
+	struct SegmentProtect {
+		const char*				name;
+		uint32_t				max;
+		uint32_t				init;
+	};
+	
+	struct DylibOverride {
+		const char*				installName;
+		const char*				useInstead;
+	};
+
+
 	const ObjectFile::ReaderOptions&	readerOptions();
 	const char*							getOutputFilePath();
 	std::vector<FileInfo>&				getInputFiles();
 
 	cpu_type_t					architecture();
 	OutputKind					outputKind();
-	bool						stripLocalSymbols();
 	bool						prebind();
 	bool						bindAtLoad();
 	bool						fullyLoadArchives();
@@ -113,6 +134,7 @@ public:
 	uint64_t					baseAddress();
 	bool						keepPrivateExterns();	// only for kObjectFile
 	bool						interposable();			// only for kDynamicLibrary
+	bool						needsModuleTable();		// only for kDynamicLibrary
 	bool						hasExportRestrictList();
 	bool						allGlobalsAreDeadStripRoots();
 	bool						shouldExport(const char*);
@@ -122,13 +144,10 @@ public:
 	bool						traceArchives();
 	DeadStripMode				deadStrip();
 	UndefinedTreatment			undefinedTreatment();
-	VersionMin					macosxVersionMin();
+	ObjectFile::ReaderOptions::VersionMin	macosxVersionMin();
 	bool						messagesPrefixedWithArchitecture();
 	Treatment					picTreatment();
 	WeakReferenceMismatchTreatment	weakReferenceMismatchTreatment();
-	Treatment					multipleDefinitionsInDylibs();
-	Treatment					overridingDefinitionInDependentDylib();
-	bool						warnOnMultipleDefinitionsInObjectFiles();
 	const char*					umbrellaName();
 	std::vector<const char*>&	allowableClients();
 	const char*					clientName();
@@ -142,19 +161,41 @@ public:
 	std::vector<const char*>&	initialUndefines();
 	bool						printWhyLive(const char* name);
 	uint32_t					minimumHeaderPad();
+	bool						maxMminimumHeaderPad() { return fMaxMinimumHeaderPad; }
 	std::vector<ExtraSection>&	extraSections();
 	std::vector<SectionAlignment>&	sectionAlignments();
 	CommonsMode					commonsMode();
 	bool						warnCommons();
 	bool						keepRelocations();
-	std::vector<const char*>&   traceSymbols();
 	FileInfo					findFile(const char* path);
-	bool						emitUUID();
+	UUIDMode					getUUIDMode() { return fUUIDMode; }
 	bool						warnStabs();
 	bool						pauseAtEnd() { return fPause; }
 	bool						printStatistics() { return fStatistics; }
 	bool						printArchPrefix() { return fMessagesPrefixedWithArchitecture; }
-	bool						makeTentativeDefinitionsReal() { return fMakeTentativeDefinitionsReal; }
+	void						gotoClassicLinker(int argc, const char* argv[]);
+	bool						sharedRegionEligible() { return fSharedRegionEligible; }
+	bool						printOrderFileStatistics() { return fPrintOrderFileStatistics; }
+	const char*					dTraceScriptName() { return fDtraceScriptName; }
+	bool						dTrace() { return (fDtraceScriptName != NULL); }
+	std::vector<OrderedSymbol>&	orderedSymbols() { return fOrderedSymbols; }
+	bool						splitSeg() { return fSplitSegs; }
+	uint64_t					baseWritableAddress() { return fBaseWritableAddress; }
+	std::vector<SegmentStart>&	customSegmentAddresses() { return fCustomSegmentAddresses; }
+	std::vector<SegmentProtect>& customSegmentProtections() { return fCustomSegmentProtections; }
+	bool						saveTempFiles() { return fSaveTempFiles; }
+	const std::vector<const char*>&   rpaths() { return fRPaths; }
+	bool						readOnlyx86Stubs() { return fReadOnlyx86Stubs; }
+	std::vector<DylibOverride>&	dylibOverrides() { return fDylibOverrides; }
+	const char*					generatedMapPath() { return fMapPath; }
+	bool						positionIndependentExecutable() { return fPositionIndependentExecutable; }
+	Options::FileInfo			findFileUsingPaths(const char* path);
+	bool						deadStripDylibs() { return fDeadStripDylibs; }
+	bool						allowedUndefined(const char* name) { return ( fAllowedUndefined.find(name) != fAllowedUndefined.end() ); }
+	bool						someAllowedUndefines() { return (fAllowedUndefined.size() != 0); }
+	LocalSymbolHandling			localSymbolHandling() { return fLocalSymbolHandling; }
+	bool						keepLocalSymbol(const char* symbolName);
+	bool						emitWarnings() { return !fSuppressWarnings; }
 
 private:
 	class CStringEquals
@@ -167,6 +208,22 @@ private:
 	enum ExportMode { kExportDefault, kExportSome, kDontExportSome };
 	enum LibrarySearchMode { kSearchDylibAndArchiveInEachDir, kSearchAllDirsForDylibsThenAllDirsForArchives };
 
+	class SetWithWildcards {
+	public:
+		void					insert(const char*);
+		bool					contains(const char*);
+		NameSet::iterator		regularBegin()	{ return fRegular.begin(); }
+		NameSet::iterator		regularEnd()	{ return fRegular.end(); }
+	private:
+		bool					hasWildCards(const char*);
+		bool					wildCardMatch(const char* pattern, const char* candidate);
+		bool					inCharRange(const char*& range, unsigned char c);
+
+		NameSet							fRegular;
+		std::vector<const char*>		fWildCard;
+	};
+
+
 	void						parse(int argc, const char* argv[]);
 	void						checkIllegalOptionCombinations();
 	void						buildSearchPaths(int argc, const char* argv[]);
@@ -178,21 +235,28 @@ private:
 											 FileInfo& result);
 	uint32_t					parseVersionNumber(const char*);
 	void						parseSectionOrderFile(const char* segment, const char* section, const char* path);
+	void						parseOrderFile(const char* path, bool cstring);
 	void						addSection(const char* segment, const char* section, const char* path);
 	void						addSubLibrary(const char* name);
 	void						loadFileList(const char* fileOfPaths);
 	uint64_t					parseAddress(const char* addr);
-	void						loadExportFile(const char* fileOfExports, const char* option, NameSet& set);
+	void						loadExportFile(const char* fileOfExports, const char* option, SetWithWildcards& set);
+	void						parseAliasFile(const char* fileOfAliases);
 	void						parsePreCommandLineEnvironmentSettings();
 	void						parsePostCommandLineEnvironmentSettings();
 	void						setUndefinedTreatment(const char* treatment);
 	void						setVersionMin(const char* version);
 	void						setWeakReferenceMismatchTreatment(const char* treatment);
-	void						setDylibInstallNameOverride(const char* paths);
+	void						addDylibOverride(const char* paths);
 	void						addSectionAlignment(const char* segment, const char* section, const char* alignment);
 	CommonsMode					parseCommonsTreatment(const char* mode);
 	Treatment					parseTreatment(const char* treatment);
 	void						reconfigureDefaults();
+	void						checkForClassic(int argc, const char* argv[]);
+	void						parseSegAddrTable(const char* segAddrPath, const char* installPath);
+	void						addLibrary(const FileInfo& info);
+	void						warnObsolete(const char* arg);
+	uint32_t					parseProtection(const char* prot);
 
 
 	ObjectFile::ReaderOptions			fReaderOptions;
@@ -202,69 +266,81 @@ private:
 	OutputKind							fOutputKind;
 	bool								fPrebind;
 	bool								fBindAtLoad;
-	bool								fStripLocalSymbols;
 	bool								fKeepPrivateExterns;
 	bool								fInterposable;
+	bool								fNeedsModuleTable;
 	bool								fIgnoreOtherArchFiles;
 	bool								fForceSubtypeAll;
 	DeadStripMode						fDeadStrip;
-	VersionMin							fVersionMin;
 	NameSpace							fNameSpace;
 	uint32_t							fDylibCompatVersion;
 	uint32_t							fDylibCurrentVersion;
 	const char*							fDylibInstallName;
+	const char*							fFinalName;
 	const char*							fEntryName;
 	uint64_t							fBaseAddress;
-	NameSet								fExportSymbols;
-	NameSet								fDontExportSymbols;
+	uint64_t							fBaseWritableAddress;
+	bool								fSplitSegs;
+	SetWithWildcards					fExportSymbols;
+	SetWithWildcards					fDontExportSymbols;
 	ExportMode							fExportMode;
 	LibrarySearchMode					fLibrarySearchMode;
 	UndefinedTreatment					fUndefinedTreatment;
 	bool								fMessagesPrefixedWithArchitecture;
-	Treatment							fPICTreatment;
 	WeakReferenceMismatchTreatment		fWeakReferenceMismatchTreatment;
-	Treatment							fMultiplyDefinedDynamic;
-	Treatment							fMultiplyDefinedUnused;
-	bool								fWarnOnMultiplyDefined;
 	std::vector<const char*>			fSubUmbellas;
 	std::vector<const char*>			fSubLibraries;
 	std::vector<const char*>			fAllowableClients;
+	std::vector<const char*>			fRPaths;
 	const char*							fClientName;
 	const char*							fUmbrellaName;
 	const char*							fInitFunctionName;
 	const char*							fDotOutputFile;
 	const char*							fExecutablePath;
 	const char*							fBundleLoader;
+	const char*							fDtraceScriptName;
+	const char*							fSegAddrTablePath;
+	const char*							fMapPath;
 	uint64_t							fZeroPageSize;
 	uint64_t							fStackSize;
 	uint64_t							fStackAddr;
 	bool								fExecutableStack;
 	uint32_t							fMinimumHeaderPad;
 	CommonsMode							fCommonsMode;
+	UUIDMode							fUUIDMode;
+	SetWithWildcards					fLocalSymbolsIncluded;
+	SetWithWildcards					fLocalSymbolsExcluded;
+	LocalSymbolHandling					fLocalSymbolHandling;
 	bool								fWarnCommons;
 	bool								fVerbose;
 	bool								fKeepRelocations;
-	bool								fEmitUUID;
 	bool								fWarnStabs;
 	bool								fTraceDylibSearching;
 	bool								fPause;
 	bool								fStatistics;
 	bool								fPrintOptions;
-	bool								fMakeTentativeDefinitionsReal;
+	bool								fSharedRegionEligible;
+	bool								fPrintOrderFileStatistics;
+	bool								fReadOnlyx86Stubs;
+	bool								fPositionIndependentExecutable;
+	bool								fMaxMinimumHeaderPad;
+	bool								fDeadStripDylibs;
+	bool								fSuppressWarnings;
 	std::vector<const char*>			fInitialUndefines;
+	NameSet								fAllowedUndefined;
 	NameSet								fWhyLive;
-	std::vector<const char*>			fTraceSymbols;
-	unsigned long						fLimitUndefinedSymbols;
 	std::vector<ExtraSection>			fExtraSections;
 	std::vector<SectionAlignment>		fSectionAlignments;
+	std::vector<OrderedSymbol>			fOrderedSymbols;
+	std::vector<SegmentStart>			fCustomSegmentAddresses;
+	std::vector<SegmentProtect>			fCustomSegmentProtections;
+	std::vector<DylibOverride>			fDylibOverrides; 
 
 	std::vector<const char*>			fLibrarySearchPaths;
 	std::vector<const char*>			fFrameworkSearchPaths;
 	std::vector<const char*>			fSDKPaths;
-	bool								fAllowStackExecute;
-
+	bool								fSaveTempFiles;
 };
-
 
 
 

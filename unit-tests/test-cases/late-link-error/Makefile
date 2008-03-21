@@ -38,6 +38,4 @@ all:
 	${FAIL_IFF} cat link_error-${ARCH}  2> fail.log
 
 clean:
-	rm link_error-${ARCH} fail.log
-	
-
+	rm link_error-* fail.log

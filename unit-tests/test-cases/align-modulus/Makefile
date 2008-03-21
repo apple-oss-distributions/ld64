@@ -33,11 +33,8 @@ run: all
 
 all:
 	${CC} ${ASMFLAGS} -dynamiclib -single_module -dead_strip foo.c align.s  -exported_symbols_list foo.exp -o foo.${ARCH}.dylib
+	${FAIL_IF_BAD_MACHO} foo.${ARCH}.dylib
 	nm foo.${ARCH}.dylib | grep "3 d _b" | ${PASS_IFF_STDIN}
 
-
 clean:
-	rm -rf foo.${ARCH}.dylib 
-	
-	
-
+	rm -rf *.dylib 

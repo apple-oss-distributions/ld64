@@ -10,12 +10,7 @@ if ( exists $ENV{UNIT_TEST_NAME} ) {
 if(system(@ARGV) != 0)
 {
     printf("FAIL $test_name\n");
-	exit 1;
-}
-else 
-{
-	exit 0;
+    exit 1;
 }
 
-
-
+exit 0;

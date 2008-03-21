@@ -13,13 +13,11 @@ if ( exists $ENV{UNIT_TEST_NAME} ) {
 	$test_name = $ENV{UNIT_TEST_NAME};
 }
 
-if(0 == system(@ARGV))
-{
-    printf("PASS $test_name\n");
-}
-else
+if(0 != system(@ARGV))
 {
     printf("FAIL $test_name\n");
+    exit 1;
 }
-exit 0;
 
+printf("PASS $test_name\n");
+exit 0;

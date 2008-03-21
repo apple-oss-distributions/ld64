@@ -24,20 +24,20 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# The point of this test that -dead_strip removes unreference code/data from archives
+# Tests that a common symbol can be used from an archive with -dead_strip.  The tricky
+# part is that common symbols are not in the table of contents for archives.
+# If the linker seens a need for my_common, that won't trigger pulling in the .o
+# file from the archive.  But the later use of foo will.  
 #
 
 run: all
 
 all:
 	${CC} ${CCFLAGS} foo.c -c -o foo.o
+	${FAIL_IF_BAD_OBJ} foo.o
 	libtool -static foo.o -o libfoo.a
 	${CC} ${CCFLAGS}  main.c -mdynamic-no-pic -Os libfoo.a -dead_strip -o main
-	${FAIL_IF_BAD_MACHO} main
-	nm -j  main | grep dead_wood | ${PASS_IFF_EMPTY}
-	
+	${PASS_IFF_GOOD_MACHO} main
 
 clean:
-	rm -rf  main libfoo.a foo.o
-	
-
+	rm -rf main *.a *.o

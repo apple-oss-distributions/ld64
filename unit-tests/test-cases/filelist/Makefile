@@ -27,7 +27,7 @@ include ${TESTROOT}/include/common.makefile
 PWD = $(shell pwd)
 
 #
-# The point of this test is to check the two forms of the'
+# The point of this test is to check the two forms of the
 #  -filelist option
 #
 
@@ -35,14 +35,13 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} -c hello.c -o hello-${ARCH}.o
+	${FAIL_IF_BAD_OBJ} hello-${ARCH}.o
 	echo "${PWD}/hello-${ARCH}.o" > "${PWD}/filelist1"
-	cd /tmp && ${CC} ${CCFLAGS} -arch ${ARCH} -filelist "${PWD}/filelist1"  -o "${PWD}/hello-${ARCH}"
+	cd /tmp && ${CC} ${CCFLAGS} -filelist "${PWD}/filelist1"  -o "${PWD}/hello-${ARCH}"
 	${FAIL_IF_BAD_MACHO} hello-${ARCH}
 	echo "hello-${ARCH}.o" > "${PWD}/filelist2"
-	cd /tmp && ${CC} ${CCFLAGS}  -arch ${ARCH} -filelist "${PWD}/filelist2,${PWD}" -o "${PWD}/hello-${ARCH}"
+	cd /tmp && ${CC} ${CCFLAGS} -filelist "${PWD}/filelist2,${PWD}" -o "${PWD}/hello-${ARCH}"
 	${PASS_IFF_GOOD_MACHO} hello-${ARCH}
 
 clean:
-	rm  hello-${ARCH} hello-${ARCH}.o filelist1 filelist2
-	
-
+	rm  hello-* *.o filelist1 filelist2

@@ -43,4 +43,4 @@ all:
 	${OTOOL} -hv foo-${ARCH} | grep ALLOW_STACK_EXECUTION | ${PASS_IFF_EMPTY}
 
 clean:
-	rm -rf foo-${ARCH}
+	rm -rf foo-*

@@ -32,14 +32,15 @@ run: all
 
 all:
 	${CC} ${ASMFLAGS} cstring-align-0.s -c -o cstring-align-0-${ARCH}.o
+	${FAIL_IF_BAD_OBJ} cstring-align-0-${ARCH}.o
+
 	${CC} ${ASMFLAGS} cstring-align-3.s -c -o cstring-align-3-${ARCH}.o
+	${FAIL_IF_ERROR} ${OBJECTDUMP} cstring-align-3-${ARCH}.o | grep 'align:' > align-3
+
 	${LD} -arch ${ARCH} -r cstring-align-0-${ARCH}.o cstring-align-3-${ARCH}.o -o cstring-r-${ARCH}.o
-	${OBJECTDUMP} cstring-align-3-${ARCH}.o | grep 'align:' > align-3
-	${OBJECTDUMP} cstring-r-${ARCH}.o | grep 'align:' > align-r
-	${PASS_IFF} diff align-3  align-r
+	${FAIL_IF_ERROR} ${OBJECTDUMP} cstring-r-${ARCH}.o | grep 'align:' > align-r
+
+	${PASS_IFF} diff align-3 align-r
 
 clean:
-	rm -rf cstring-align-0-${ARCH}.o cstring-align-3-${ARCH}.o cstring-r-${ARCH}.o align-3 align-r
-		
-	
-
+	rm -rf *.o align-3 align-r

@@ -32,12 +32,12 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} bar.c -dynamiclib -o libbar.dylib
+	${FAIL_IF_BAD_MACHO} libbar.dylib
 	${CC} ${CCFLAGS} main.c bar.c -o main
+	${FAIL_IF_BAD_MACHO} main
 	${CC} ${CCFLAGS} bundle.c -bundle -bundle_loader main libbar.dylib -o bundle.bundle
 	${FAIL_IF_BAD_MACHO} bundle.bundle
 	nm -m bundle.bundle | grep _bar | grep "from executable" | ${PASS_IFF_STDIN}
 
 clean:
-	rm libbar.dylib main bundle.bundle
-	
-
+	rm *.dylib main bundle.bundle

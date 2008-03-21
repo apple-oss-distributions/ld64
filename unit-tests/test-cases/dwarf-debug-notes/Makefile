@@ -32,23 +32,19 @@ include ${TESTROOT}/include/common.makefile
 
 run: all
 
-all: hello.o other.o crt1.o 
-	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.o other.o -o dwarf-hello-${ARCH} -L.
+all: hello.o other.o 
+	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.o other.o -o dwarf-hello-${ARCH}
 	${FAIL_IF_BAD_MACHO} dwarf-hello-${ARCH}
 	nm -ap dwarf-hello-${ARCH} | ./stabs-filter.pl > dwarf-hello-${ARCH}.stabs
 	${PASS_IFF} diff dwarf-hello-${ARCH}.stabs expected-stabs
 
 hello.o : hello.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.cxx -c -o hello.o -mdynamic-no-pic
+	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.cxx -c -o $@ -mdynamic-no-pic
+	${FAIL_IF_BAD_OBJ} $@
 
 other.o : other.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 other.cxx -c -o other.o -mdynamic-no-pic
-
-# don't want any stabs in crt1.o to effect output, so my private stripped copy
-crt1.o : /usr/lib/crt1.o
-	strip -S /usr/lib/crt1.o -o crt1.o
+	${CXX} ${CCXXFLAGS} -gdwarf-2 other.cxx -c -o $@ -mdynamic-no-pic
+	${FAIL_IF_BAD_OBJ} $@
 
 clean:
-	rm -rf dwarf-hello-${ARCH}  hello.o  other.o crt1.o dwarf-hello-${ARCH}.stabs
-
-
+	rm -rf dwarf-hello-* *.o *.stabs

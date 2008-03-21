@@ -35,13 +35,12 @@ run: all
 
 all:
 	${CC} ${ASMFLAGS} relocs-asm.s -c -o relocs-asm.${ARCH}.o
+	${FAIL_IF_ERROR} ${OBJECTDUMP} -no_content relocs-asm.${ARCH}.o > relocs-asm.${ARCH}.o.dump
+
 	${LD} -arch ${ARCH} -r -keep_private_externs relocs-asm.${ARCH}.o -o relocs-asm-r.${ARCH}.o
-	${OBJECTDUMP} -no_content relocs-asm.${ARCH}.o > relocs-asm.${ARCH}.o.dump
-	${OBJECTDUMP} -no_content relocs-asm-r.${ARCH}.o > relocs-asm-r.${ARCH}.o.dump
+	${FAIL_IF_ERROR} ${OBJECTDUMP} -no_content relocs-asm-r.${ARCH}.o > relocs-asm-r.${ARCH}.o.dump
+
 	${PASS_IFF} diff relocs-asm.${ARCH}.o.dump relocs-asm-r.${ARCH}.o.dump
 
 clean:
-	rm -rf relocs-asm.${ARCH}.o relocs-asm-r.${ARCH}.o relocs-asm.${ARCH}.o.dump relocs-asm-r.${ARCH}.o.dump
-	
-	
-
+	rm -rf *.o *.dump

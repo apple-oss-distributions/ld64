@@ -34,19 +34,19 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all: hello.o other.o 
-	${CXX} ${CCXXFLAGS} -gused hello.o other.o -o stabs-hello-${ARCH}
+	${CXX} ${CCXXFLAGS} -gstabs+ -gused hello.o other.o -o stabs-hello-${ARCH}
 	${FAIL_IF_BAD_MACHO} stabs-hello-${ARCH}
 	nm -ap stabs-hello-${ARCH} | grep FUN | grep _Z3fooi | wc -l > stabs-hello-foo-count
 	echo "       1" > one
 	${PASS_IFF} diff stabs-hello-foo-count one
 
 hello.o : hello.cxx
-	${CXX} ${CCXXFLAGS} -gused hello.cxx -c -o hello.o
+	${CXX} ${CCXXFLAGS} -gstabs+ -gused hello.cxx -c -o $@
+	${FAIL_IF_BAD_OBJ} $@
 
 other.o : other.cxx
-	${CXX} ${CCXXFLAGS} -gused other.cxx -c -o other.o
+	${CXX} ${CCXXFLAGS} -gstabs+ -gused other.cxx -c -o $@
+	${FAIL_IF_BAD_OBJ} $@
 
 clean:
-	rm -rf stabs-hello-${ARCH}  hello.o other.o stabs-hello-${ARCH}.stabs stabs-hello-foo-count one
-
-
+	rm -rf stabs-hello-* *.o *.stabs stabs-hello-foo-count one

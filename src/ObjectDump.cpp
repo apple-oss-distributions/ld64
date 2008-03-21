@@ -37,6 +37,10 @@ static bool			sDumpContent= true;
 static bool			sDumpStabs	= false;
 static bool			sSort		= true;
 static cpu_type_t	sPreferredArch = CPU_TYPE_POWERPC64;
+static const char* sMatchName;
+static int sPrintRestrict;
+static int sPrintAlign;
+static int sPrintName;
 
 
  __attribute__((noreturn))
@@ -152,13 +156,18 @@ static void dumpStabs(std::vector<ObjectFile::Reader::Stab>* stabs)
 
 static void dumpAtom(ObjectFile::Atom* atom)
 {
+	if(sMatchName && strcmp(sMatchName, atom->getDisplayName()))
+		return;
+
 	//printf("atom:    %p\n", atom);
 	
 	// name
-	printf("name:    %s\n",  atom->getDisplayName());
+	if(!sPrintRestrict || sPrintName)
+		printf("name:    %s\n",  atom->getDisplayName());
 	
 	// scope
-	switch ( atom->getScope() ) {
+	if(!sPrintRestrict)
+		switch ( atom->getScope() ) {
 		case ObjectFile::Atom::scopeTranslationUnit:
 			printf("scope:   translation unit\n");
 			break;
@@ -170,10 +179,11 @@ static void dumpAtom(ObjectFile::Atom* atom)
 			break;
 		default:
 			printf("scope:   unknown\n");
-	}
+		}
 	
 	// kind
-	switch ( atom->getDefinitionKind() ) {
+	if(!sPrintRestrict)
+		switch ( atom->getDefinitionKind() ) {
 		case ObjectFile::Atom::kRegularDefinition:
 			printf("kind:     regular\n");
 			break;
@@ -189,36 +199,51 @@ static void dumpAtom(ObjectFile::Atom* atom)
 		case ObjectFile::Atom::kExternalWeakDefinition:
 			printf("kind:     weak import\n");
 			break;
+		case ObjectFile::Atom::kAbsoluteSymbol:
+			printf("kind:     absolute symbol\n");
+			break;
 		default:
-			printf("scope:   unknown\n");
-	}
+			printf("kind:   unknown\n");
+		}
 
 	// segment and section
-	printf("section: %s,%s\n", atom->getSegment().getName(), atom->getSectionName());
+	if(!sPrintRestrict)
+		printf("section: %s,%s\n", atom->getSegment().getName(), atom->getSectionName());
 
 	// attributes
-	printf("attrs:   ");
-	if ( atom->dontDeadStrip() )
-		printf("dont-dead-strip ");
-	if ( atom->isZeroFill() )
-		printf("zero-fill ");
-	printf("\n");
+	if(!sPrintRestrict) {
+		printf("attrs:   ");
+		if ( atom->dontDeadStrip() )
+			printf("dont-dead-strip ");
+		if ( atom->isZeroFill() )
+			printf("zero-fill ");
+		printf("\n");
+	}
 	
 	// size
-	printf("size:    0x%012llX\n", atom->getSize());
+	if(!sPrintRestrict)
+		printf("size:    0x%012llX\n", atom->getSize());
 	
 	// alignment
-	printf("align:    %u mod %u\n", atom->getAlignment().modulus, (1 << atom->getAlignment().powerOf2) );
+	if(!sPrintRestrict || sPrintAlign)
+		printf("align:    %u mod %u\n", atom->getAlignment().modulus, (1 << atom->getAlignment().powerOf2) );
 
 	// content
-	if ( sDumpContent ) { 
+	if (!sPrintRestrict && sDumpContent ) { 
 		uint64_t size = atom->getSize();
 		if ( size < 4096 ) {
 			uint8_t content[size];
 			atom->copyRawContent(content);
 			printf("content: ");
 			if ( strcmp(atom->getSectionName(), "__cstring") == 0 ) {
-				printf("\"%s\"", content);
+				printf("\"");
+				for (unsigned int i=0; i < size; ++i) {
+					if(content[i]<'!' || content[i]>=127)
+						printf("\\%o", content[i]);
+					else
+						printf("%c", content[i]);
+				}
+				printf("\"");
 			}
 			else {
 				for (unsigned int i=0; i < size; ++i)
@@ -229,30 +254,38 @@ static void dumpAtom(ObjectFile::Atom* atom)
 	}
 	
 	// references
-	std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
-	const int refCount = references.size();
-	printf("references: (%u)\n", refCount);
-	for (int i=0; i < refCount; ++i) {
-		ObjectFile::Reference* ref = references[i];
-		printf("   %s\n", ref->getDescription());
+	if(!sPrintRestrict) {
+		std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
+		const int refCount = references.size();
+		printf("references: (%u)\n", refCount);
+		for (int i=0; i < refCount; ++i) {
+			ObjectFile::Reference* ref = references[i];
+			printf("   %s\n", ref->getDescription());
+		}
 	}
 	
 	// line info
-	std::vector<ObjectFile::LineInfo>* lineInfo = atom->getLineInfo();
-	if ( (lineInfo != NULL) && (lineInfo->size() > 0) ) {
-		printf("line info: (%lu)\n", lineInfo->size());
-		for (std::vector<ObjectFile::LineInfo>::iterator it = lineInfo->begin(); it != lineInfo->end(); ++it) {
-			printf("   offset 0x%04X, line %d, file %s\n", it->atomOffset, it->lineNumber, it->fileName);
+	if(!sPrintRestrict) {
+		std::vector<ObjectFile::LineInfo>* lineInfo = atom->getLineInfo();
+		if ( (lineInfo != NULL) && (lineInfo->size() > 0) ) {
+			printf("line info: (%lu)\n", lineInfo->size());
+			for (std::vector<ObjectFile::LineInfo>::iterator it = lineInfo->begin(); it != lineInfo->end(); ++it) {
+				printf("   offset 0x%04X, line %d, file %s\n", it->atomOffset, it->lineNumber, it->fileName);
+			}
 		}
 	}
 
+	if(!sPrintRestrict)
+		printf("\n");
 }
 
 struct AtomSorter
 {
-     bool operator()(ObjectFile::Atom* left, ObjectFile::Atom* right)
+     bool operator()(const ObjectFile::Atom* left, const ObjectFile::Atom* right)
      {
-          return (strcmp(left->getDisplayName(), right->getDisplayName()) < 0);
+		if ( left == right )
+			return false;
+        return (strcmp(left->getDisplayName(), right->getDisplayName()) < 0);
      }
 };
 
@@ -274,10 +307,8 @@ static void dumpFile(ObjectFile::Reader* reader)
 	if ( sSort )
 		std::sort(sortedAtoms.begin(), sortedAtoms.end(), AtomSorter());
 	
-	for(std::vector<ObjectFile::Atom*>::iterator it=sortedAtoms.begin(); it != sortedAtoms.end(); ++it) {
+	for(std::vector<ObjectFile::Atom*>::iterator it=sortedAtoms.begin(); it != sortedAtoms.end(); ++it)
 		dumpAtom(*it);
-		printf("\n");
-	}
 }
 
 
@@ -296,7 +327,6 @@ static ObjectFile::Reader* createReader(const char* path, const ObjectFile::Read
 		const struct fat_header* fh = (struct fat_header*)p;
 		const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
 		for (unsigned long i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
-			fprintf(stderr, "archs[i].cputype = %X\n", archs[i].cputype);
 			if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)sPreferredArch ) {
 				p = p + OSSwapBigToHostInt32(archs[i].offset);
 				mh = (struct mach_header*)p;
@@ -304,19 +334,37 @@ static ObjectFile::Reader* createReader(const char* path, const ObjectFile::Read
 		}
 	}
 	if ( mach_o::relocatable::Reader<x86>::validFile(p) )
-		return mach_o::relocatable::Reader<x86>::make(p, path, 0, options);
+		return new mach_o::relocatable::Reader<x86>::Reader(p, path, 0, options, 0);
 	else if ( mach_o::relocatable::Reader<ppc>::validFile(p) )
-		return mach_o::relocatable::Reader<ppc>::make(p, path, 0, options);
+		return new mach_o::relocatable::Reader<ppc>::Reader(p, path, 0, options, 0);
 	else if ( mach_o::relocatable::Reader<ppc64>::validFile(p) )
-		return mach_o::relocatable::Reader<ppc64>::make(p, path, 0, options);
+		return new mach_o::relocatable::Reader<ppc64>::Reader(p, path, 0, options, 0);
 	else if ( mach_o::relocatable::Reader<x86_64>::validFile(p) )
-		return mach_o::relocatable::Reader<x86_64>::make(p, path, 0, options);
+		return new mach_o::relocatable::Reader<x86_64>::Reader(p, path, 0, options, 0);
 	throwf("not a mach-o object file: %s", path);
 }
 
+static
+void
+usage()
+{
+	fprintf(stderr, "ObjectDump options:\n"
+			"\t-no_content\tdon't dump contents\n"
+			"\t-stabs\t\tdump stabs\n"
+			"\t-arch aaa\tonly dump info about arch aaa\n"
+			"\t-only sym\tonly dump info about sym\n"
+			"\t-align\t\tonly print alignment info\n"
+			"\t-name\t\tonly print symbol names\n"
+		);
+}
 
 int main(int argc, const char* argv[])
 {
+	if(argc<2) {
+		usage();
+		return 0;
+	}
+
 	ObjectFile::ReaderOptions options;
 	try {
 		for(int i=1; i < argc; ++i) {
@@ -332,7 +380,7 @@ int main(int argc, const char* argv[])
 					sSort = false;
 				}
 				else if ( strcmp(arg, "-arch") == 0 ) {
-					const char* arch = argv[++i];
+					const char* arch = ++i<argc? argv[i]: "";
 					if ( strcmp(arch, "ppc64") == 0 )
 						sPreferredArch = CPU_TYPE_POWERPC64;
 					else if ( strcmp(arch, "ppc") == 0 )
@@ -344,7 +392,19 @@ int main(int argc, const char* argv[])
 					else 
 						throwf("unknown architecture %s", arch);
 				}
+				else if ( strcmp(arg, "-only") == 0 ) {
+					sMatchName = ++i<argc? argv[i]: NULL;
+				}
+				else if ( strcmp(arg, "-align") == 0 ) {
+					sPrintRestrict = true;
+					sPrintAlign = true;
+				}
+				else if ( strcmp(arg, "-name") == 0 ) {
+					sPrintRestrict = true;
+					sPrintName = true;
+				}
 				else {
+					usage();
 					throwf("unknown option: %s\n", arg);
 				}
 			}
@@ -361,6 +421,3 @@ int main(int argc, const char* argv[])
 	
 	return 0;
 }
-
-
-

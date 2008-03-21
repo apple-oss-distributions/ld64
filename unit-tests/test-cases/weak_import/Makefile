@@ -32,6 +32,8 @@ run: all
 
 all:	
 	${CC} ${CCFLAGS} -dynamiclib -single_module foo.c -o libfoo-${ARCH}.dylib 
+	${FAIL_IF_BAD_MACHO} libfoo-${ARCH}.dylib
+
 	${CC} ${CCFLAGS} -mmacosx-version-min=10.4 main.c -o main-${ARCH} libfoo-${ARCH}.dylib 
 	nm -m main-${ARCH} | grep _func1 | grep -v weak    >/dev/null
 	nm -m main-${ARCH} | grep _func2 | grep    weak    >/dev/null
@@ -41,6 +43,9 @@ all:
 	nm -m main-${ARCH} | grep _data2 | grep    weak    >/dev/null
 	nm -m main-${ARCH} | grep _data3 | grep -v weak    >/dev/null
 	nm -m main-${ARCH} | grep _data4 | grep    weak    >/dev/null
+	otool -rv main-${ARCH} | grep _data6 > /dev/null
+	${FAIL_IF_BAD_MACHO} main-${ARCH}
+
 	${CC} ${CCFLAGS} -mmacosx-version-min=10.4 main.c -dynamiclib -o main-${ARCH}.dylib libfoo-${ARCH}.dylib 
 	nm -m main-${ARCH}.dylib | grep _func1 | grep -v weak    >/dev/null
 	nm -m main-${ARCH}.dylib | grep _func2 | grep    weak    >/dev/null
@@ -50,7 +55,8 @@ all:
 	nm -m main-${ARCH}.dylib | grep _data2 | grep    weak    >/dev/null
 	nm -m main-${ARCH}.dylib | grep _data3 | grep -v weak    >/dev/null
 	nm -m main-${ARCH}.dylib | grep _data4 | grep    weak    >/dev/null
+	otool -rv main-${ARCH}.dylib | grep _data6 > /dev/null
 	${PASS_IFF_GOOD_MACHO} main-${ARCH}.dylib
 	
 clean:
-	rm -rf libfoo-${ARCH}.dylib  main-${ARCH}  main-${ARCH}.dylib
+	rm -rf *.dylib main-*

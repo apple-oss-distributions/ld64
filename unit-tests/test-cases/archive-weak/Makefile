@@ -37,14 +37,15 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} foo.c -c -o foo-${ARCH}.o 
+	${FAIL_IF_BAD_OBJ} foo-${ARCH}.o
 	${CC} ${CCFLAGS} bar.c -c -o bar-${ARCH}.o 
+	${FAIL_IF_BAD_OBJ} bar-${ARCH}.o
 	${CC} ${CCFLAGS} baz.c -c -o baz-${ARCH}.o 
+	${FAIL_IF_BAD_OBJ} baz-${ARCH}.o
 	libtool -static foo-${ARCH}.o  bar-${ARCH}.o  baz-${ARCH}.o -o libfoobar-${ARCH}.a
 	${CC} ${CCFLAGS} main.c foo.c -lfoobar-${ARCH} -L. -o main-${ARCH} 
 	${FAIL_IF_BAD_MACHO} main-${ARCH}
 	nm -m main-${ARCH} | grep _baz | grep weak | ${PASS_IFF_STDIN}
 
 clean:
-	rm -rf main-${ARCH} foo-${ARCH}.o bar-${ARCH}.o baz-${ARCH}.o libfoobar-${ARCH}.a
-	
-
+	rm -rf main-* *.o *.a

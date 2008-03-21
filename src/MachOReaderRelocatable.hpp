@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -78,7 +78,6 @@ public:
 
 // forward reference
 template <typename A> class Reader;
-template <typename A> class SymbolAtomSorter;
 
 struct AtomAndOffset
 {
@@ -104,14 +103,13 @@ public:
 	virtual					~Reference() {}
 
 
-	virtual bool			isTargetUnbound() const							{ return ( fToTarget.atom == NULL ); }
-	virtual bool			isFromTargetUnbound() const						{ return ( fFromTarget.atom == NULL ); }
+	virtual ObjectFile::Reference::TargetBinding	getTargetBinding() const;
+	virtual ObjectFile::Reference::TargetBinding	getFromTargetBinding() const;
 	virtual uint8_t			getKind() const									{ return (uint8_t)fKind; }
 	virtual uint64_t		getFixUpOffset() const							{ return fFixUpOffsetInSrc; }
 	virtual const char*		getTargetName() const							{ return (fToTargetName != NULL) ? fToTargetName : fToTarget.atom->getName(); }
 	virtual ObjectFile::Atom& getTarget() const								{ return *fToTarget.atom; }
 	virtual uint64_t		getTargetOffset() const							{ return (int64_t)((int32_t)fToTarget.offset); }
-	virtual bool			hasFromTarget() const							{ return ( (fFromTarget.atom != NULL) || (fFromTargetName != NULL) ); }
 	virtual ObjectFile::Atom& getFromTarget() const							{ return *fFromTarget.atom; }
 	virtual const char*		getFromTargetName() const						{ return (fFromTargetName != NULL) ? fFromTargetName : fFromTarget.atom->getName(); }
 	virtual void			setTarget(ObjectFile::Atom& target, uint64_t offset)	{ fToTarget.atom = &target; fToTarget.offset = offset; }
@@ -122,6 +120,7 @@ public:
 	virtual const char*		getDescription() const;
 	virtual uint64_t		getFromTargetOffset() const						{ return fFromTarget.offset; }
 
+	static bool				fgForFinalLinkedImage;
 
 private:
 	pint_t					fFixUpOffsetInSrc;
@@ -130,8 +129,10 @@ private:
 	const char*				fToTargetName;
 	const char*				fFromTargetName;
 	Kinds					fKind;
+	
 };
 
+template <typename A> bool Reference<A>::fgForFinalLinkedImage = true;
 
 template <typename A>
 Reference<A>::Reference(Kinds kind, const AtomAndOffset& at, const AtomAndOffset& toTarget)
@@ -141,10 +142,12 @@ Reference<A>::Reference(Kinds kind, const AtomAndOffset& at, const AtomAndOffset
 	// make reference a by-name unless:
 	// - the reference type is only used with direct references
 	// - the target is translation unit scoped
+	// - the target kind is not regular (is weak or tentative)
 	if ( (kind != A::kNoFixUp) && (kind != A::kFollowOn) 
-		&& (toTarget.atom->getScope() != ObjectFile::Atom::scopeTranslationUnit) ) {
-		//fprintf(stderr, "Reference(): changing to by-name %p %s, target scope=%d\n", toTarget.atom, fToTargetName, toTarget.atom->getScope());
+		&& (toTarget.atom->getScope() != ObjectFile::Atom::scopeTranslationUnit) 
+		&& (toTarget.atom->getDefinitionKind() != ObjectFile::Atom::kRegularDefinition) ) {
 		fToTargetName = toTarget.atom->getName();
+		//fprintf(stderr, "Reference(): changing to by-name %p %s, target scope=%d, target section=%s\n", toTarget.atom, fToTargetName, toTarget.atom->getScope(), toTarget.atom->getSectionName());
 		fToTarget.atom = NULL;
 	}
 	((class BaseAtom*)at.atom)->addReference(this);
@@ -159,6 +162,7 @@ Reference<A>::Reference(Kinds kind, const AtomAndOffset& at, const AtomAndOffset
 	// make reference a by-name where needed
 	if ( (kind != A::kNoFixUp) && (kind != A::kFollowOn) 
 		&& (toTarget.atom->getScope() != ObjectFile::Atom::scopeTranslationUnit)
+		&& (toTarget.atom->getDefinitionKind() != ObjectFile::Atom::kRegularDefinition) 
 		&& (toTarget.atom != at.atom) ) {
 			fToTargetName = toTarget.atom->getName();
 			fToTarget.atom = NULL;
@@ -176,6 +180,39 @@ Reference<A>::Reference(Kinds kind, const AtomAndOffset& at, const char* toName,
 	fToTarget.offset = toOffset;
 	((class BaseAtom*)at.atom)->addReference(this);
 }
+
+template <typename A>
+ObjectFile::Reference::TargetBinding Reference<A>::getTargetBinding() const
+{
+	if ( fgForFinalLinkedImage ) {
+		if ( (fKind == A::kDtraceProbe) || (fKind == A::kDtraceProbeSite) || (fKind == A::kDtraceIsEnabledSite) || (fKind == A::kDtraceTypeReference) )
+			return ObjectFile::Reference::kDontBind;
+	}
+	if ( fToTarget.atom == NULL ) 
+		return ObjectFile::Reference::kUnboundByName;
+	if ( fToTargetName == NULL ) 
+		return ObjectFile::Reference::kBoundDirectly;
+	else
+		return ObjectFile::Reference::kBoundByName;
+}
+
+template <typename A>
+ObjectFile::Reference::TargetBinding Reference<A>::getFromTargetBinding() const
+{
+	if ( fFromTarget.atom == NULL ) {
+		if ( fFromTargetName == NULL ) 
+			return ObjectFile::Reference::kDontBind;
+		else
+			return ObjectFile::Reference::kUnboundByName;
+	}
+	else {
+		if ( fFromTargetName == NULL ) 
+			return ObjectFile::Reference::kBoundDirectly;
+		else
+			return ObjectFile::Reference::kBoundByName;
+	}
+}
+
 
 
 template <typename A>
@@ -221,6 +258,18 @@ public:
 
 DataSegment DataSegment::fgSingleton;
 
+class LinkEditSegment : public ObjectFile::Segment
+{
+public:
+	virtual const char*			getName() const						{ return "__LINKEDIT"; }
+	virtual bool				isContentReadable() const			{ return true; }
+	virtual bool				isContentWritable() const			{ return false; }
+	virtual bool				isContentExecutable() const			{ return false; }
+
+	static LinkEditSegment			fgSingleton;
+};
+
+LinkEditSegment LinkEditSegment::fgSingleton;
 
 class BaseAtom : public ObjectFile::Atom
 {
@@ -231,9 +280,76 @@ public:
 	virtual void								addReference(ObjectFile::Reference* ref) = 0;
 	virtual void								sortReferences() = 0;
 	virtual void								addLineInfo(const ObjectFile::LineInfo& info) = 0;
+	virtual uint64_t							getObjectAddress() const = 0;
+	virtual uint32_t							getOrdinal() const { return fOrdinal; }
+	virtual void								setOrdinal(uint32_t value) { fOrdinal = value; }
+	virtual const void*							getSectionRecord() const = 0;
+	virtual bool								isAlias() const { return false; }
 
 	uint32_t									fStabsStartIndex;
 	uint32_t									fStabsCount;
+	uint32_t									fOrdinal;
+};
+
+class BaseAtomSorter
+{
+public:
+	bool operator()(const class BaseAtom* left, const class BaseAtom* right)  {
+		if ( left == right )
+			return false;
+		uint64_t leftAddr  =  left->getObjectAddress();
+		uint64_t rightAddr = right->getObjectAddress();
+		if ( leftAddr < rightAddr ) {
+			return true;
+		}
+		else if ( leftAddr > rightAddr ) {
+			return false;
+		}
+		else {
+			// if they have same address, one might be the end of a section and the other the start of the next section
+			const void* leftSection  =  left->getSectionRecord();
+			const void* rightSection =  right->getSectionRecord();
+			if ( leftSection != rightSection ) {
+				return ( leftSection < rightSection );
+			}
+			// if they have same address and section, one might be an alias
+			bool leftAlias  = left->isAlias();
+			bool rightAlias = right->isAlias();
+			if ( leftAlias && rightAlias ) {
+				// sort multiple aliases for same address first by scope
+				ObjectFile::Atom::Scope	leftScope  = left->getScope();
+				ObjectFile::Atom::Scope	rightScope = right->getScope();
+				if ( leftScope != rightScope ) {
+					return ( leftScope < rightScope );
+				}
+				// sort multiple aliases for same address then by name
+				return ( strcmp(left->getName(), right->getName()) < 0 );
+			}
+			else if ( leftAlias ) {
+				return true;
+			}
+			else if ( rightAlias ) {
+				return false;
+			}
+			else {
+				// they must be tentative defintions
+				switch ( left->getDefinitionKind() ) {
+					case ObjectFile::Atom::kTentativeDefinition:
+						// sort tentative definitions by name
+						return ( strcmp(left->getName(), right->getName()) < 0 );
+					case ObjectFile::Atom::kAbsoluteSymbol:
+						// sort absolute symbols with same address by name
+						return ( strcmp(left->getName(), right->getName()) < 0 );
+					default:
+						// hack for rdar://problem/5102873
+						if ( !left->isZeroFill() || !right->isZeroFill() )
+							fprintf(stderr, "ld: atom sorting error for %s and %s in %s\n", left->getDisplayName(), right->getDisplayName(), left->getFile()->getPath());
+						break;
+				}
+			}
+		}
+		return false;
+	}
 };
 
 
@@ -255,23 +371,24 @@ public:
 	virtual ObjectFile::Atom::DefinitionKind	getDefinitionKind() const		{ return ((fSymbol->n_desc() & N_WEAK_DEF) != 0)
 																						? ObjectFile::Atom::kWeakDefinition : ObjectFile::Atom::kRegularDefinition; }
 	virtual SymbolTableInclusion				getSymbolTableInclusion() const	{ return fSymbolTableInclusion; }
-	virtual	bool								dontDeadStrip() const			{ return ((fSymbol->n_desc() & (N_NO_DEAD_STRIP|REFERENCED_DYNAMICALLY)) != 0); }
+	virtual	bool								dontDeadStrip() const;
 	virtual bool								isZeroFill() const				{ return ((fSection->flags() & SECTION_TYPE) == S_ZEROFILL); }
 	virtual uint64_t							getSize() const					{ return fSize; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const			{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual bool								mustRemainInSection() const		{ return true; }
 	virtual const char*							getSectionName() const;
 	virtual Segment<A>&							getSegment() const				{ return *fSegment; }
-	virtual bool								requiresFollowOnAtom() const;
 	virtual ObjectFile::Atom&					getFollowOnAtom() const;
 	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const				{ return (std::vector<ObjectFile::LineInfo>*)&fLineInfo; }
 	virtual ObjectFile::Alignment				getAlignment() const			{ return fAlignment; }
 	virtual void								copyRawContent(uint8_t buffer[]) const;
 	virtual void								setScope(ObjectFile::Atom::Scope newScope)		{ fScope = newScope; }
-	virtual void								setSize(uint64_t size)			{ fSize = size; }
+	virtual void								setSize(uint64_t size);
 	virtual void								addReference(ObjectFile::Reference* ref) { fReferences.push_back((Reference<A>*)ref); }
 	virtual void								sortReferences() { std::sort(fReferences.begin(), fReferences.end(), ReferenceSorter()); }
 	virtual void								addLineInfo(const  ObjectFile::LineInfo& info)	{ fLineInfo.push_back(info); }
+	virtual uint64_t							getObjectAddress() const 		{ return fAddress; }
+	virtual const void*							getSectionRecord() const		{ return (const void*)fSection; }
 
 protected:
 	typedef typename A::P						P;
@@ -282,7 +399,6 @@ protected:
 	typedef typename ReferenceVector::iterator			ReferenceVectorIterator;		// seems to help C++ parser
 	typedef typename ReferenceVector::const_iterator	ReferenceVectorConstIterator;	// seems to help C++ parser
 	friend class Reader<A>;
-	friend class SymbolAtomSorter<A>;
 
 											SymbolAtom(Reader<A>&, const macho_nlist<P>*, const macho_section<P>*);
 	virtual									~SymbolAtom() {}
@@ -388,17 +504,40 @@ SymbolAtom<A>::SymbolAtom(Reader<A>& owner, const macho_nlist<P>* symbol, const 
 		// GCC_except_table* symbols don't need to exist in final linked image
 		fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableNotIn;
 	}
+	else if ( fOwner.fOptions.fForFinalLinkedImage && !fOwner.fOptions.fForStatic && (fOwner.fStrings[fSymbol->n_strx()] == 'l') ) {
+		// labels beginning with a lowercase ell are automatically removed in final linked images <rdar://problem/4571042>
+		// xnu code base uses a lot of asesembly labels that start with 'l', don't strip those (static executable)
+		fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableNotIn;
+	}
 	else {
 		fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableIn;
 	}
 	// compute alignment
 	fAlignment = ObjectFile::Alignment(fSection->align(), fAddress % (1 << fSection->align()));
+	
+	// work around malformed icc generated .o files  <rdar://problem/5349847>
+	// if section starts with a symbol and that symbol address does not match section alignment, then force it to
+	if ( (section->addr() == fAddress) && (fAlignment.modulus != 0) )
+		fAlignment.modulus = 0;
+}
+
+template <typename A>
+bool SymbolAtom<A>::dontDeadStrip() const
+{
+	// the symbol can have a no-dead-strip bit
+	if ( (fSymbol->n_desc() & (N_NO_DEAD_STRIP|REFERENCED_DYNAMICALLY)) != 0 )
+		return true;
+	// or the section can have a no-dead-strip bit
+	return ( fSection->flags() & S_ATTR_NO_DEAD_STRIP );
 }
 
 
 template <typename A>
 const char*	SymbolAtom<A>::getSectionName() const
 {
+	if ( fOwner.fOptions.fForFinalLinkedImage && (strcmp(fSection->sectname(), "__textcoal_nt") == 0) )
+		return "__text";
+	
 	if ( strlen(fSection->sectname()) > 15 ) {
 		static char temp[18];
 		strncpy(temp, fSection->sectname(), 16);
@@ -406,20 +545,6 @@ const char*	SymbolAtom<A>::getSectionName() const
 		return temp;
 	}
 	return fSection->sectname();
-}
-
-template <typename A>
-bool SymbolAtom<A>::requiresFollowOnAtom() const
-{
-	// requires follow-on if built with old compiler and not the last atom
-	if ( (fOwner.fHeader->flags() & MH_SUBSECTIONS_VIA_SYMBOLS) == 0) {
-		for (ReferenceVectorConstIterator it=fReferences.begin(); it != fReferences.end(); it++) {
-			Reference<A>* ref = *it;
-			if ( ref->getKind() == A::kFollowOn )
-				return true;
-		}
-	}
-	return false;
 }
 
 template <typename A>
@@ -434,7 +559,27 @@ ObjectFile::Atom& SymbolAtom<A>::getFollowOnAtom() const
 }
 
 
+class Beyond
+{
+public:
+	Beyond(uint64_t offset) : fOffset(offset) {}
+	bool operator()(ObjectFile::Reference* ref) const {
+		return ( ref->getFixUpOffset() >= fOffset );
+	}
+private:
+	uint64_t fOffset;
+};
 
+
+template <typename A>
+void SymbolAtom<A>::setSize(uint64_t size)
+{
+	// when resizing, any references beyond the new size are tossed
+	if ( (fSize != 0) && (fReferences.size() > 0) ) 
+		fReferences.erase(std::remove_if(fReferences.begin(), fReferences.end(), Beyond(size)), fReferences.end());
+	// set new size
+	fSize = size;
+}
 
 template <typename A>
 void SymbolAtom<A>::copyRawContent(uint8_t buffer[]) const
@@ -448,34 +593,83 @@ void SymbolAtom<A>::copyRawContent(uint8_t buffer[]) const
 	}
 }
 
+//
+// A SymbolAliasAtom represents an alternate name for a SymbolAtom
+//
+//
 template <typename A>
-class SymbolAtomSorter
+class SymbolAliasAtom : public BaseAtom
 {
 public:
-	SymbolAtomSorter(std::map<uint32_t, BaseAtom*>& map) : fMap(map) {}
-	
-	typedef typename A::P::uint_t pint_t;
-	
-	bool operator()(ObjectFile::Atom* left, ObjectFile::Atom* right)
-	{
-		pint_t leftAddr  = ((SymbolAtom<A>*)left)->fAddress;
-		pint_t rightAddr = ((SymbolAtom<A>*)right)->fAddress;
-		if ( leftAddr == rightAddr ) {
-			// two atoms with same address, must have been a function with multiple labels
-			// make sure we sort these so the one with real content (in map) is last
-			std::map<uint32_t, BaseAtom*>::iterator pos = fMap.find(leftAddr);
-			if ( pos != fMap.end() ) {
-				return ( pos->second == right );
-			}
-			return false;
-		}
-		else {
-			return ( leftAddr < rightAddr );
-		}
-	}
-private:
-	std::map<uint32_t, BaseAtom*>&	fMap;
+	virtual ObjectFile::Reader*					getFile() const					{ return fAliasOf.getFile(); }
+	virtual bool								getTranslationUnitSource(const char** dir, const char** name) const
+																				{ return fAliasOf.getTranslationUnitSource(dir, name); }
+	virtual const char*							getName() const					{ return fName; }
+	virtual const char*							getDisplayName() const			{ return fName; }
+	virtual ObjectFile::Atom::Scope				getScope() const				{ return fScope; }
+	virtual ObjectFile::Atom::DefinitionKind	getDefinitionKind() const		{ return fAliasOf.getDefinitionKind(); }
+	virtual SymbolTableInclusion				getSymbolTableInclusion() const	{ return fAliasOf.getSymbolTableInclusion(); }
+	virtual	bool								dontDeadStrip() const			{ return fDontDeadStrip; }
+	virtual bool								isZeroFill() const				{ return fAliasOf.isZeroFill(); }
+	virtual uint64_t							getSize() const					{ return 0; }
+	virtual std::vector<ObjectFile::Reference*>&  getReferences() const			{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
+	virtual bool								mustRemainInSection() const		{ return true; }
+	virtual const char*							getSectionName() const			{ return fAliasOf.getSectionName(); }
+	virtual Segment<A>&							getSegment() const				{ return (Segment<A>&)fAliasOf.getSegment(); }
+	virtual ObjectFile::Atom&					getFollowOnAtom() const			{ return (ObjectFile::Atom&)fAliasOf; }
+	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const				{ return NULL; }
+	virtual ObjectFile::Alignment				getAlignment() const			{ return  fAliasOf.getAlignment(); }
+	virtual void								copyRawContent(uint8_t buffer[]) const {}
+	virtual void								setScope(ObjectFile::Atom::Scope newScope)		{ fScope = newScope; }
+	virtual void								setSize(uint64_t size)			{  }
+	virtual void								addReference(ObjectFile::Reference* ref) { fReferences.push_back((Reference<A>*)ref); }
+	virtual void								sortReferences() { std::sort(fReferences.begin(), fReferences.end(), ReferenceSorter()); }
+	virtual void								addLineInfo(const  ObjectFile::LineInfo& info)	{  }
+	virtual uint64_t							getObjectAddress() const		{ return fAliasOf.getObjectAddress(); }
+	virtual const void*							getSectionRecord() const		{ return fAliasOf.getSectionRecord(); }
+	virtual bool								isAlias() const					{ return true; }
+
+protected:
+	typedef typename A::P						P;
+	typedef typename std::vector<Reference<A>*>			ReferenceVector;
+	typedef typename ReferenceVector::iterator			ReferenceVectorIterator;		// seems to help C++ parser
+	typedef typename ReferenceVector::const_iterator	ReferenceVectorConstIterator;	// seems to help C++ parser
+	friend class Reader<A>;
+
+											SymbolAliasAtom(const char* name, const macho_nlist<P>*, const BaseAtom& );
+	virtual									~SymbolAliasAtom() {}
+
+	const char*									fName;
+	const BaseAtom&								fAliasOf;
+	ObjectFile::Atom::Scope						fScope;
+	bool										fDontDeadStrip;
+	ReferenceVector								fReferences;
 };
+
+
+template <typename A>
+SymbolAliasAtom<A>::SymbolAliasAtom(const char* name, const macho_nlist<P>* symbol, const BaseAtom& aliasOf)
+ : fName(name), fAliasOf(aliasOf)
+{
+	//fprintf(stderr, "SymbolAliasAtom(%p) %s\n", this, name);
+	if ( symbol != NULL ) {
+		uint8_t type =  symbol->n_type();
+		if ( (type & N_EXT) == 0 )
+			fScope = ObjectFile::Atom::scopeTranslationUnit;
+		else if ( (type & N_PEXT) != 0 )
+			fScope = ObjectFile::Atom::scopeLinkageUnit;
+		else
+			fScope = ObjectFile::Atom::scopeGlobal;
+		fDontDeadStrip = ((symbol->n_desc() & (N_NO_DEAD_STRIP|REFERENCED_DYNAMICALLY)) != 0);
+	}
+	else {
+		// aliases defined on the command line are initially global scope
+		fScope = ObjectFile::Atom::scopeGlobal;
+		fDontDeadStrip = false;
+	}
+	// add follow-on reference to real atom	
+	new Reference<A>(A::kFollowOn, AtomAndOffset(this), AtomAndOffset((ObjectFile::Atom*)&aliasOf));
+}
 
 
 //
@@ -501,18 +695,19 @@ public:
 	virtual uint64_t							getSize() const					{ return fSymbol->n_value(); }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const			{ return fgNoReferences; }
 	virtual bool								mustRemainInSection() const		{ return true; }
-	virtual const char*							getSectionName() const			{ return "__common"; }
+	virtual const char*							getSectionName() const;
 	virtual ObjectFile::Segment&				getSegment() const				{ return DataSegment::fgSingleton; }
-	virtual bool								requiresFollowOnAtom() const	{ return false; }
 	virtual ObjectFile::Atom&					getFollowOnAtom() const			{ return *(ObjectFile::Atom*)NULL; }
 	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const				{ return NULL; }
 	virtual ObjectFile::Alignment				getAlignment() const;
 	virtual void								copyRawContent(uint8_t buffer[]) const;
 	virtual void								setScope(ObjectFile::Atom::Scope newScope)		{ fScope = newScope; }
 	virtual void								setSize(uint64_t size)			{ }
-	virtual void								addReference(ObjectFile::Reference* ref) { throw "ld64: can't add references"; }
+	virtual void								addReference(ObjectFile::Reference* ref) { throw "ld: can't add references"; }
 	virtual void								sortReferences() { }
-	virtual void								addLineInfo(const  ObjectFile::LineInfo& info)	{ throw "ld64: can't add line info to tentative definition"; }
+	virtual void								addLineInfo(const  ObjectFile::LineInfo& info)	{ throw "ld: can't add line info to tentative definition"; }
+	virtual uint64_t							getObjectAddress() const		{ return ULLONG_MAX; }
+	virtual const void*							getSectionRecord() const		{ return NULL; }
 
 protected:
 	typedef typename A::P					P;
@@ -557,16 +752,33 @@ TentativeAtom<A>::TentativeAtom(Reader<A>& owner, const macho_nlist<P>* symbol)
 template <typename A>
 ObjectFile::Alignment TentativeAtom<A>::getAlignment() const
 {
-	// common symbols align to their size
-	// that is, a 4-byte common aligns to 4-bytes
-	// to be safe, odd size commons align to the next power-of-2 size
-	uint8_t alignment = (uint8_t)ceil(log2(this->getSize()));
+	uint8_t alignment = GET_COMM_ALIGN(fSymbol->n_desc());
+	if ( alignment == 0 ) {
+		// common symbols align to their size
+		// that is, a 4-byte common aligns to 4-bytes
+		// if this size is not a power of two, 
+		// then round up to the next power of two
+		uint64_t size = this->getSize();
+		alignment = 63 - (uint8_t)__builtin_clzll(size);
+		if ( size != (1ULL << alignment) )
+			++alignment;
+	}
 	// limit alignment of extremely large commons to 2^15 bytes (8-page)
-	if ( alignment < 15 )
+	if ( alignment < 12 )
 		return ObjectFile::Alignment(alignment);
 	else
-		return ObjectFile::Alignment(15);
+		return ObjectFile::Alignment(12);
 }
+
+template <typename A>
+const char* TentativeAtom<A>::getSectionName() const
+{
+	if ( fOwner.fOptions.fForFinalLinkedImage || fOwner.fOptions.fMakeTentativeDefinitionsReal )
+		return "__common"; 
+	else
+		return "._tentdef"; 
+}
+
 
 template <typename A>
 void TentativeAtom<A>::copyRawContent(uint8_t buffer[]) const
@@ -598,7 +810,6 @@ public:
 	virtual bool								mustRemainInSection() const		{ return true; }
 	virtual const char*							getSectionName() const;
 	virtual Segment<A>&							getSegment() const				{ return *fSegment; }
-	virtual bool								requiresFollowOnAtom() const;
 	virtual ObjectFile::Atom&					getFollowOnAtom() const;
 	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const				{ return NULL; }
 	virtual ObjectFile::Alignment				getAlignment() const;
@@ -607,10 +818,13 @@ public:
 	virtual void								setSize(uint64_t size)			{ fSize = size; }
 	virtual void								addReference(ObjectFile::Reference* ref) { fReferences.push_back((Reference<A>*)ref); }
 	virtual void								sortReferences() { std::sort(fReferences.begin(), fReferences.end(), ReferenceSorter()); }
-	virtual void								addLineInfo(const  ObjectFile::LineInfo& info) { fprintf(stderr, "ld64: can't add line info to anonymous symbol %s from %s\n", this->getDisplayName(), this->getFile()->getPath()); }
+	virtual void								addLineInfo(const  ObjectFile::LineInfo& info) { fprintf(stderr, "ld: can't add line info to anonymous symbol %s from %s\n", this->getDisplayName(), this->getFile()->getPath()); }
+	virtual uint64_t							getObjectAddress() const		{ return fAddress; }
+	virtual const void*							getSectionRecord() const		{ return (const void*)fSection; }
 	BaseAtom*									redirectTo()					{ return fRedirect; }
 	bool										isWeakImportStub()				{ return fWeakImportStub; }
-
+	void										resolveName();
+	
 protected:
 	typedef typename A::P						P;
 	typedef typename A::P::E					E;
@@ -623,9 +837,11 @@ protected:
 
 											AnonymousAtom(Reader<A>&, const macho_section<P>*, uint32_t addr, uint32_t size);
 	virtual									~AnonymousAtom() {}
+	static bool									cstringsHaveLabels();
 
 	Reader<A>&									fOwner;
 	const char*									fSynthesizedName;
+	const char*									fDisplayName;
 	const macho_section<P>*						fSection;
 	uint32_t									fAddress;
 	uint32_t									fSize;
@@ -640,25 +856,27 @@ protected:
 
 template <typename A>
 AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* section, uint32_t addr, uint32_t size)
- : fOwner(owner), fSynthesizedName(NULL), fSection(section), fAddress(addr), fSize(size), fSegment(NULL), fDontDeadStrip(true),
-	fWeakImportStub(false), fSymbolTableInclusion(ObjectFile::Atom::kSymbolTableNotIn),
+ : fOwner(owner), fSynthesizedName(NULL), fDisplayName(NULL), fSection(section), fAddress(addr), fSize(size), 
+	fSegment(NULL), fDontDeadStrip(true), fWeakImportStub(false), fSymbolTableInclusion(ObjectFile::Atom::kSymbolTableNotIn),
 	fScope(ObjectFile::Atom::scopeTranslationUnit)
 {
 	fSegment = new Segment<A>(fSection);
 	fRedirect = this;
 	uint8_t type = fSection->flags() & SECTION_TYPE;
+	//fprintf(stderr, "AnonymousAtom(%p) addr=0x%X in %s from %s\n", this, addr, section->sectname(), owner.getPath());
 	switch ( type ) {
 		case S_ZEROFILL:
 			{
 				asprintf((char**)&fSynthesizedName, "zero-fill-at-0x%08X", addr);
 			}
 			break;
+		case S_COALESCED:
 		case S_REGULAR:
 			if ( (strcmp(section->sectname(), "__class") == 0) && (strcmp(section->segname(), "__OBJC") == 0) && owner.fAppleObjc ) {
 				// special case ObjC classes to synthesize .objc_class_name_* symbols, for Apple runtime only
-				uint32_t classNameAddr =  P::getP(*(pint_t*)(((uint8_t*)owner.fHeader) + section->offset() + addr + 2*sizeof(pint_t) - section->addr()));
-				const char* str = (char*)(owner.fHeader) + section->offset() + classNameAddr - section->addr();
-				asprintf((char**)&fSynthesizedName, ".objc_class_name_%s", str);
+				fSynthesizedName = ".objc_class_name_PENDING";
+				owner.fAtomsPendingAName.push_back(this);
+				owner.fSectionsWithAtomsPendingAName.insert(fSection);
 				if ( fOwner.fOptions.fForFinalLinkedImage ) 
 					fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableIn;
 				else
@@ -677,6 +895,8 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 				asprintf((char**)&fSynthesizedName, "cstring=%s", str);
 				fScope = ObjectFile::Atom::scopeLinkageUnit;
 				fDontDeadStrip = false;
+				if ( !fOwner.fOptions.fForFinalLinkedImage && cstringsHaveLabels() ) 
+					fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableIn;
 			}
 			break;
 		case S_4BYTE_LITERALS:
@@ -706,10 +926,13 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 			break;
 		case S_LITERAL_POINTERS:
 			{
-				uint32_t literalNameAddr =  P::getP(*(pint_t*)(((uint8_t*)owner.fHeader) + section->offset() + addr - section->addr()));
-				const char* str = (char*)(owner.fHeader) + section->offset() + literalNameAddr - section->addr();
-				asprintf((char**)&fSynthesizedName, "literal-pointer@%s@%s@%s", section->segname(), section->sectname(), str);
+				//uint32_t literalNameAddr =  P::getP(*(pint_t*)(((uint8_t*)owner.fHeader) + section->offset() + addr - section->addr()));
+				//const char* str = (char*)(owner.fHeader) + section->offset() + literalNameAddr - section->addr();
+				//asprintf((char**)&fSynthesizedName, "literal-pointer@%s@%s@%s", section->segname(), section->sectname(), str);
+				fSynthesizedName = "literal-pointer-name-PENDING";
 				fScope = ObjectFile::Atom::scopeLinkageUnit;
+				owner.fAtomsPendingAName.push_back(this);
+				owner.fSectionsWithAtomsPendingAName.insert(fSection);
 			}
 			break;
 		case S_MOD_INIT_FUNC_POINTERS:
@@ -731,12 +954,16 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 				fWeakImportStub = fOwner.isWeakImportSymbol(sym);
 				// sometimes the compiler gets confused and generates a stub to a static function
 				// if so, we should redirect any call to the stub to be calls to the real static function atom
-				if ( ((sym->n_type() & N_TYPE) != N_UNDF) && ((sym->n_desc() & N_WEAK_DEF) == 0) ) {
+				if ( ((sym->n_type() & N_TYPE) != N_UNDF) && ((sym->n_type() & N_EXT) == 0) ) {
 					BaseAtom* staticAtom = fOwner.findAtomByName(fSynthesizedName);
-					if ( staticAtom != NULL )
+					if ( staticAtom != NULL ) 
 						fRedirect = staticAtom;
 				}
-				fScope = ObjectFile::Atom::scopeLinkageUnit;
+				// might be a spurious stub for a static function, make stub static too
+				if ( (sym->n_type() & N_EXT) == 0 ) 
+					fScope = ObjectFile::Atom::scopeTranslationUnit;
+				else
+					fScope = ObjectFile::Atom::scopeLinkageUnit;
 			}
 			break;
 		case S_LAZY_SYMBOL_POINTERS:
@@ -752,23 +979,40 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 					uint32_t fileOffset = fSection->offset() - fSection->addr() + fAddress;
 					pint_t nonLazyPtrValue = P::getP(*((pint_t*)((char*)(fOwner.fHeader)+fileOffset)));
 					// All atoms not created yet, so we need to scan symbol table
+					const macho_nlist<P>* closestSym = NULL; 
 					const macho_nlist<P>* end = &fOwner.fSymbols[fOwner.fSymbolCount];
 					for (const macho_nlist<P>* sym =  fOwner.fSymbols; sym < end; ++sym) {
 						if ( ((sym->n_type() & N_TYPE) == N_SECT) 
-						 && ((sym->n_type() & N_STAB) == 0) 
-						 && (sym->n_value() == nonLazyPtrValue) ) {
-							const char* name = &fOwner.fStrings[sym->n_strx()];
-							char* str = new char[strlen(name)+16];
-							strcpy(str, name);
-							strcat(str, "$non_lazy_ptr");
-							fSynthesizedName = str;
-							// add direct reference to target later, because its atom may not be constructed yet
-							fOwner.fLocalNonLazys.push_back(this);
-							fScope = ObjectFile::Atom::scopeTranslationUnit;
-							return;
+						 && ((sym->n_type() & N_STAB) == 0) ) {
+							if ( sym->n_value() == nonLazyPtrValue ) {
+								const char* name = &fOwner.fStrings[sym->n_strx()];
+								char* str = new char[strlen(name)+16];
+								strcpy(str, name);
+								strcat(str, "$non_lazy_ptr");
+								fSynthesizedName = str;
+								// add direct reference to target later, because its atom may not be constructed yet
+								fOwner.fLocalNonLazys.push_back(this);
+								fScope = ObjectFile::Atom::scopeTranslationUnit;
+								return;
+							}
+							else if ( (sym->n_value() < nonLazyPtrValue) && ((closestSym == NULL) || (sym->n_value() > closestSym->n_value())) ) {
+								closestSym = sym;
+							}
 						}
 					}
-					throwf("malformed .o file: non-lazy-pointer at address 0x%08X with value 0x%0llX missing symbol", addr, (uint64_t)nonLazyPtrValue);
+					// add direct reference to target later, because its atom may not be constructed yet
+					if ( closestSym != NULL ) {
+						const char* name = &fOwner.fStrings[closestSym->n_strx()];
+						char* str;
+						asprintf(&str, "%s+%u$non_lazy_ptr", name, nonLazyPtrValue - closestSym->n_value());
+						fSynthesizedName = str;
+					}
+					else {
+						fSynthesizedName = "$interior$non_lazy_ptr";
+					}
+					fScope = ObjectFile::Atom::scopeTranslationUnit;
+					fOwner.fLocalNonLazys.push_back(this);
+					return;
 				}
 				const macho_nlist<P>* targetSymbol = &fOwner.fSymbols[symbolIndex];
 				const char* name = &fOwner.fStrings[targetSymbol->n_strx()];
@@ -780,6 +1024,14 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 					strcat(str, "$non_lazy_ptr");
 				fSynthesizedName = str;
 
+				// optimize __IMPORT segment out of i386 dyld
+				if ( fOwner.fOptions.fForDyld  && (strcmp(fSection->segname(),"__IMPORT") == 0) ) {
+					macho_section<P>* dummySection = new macho_section<P>(*fSection);
+					dummySection->set_segname("__DATA");
+					fSection = dummySection;
+					fSegment = new Segment<A>(fSection);
+				}
+				
 				if ( (targetSymbol->n_type() & N_EXT) == 0 ) {
 					// target is translation unit scoped, so add direct reference to target
 					//fOwner.makeReference(A::kPointer, addr, targetSymbol->n_value());
@@ -799,6 +1051,47 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 	//fprintf(stderr, "AnonymousAtom(%p) %s \n", this, this->getDisplayName());
 }
 
+// x86_64 uses L labels on cstrings to allow relocs with addends
+template <> bool AnonymousAtom<x86_64>::cstringsHaveLabels() { return true; }
+template <typename A> bool AnonymousAtom<A>::cstringsHaveLabels() { return false; }
+
+
+template <typename A>
+void AnonymousAtom<A>::resolveName()
+{
+	if ( (strcmp(fSection->sectname(), "__class") == 0) && (strcmp(fSection->segname(), "__OBJC") == 0) ) {
+		std::vector<ObjectFile::Reference*>&  references = this->getReferences();
+		// references are not yet sorted, so scan the vector
+		for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
+			if ( ((*rit)->getFixUpOffset() == sizeof(pint_t)) && ((*rit)->getKind() == A::kPointer) ) {
+				const char* superStr = (*rit)->getTargetName();
+				if ( strncmp(superStr, "cstring=", 8) == 0 ) {
+					const char* superClassName;
+					asprintf((char**)&superClassName, ".objc_class_name_%s", &superStr[8]);
+					new Reference<A>(A::kNoFixUp, AtomAndOffset(this), superClassName, 0);
+				}
+				break;
+			}
+		}
+		for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
+			if ( ((*rit)->getFixUpOffset() == 2*sizeof(pint_t)) && ((*rit)->getKind() == A::kPointer) ) {
+				const char* classStr = (*rit)->getTargetName();
+				if ( strncmp(classStr, "cstring=", 8) == 0 ) {
+					asprintf((char**)&fSynthesizedName, ".objc_class_name_%s", &classStr[8]);
+				}
+				break;
+			}
+		}
+	}
+	else if ( (fSection->flags() & SECTION_TYPE) == S_LITERAL_POINTERS) {
+		ObjectFile::Reference* ref = this->getReferences()[0];
+		const char* str = ref->getTargetName();
+		if ( strncmp(str, "cstring=", 8) == 0 ) {
+			asprintf((char**)&fSynthesizedName, "literal-pointer@%s@%s@%s", fSection->segname(), fSection->sectname(), &str[8]);
+		}
+	}
+}
+
 
 template <typename A>
 const char* AnonymousAtom<A>::getDisplayName() const
@@ -806,16 +1099,19 @@ const char* AnonymousAtom<A>::getDisplayName() const
 	if ( fSynthesizedName != NULL )
 		return fSynthesizedName;
 
-	static char temp[512];
+	if ( fDisplayName != NULL )
+		return fDisplayName;
+
 	if ( (fSection->flags() & SECTION_TYPE) == S_CSTRING_LITERALS ) {
 		uint32_t fileOffset = fSection->offset() - fSection->addr() + fAddress;
-		sprintf(temp, "atom string literal: \"%s\"", (char*)(fOwner.fHeader)+fileOffset);
+		asprintf((char**)&fDisplayName, "atom string literal: \"%s\"", (char*)(fOwner.fHeader)+fileOffset);
 	}
 	else {
-		sprintf(temp, "%s@%d", fSection->sectname(), fAddress - (uint32_t)fSection->addr() );
+		asprintf((char**)&fDisplayName, "%s@%d", fSection->sectname(), fAddress - (uint32_t)fSection->addr() );
 	}
-	return temp;
+	return fDisplayName;
 }
+
 
 template <typename A>
 ObjectFile::Atom::Scope AnonymousAtom<A>::getScope() const
@@ -832,9 +1128,14 @@ ObjectFile::Atom::DefinitionKind AnonymousAtom<A>::getDefinitionKind() const
 		case S_4BYTE_LITERALS:
 		case S_8BYTE_LITERALS:
 		case S_16BYTE_LITERALS:
-		case S_NON_LAZY_SYMBOL_POINTERS:
+		case S_SYMBOL_STUBS:
 		case S_LITERAL_POINTERS:
 			return ObjectFile::Atom::kWeakDefinition;
+		case S_NON_LAZY_SYMBOL_POINTERS:
+			if ( fScope == ObjectFile::Atom::scopeTranslationUnit )
+				return ObjectFile::Atom::kRegularDefinition;
+			else
+				return ObjectFile::Atom::kWeakDefinition;
 		default:
 			return ObjectFile::Atom::kRegularDefinition;
 	}
@@ -871,24 +1172,14 @@ ObjectFile::Alignment AnonymousAtom<A>::getAlignment() const
 			return ObjectFile::Alignment(4);
 		case S_NON_LAZY_SYMBOL_POINTERS:
 			return ObjectFile::Alignment((uint8_t)log2(sizeof(pint_t)));
+		case S_CSTRING_LITERALS:
+			if ( ! fOwner.fOptions.fForFinalLinkedImage )
+				return ObjectFile::Alignment(fSection->align());
 		default:
 			return ObjectFile::Alignment(fSection->align(), fAddress % (1 << fSection->align()));
 	}
 }
 
-template <typename A>
-bool AnonymousAtom<A>::requiresFollowOnAtom() const
-{
-	// requires follow-on if built with old compiler and not the last atom
-	if ( (fOwner.fHeader->flags() & MH_SUBSECTIONS_VIA_SYMBOLS) == 0) {
-		for (ReferenceVectorConstIterator it=fReferences.begin(); it != fReferences.end(); it++) {
-			Reference<A>* ref = *it;
-			if ( ref->getKind() == A::kFollowOn )
-				return true;
-		}
-	}
-	return false;
-}
 
 template <typename A>
 ObjectFile::Atom& AnonymousAtom<A>::getFollowOnAtom() const
@@ -914,6 +1205,78 @@ void AnonymousAtom<A>::copyRawContent(uint8_t buffer[]) const
 }
 
 
+//
+// An AbsoluteAtom represents an N_ABS symbol which can only be created in 
+// assembly language and usable by static executables such as the kernel/
+//
+template <typename A>
+class AbsoluteAtom : public BaseAtom
+{
+public:
+	virtual ObjectFile::Reader*					getFile() const					{ return &fOwner; }
+	virtual bool								getTranslationUnitSource(const char** dir, const char** name) const
+																				{ return fOwner.getTranslationUnitSource(dir, name); }
+	virtual const char*							getName() const					{ return &fOwner.fStrings[fSymbol->n_strx()]; }
+	virtual const char*							getDisplayName() const			{ return getName(); }
+	virtual ObjectFile::Atom::Scope				getScope() const				{ return fScope; }
+	virtual ObjectFile::Atom::DefinitionKind	getDefinitionKind() const		{ return ObjectFile::Atom::kAbsoluteSymbol; }
+	virtual bool								isZeroFill() const				{ return false; }
+	virtual SymbolTableInclusion				getSymbolTableInclusion() const	{ return ObjectFile::Atom::kSymbolTableInAsAbsolute; }
+	virtual	bool								dontDeadStrip() const			{ return false; }
+	virtual uint64_t							getSize() const					{ return 0; }
+	virtual std::vector<ObjectFile::Reference*>&  getReferences() const			{ return fgNoReferences; }
+	virtual bool								mustRemainInSection() const		{ return true; }
+	virtual const char*							getSectionName() const			{ return "._absolute"; } 
+	virtual ObjectFile::Segment&				getSegment() const				{ return LinkEditSegment::fgSingleton; }
+	virtual ObjectFile::Atom&					getFollowOnAtom() const			{ return *(ObjectFile::Atom*)NULL; }
+	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const				{ return NULL; }
+	virtual ObjectFile::Alignment				getAlignment() const			{ return ObjectFile::Alignment(0); }
+	virtual void								copyRawContent(uint8_t buffer[]) const	{ }
+	virtual void								setScope(ObjectFile::Atom::Scope newScope)		{ fScope = newScope; }
+	virtual void								setSize(uint64_t size)			{ }
+	virtual void								addReference(ObjectFile::Reference* ref) { throw "ld: can't add references"; }
+	virtual void								sortReferences()				{ }
+	virtual void								addLineInfo(const  ObjectFile::LineInfo& info)	{ throw "ld: can't add line info to tentative definition"; }
+	virtual uint64_t							getObjectAddress() const		{ return fSymbol->n_value(); }
+	virtual void								setSectionOffset(uint64_t offset) { /* don't let fSectionOffset be altered*/ }
+	virtual const void*							getSectionRecord() const		{ return NULL; }
+
+protected:
+	typedef typename A::P					P;
+	typedef typename A::P::E				E;
+	typedef typename A::P::uint_t			pint_t;
+	typedef typename A::ReferenceKinds		Kinds;
+	friend class Reader<A>;
+
+											AbsoluteAtom(Reader<A>&, const macho_nlist<P>*);
+	virtual									~AbsoluteAtom() {}
+
+	Reader<A>&									fOwner;
+	const macho_nlist<P>*						fSymbol;
+	ObjectFile::Atom::Scope						fScope;
+	static std::vector<ObjectFile::Reference*>	fgNoReferences;
+};
+
+template <typename A>
+std::vector<ObjectFile::Reference*> AbsoluteAtom<A>::fgNoReferences;
+
+template <typename A>
+AbsoluteAtom<A>::AbsoluteAtom(Reader<A>& owner, const macho_nlist<P>* symbol)
+ : fOwner(owner), fSymbol(symbol)
+{
+	// store absolute adress in fSectionOffset
+	fSectionOffset = symbol->n_value();
+	// compute scope
+	uint8_t type =  symbol->n_type();
+	if ( (type & N_EXT) == 0 )
+		fScope = ObjectFile::Atom::scopeTranslationUnit;
+	else if ( (type & N_PEXT) != 0 )
+		fScope = ObjectFile::Atom::scopeLinkageUnit;
+	else
+		fScope = ObjectFile::Atom::scopeGlobal;
+	//fprintf(stderr, "AbsoluteAtom(%p) %s\n", this, this->getDisplayName());
+}
+
 
 
 template <typename A>
@@ -921,9 +1284,8 @@ class Reader : public ObjectFile::Reader
 {
 public:
 	static bool										validFile(const uint8_t* fileContent);
-	static Reader<A>*								make(const uint8_t* fileContent, const char* path, time_t modTime,
-															const ObjectFile::ReaderOptions& options)
-														{ return new Reader<A>(fileContent, path, modTime, options); }
+													Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
+														const ObjectFile::ReaderOptions& options, uint32_t ordinalBase);
 	virtual											~Reader() {}
 
 	virtual const char*								getPath()				{ return fPath; }
@@ -932,6 +1294,10 @@ public:
 	virtual std::vector<class ObjectFile::Atom*>&	getAtoms()				{ return (std::vector<class ObjectFile::Atom*>&)(fAtoms); }
 	virtual std::vector<class ObjectFile::Atom*>*	getJustInTimeAtomsFor(const char* name) { return NULL; }
 	virtual std::vector<Stab>*						getStabs()				{ return &fStabs; }
+	virtual ObjectFile::Reader::ObjcConstraint		getObjCConstraint()		{ return fObjConstraint; }
+	virtual ObjectFile::Reader::CpuConstraint		getCpuConstraint()		{ return fCpuConstraint; }
+	virtual bool									canScatterAtoms()		{ return (fHeader->flags() & MH_SUBSECTIONS_VIA_SYMBOLS); }
+	virtual bool									objcReplacementClasses(){ return fReplacementClasses; }
 
 	 bool											getTranslationUnitSource(const char** dir, const char** name) const;
 
@@ -944,8 +1310,10 @@ private:
 	typedef typename A::ReferenceKinds			Kinds;
 	friend class AnonymousAtom<A>;
 	friend class TentativeAtom<A>;
+	friend class AbsoluteAtom<A>;
 	friend class SymbolAtom<A>;
-												Reader(const uint8_t* fileContent, const char* path, time_t modTime, const ObjectFile::ReaderOptions& options);
+
+	void										addReferencesForSection(const macho_section<P>* sect);
 	bool										addRelocReference(const macho_section<P>* sect, const macho_relocation_info<P>* reloc);
 	bool										addRelocReference_powerpc(const macho_section<P>* sect, const macho_relocation_info<P>* reloc);
 	Kinds										pointerDiffKindForLength_powerpc(uint8_t r_length);
@@ -963,11 +1331,14 @@ private:
 	Reference<A>*								makeReferenceToEH(const char* ehName, pint_t ehAtomAddress, const macho_section<P>* ehSect);
 	Reference<A>*								makeReferenceToSymbol(Kinds kind, uint32_t atAddr, const macho_nlist<P>* toSymbol, uint32_t toOffset);
 	void										validSectionType(uint8_t type);
+	void										addDtraceExtraInfos(uint32_t probeAddr, const char* providerName);
+	void										setCpuConstraint(uint32_t cpusubtype);
 
 	BaseAtom*									findAtomByName(const char*);
 
 	const char*									fPath;
 	time_t										fModTime;
+	uint32_t									fOrdinalBase;
 	const ObjectFile::ReaderOptions&			fOptions;
 	const macho_header<P>*						fHeader;
 	const char*									fStrings;
@@ -975,9 +1346,13 @@ private:
 	uint32_t									fSymbolCount;
 	const macho_segment_command<P>*				fSegment;
 	const uint32_t*								fIndirectTable;
-	std::vector<ObjectFile::Atom*>				fAtoms;
+	std::vector<BaseAtom*>						fAtoms;
 	std::map<uint32_t, BaseAtom*>				fAddrToAtom;
+	std::map<uint32_t, BaseAtom*>				fAddrToAbsoluteAtom;
 	std::vector<class AnonymousAtom<A>*>		fLocalNonLazys;
+	std::vector<class AnonymousAtom<A>*>		fAtomsPendingAName;
+	std::set<const macho_section<P>*>			fSectionsWithAtomsPendingAName;
+	std::vector<const char*>					fDtraceProviderInfo;
 	ObjectFile::Reader::DebugInfoKind			fDebugInfo;
 	bool										fHasUUID;
 	const macho_section<P>*						fDwarfDebugInfoSect;
@@ -988,21 +1363,35 @@ private:
 	std::map<uint32_t,const char*>				fDwarfIndexToFile;
 	std::vector<Stab>							fStabs;
 	bool										fAppleObjc;
+	bool										fHasDTraceProbes;
+	bool										fHaveIndirectSymbols;
+	bool										fReplacementClasses;
+	ObjectFile::Reader::ObjcConstraint			fObjConstraint;
+	ObjectFile::Reader::CpuConstraint			fCpuConstraint;
 };
 
 template <typename A>
-Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, const ObjectFile::ReaderOptions& options)
-	: fPath(strdup(path)), fModTime(modTime), fOptions(options), fHeader((const macho_header<P>*)fileContent),
+Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, const ObjectFile::ReaderOptions& options, uint32_t ordinalBase)
+	: fPath(strdup(path)), fModTime(modTime), fOrdinalBase(ordinalBase), fOptions(options), fHeader((const macho_header<P>*)fileContent),
 	 fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fSegment(NULL), fIndirectTable(NULL),
-	 fDebugInfo(kDebugInfoNone), fHasUUID(false), fDwarfDebugInfoSect(NULL), fDwarfDebugAbbrevSect(NULL),
-	  fDwarfTranslationUnitDir(NULL), fDwarfTranslationUnitFile(NULL), fAppleObjc(false)
+	 fDebugInfo(kDebugInfoNone), fHasUUID(false), fDwarfDebugInfoSect(NULL), fDwarfDebugAbbrevSect(NULL), fDwarfDebugLineSect(NULL),
+	  fDwarfTranslationUnitDir(NULL), fDwarfTranslationUnitFile(NULL), fAppleObjc(false), fHasDTraceProbes(false),
+	  fHaveIndirectSymbols(false), fReplacementClasses(false), 
+	  fObjConstraint(ObjectFile::Reader::kObjcNone), fCpuConstraint(ObjectFile::Reader::kCpuAny) 
 {
 	// sanity check
 	if ( ! validFile(fileContent) )
 		throw "not a valid mach-o object file";
 
+	Reference<A>::fgForFinalLinkedImage = options.fForFinalLinkedImage;
+
+	// write out path for -t or -whatsloaded option
+	if ( options.fLogObjectFiles || options.fLogAllFiles )
+		printf("%s\n", path);
+
 	// cache intersting pointers
 	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	this->setCpuConstraint(header->cpusubtype());
 	const uint32_t cmd_count = header->ncmds();
 	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((char*)header + sizeof(macho_header<P>));
 	const macho_load_command<P>* cmd = cmds;
@@ -1016,6 +1405,10 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 					fSymbolCount = symtab->nsyms();
 					fSymbols = (const macho_nlist<P>*)((char*)header + symtab->symoff());
 					fStrings = (char*)header + symtab->stroff();
+					if ( undefinedEndIndex == 0 ) {
+						undefinedStartIndex = 0;
+						undefinedEndIndex = symtab->nsyms();
+					}
 				}
 				break;
 			case LC_DYSYMTAB:
@@ -1046,66 +1439,89 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 
 	// add all atoms that have entries in symbol table
 	const macho_section<P>* sections = (macho_section<P>*)((char*)fSegment + sizeof(macho_segment_command<P>));
-	for (uint32_t i=0; i < fSymbolCount; ++i) {
+	for (int i=fSymbolCount-1; i >= 0 ; --i) {
+		// walk backwards through symbol table so globals are see before locals, otherwise a local alias would beome the reaal name
 		const macho_nlist<P>& sym = fSymbols[i];
 		if ( (sym.n_type() & N_STAB) == 0 ) {
 			uint8_t type =  (sym.n_type() & N_TYPE);
 			if ( type == N_SECT ) {
 				const macho_section<P>* section	= &sections[sym.n_sect()-1];
+				pint_t sectionEndAddr = section->addr() + section->size();
 				bool suppress = false;
 				// ignore atoms in debugger sections
 				if ( (section->flags() & S_ATTR_DEBUG) == 0 ) {
-					// ignore labels for atoms in other sections
-					switch ( section->flags() & SECTION_TYPE ) {
-						case S_REGULAR:
-							if ( (sym.n_desc() & N_WEAK_DEF) && strcmp(section->sectname(), "__picsymbolstub1__TEXT") == 0 )
-								suppress = true; // ignore stubs in crt1.o built by old ld64 that was missing S_SYMBOL_STUBS
-						case S_ZEROFILL:
-						case S_COALESCED:
-						case S_4BYTE_LITERALS:
-						case S_8BYTE_LITERALS:
-						case S_16BYTE_LITERALS:
-						case S_CSTRING_LITERALS:
-							{
-								BaseAtom* newAtom = new SymbolAtom<A>(*this, &sym, section);
-								std::map<uint32_t, BaseAtom*>::iterator pos = fAddrToAtom.find(sym.n_value());
-								if ( pos != fAddrToAtom.end() ) {
-									// another label to an existing address
-									// make this one be the real one and followed by the previous 
-									BaseAtom* existingAtom = pos->second;
-									//fprintf(stderr, "new atom %s has same address as existing atom %s\n", newAtom->getDisplayName(), existingAtom->getDisplayName());
-									new Reference<A>(A::kFollowOn, AtomAndOffset(newAtom), AtomAndOffset(existingAtom));
-									newAtom->setSize(0);
-								}
-								else {
-									fAddrToAtom[sym.n_value()] = newAtom;
-								}
-								if ( ! suppress )
-									fAtoms.push_back(newAtom);
-								}
-							break;
-						case S_SYMBOL_STUBS:
-						case S_LAZY_SYMBOL_POINTERS:
-						case S_NON_LAZY_SYMBOL_POINTERS:
-							// ignore symboled stubs produces by old ld64
-							break;
-						default:
-							fprintf(stderr, "ld64 warning: symbol %s found in unsupported section in %s\n",
-								&fStrings[sym.n_strx()], this->getPath());
+					if ( strncmp(&fStrings[sym.n_strx()], "__dtrace_probe$", 15) == 0 ) {
+						// ignore dtrace probe labels 
+						fHasDTraceProbes = true;
+					}
+					else if ( fStrings[sym.n_strx()] == 'L' ) {
+						// ignore L labels, <rdar://problem/3962731>
+					}
+					else {
+						// ignore labels for atoms in other sections
+						switch ( section->flags() & SECTION_TYPE ) {
+							case S_REGULAR:
+								if ( (sym.n_desc() & N_WEAK_DEF) && strcmp(section->sectname(), "__picsymbolstub1__TEXT") == 0 )
+									suppress = true; // ignore stubs in crt1.o built by old ld64 that was missing S_SYMBOL_STUBS
+							case S_ZEROFILL:
+							case S_COALESCED:
+							case S_4BYTE_LITERALS:
+							case S_8BYTE_LITERALS:
+							case S_16BYTE_LITERALS:
+							case S_CSTRING_LITERALS:
+								{
+									BaseAtom* newAtom;
+									std::map<uint32_t, BaseAtom*>::iterator pos = fAddrToAtom.find(sym.n_value());
+									if ( (pos != fAddrToAtom.end()) && (strcmp(pos->second->getSectionName(), section->sectname())==0) ) {
+										// another label to an existing address in the same section, make this an alias
+										newAtom = new SymbolAliasAtom<A>(&fStrings[sym.n_strx()], &sym, *pos->second);
+									}
+									else {
+										// make SymbolAtom atom for this address
+										newAtom = new SymbolAtom<A>(*this, &sym, section);
+										// don't add symbols at end of section to addr->atom map
+										if ( sym.n_value() != sectionEndAddr )
+											fAddrToAtom[sym.n_value()] = newAtom;
+									}
+									if ( ! suppress )
+										fAtoms.push_back(newAtom);
+									}
+								break;
+							case S_SYMBOL_STUBS:
+							case S_LAZY_SYMBOL_POINTERS:
+							case S_NON_LAZY_SYMBOL_POINTERS:
+								// ignore symboled stubs produces by old ld64
+								break;
+							default:
+								fprintf(stderr, "ld: warning symbol %s found in unsupported section in %s\n",
+									&fStrings[sym.n_strx()], this->getPath());
+						}
 					}
 				}
 			}
 			else if ( (type == N_UNDF) && (sym.n_value() != 0) ) {
 				fAtoms.push_back(new TentativeAtom<A>(*this, &sym));
 			}
-			else if ( (type == N_ABS) && (strncmp(&fStrings[sym.n_strx()], ".objc_class_name_", 16) == 0) ) {
-				fAppleObjc = true;
+			else if ( type == N_ABS ) {
+				const char* symName = &fStrings[sym.n_strx()];
+				if ( strncmp(symName, ".objc_class_name_", 16) == 0 ) {
+					// ignore .objc_class_name_* symbols 
+					fAppleObjc = true;
+				}
+				else if ( strcmp(&symName[strlen(symName)-3], ".eh") == 0 ) {
+					// ignore empty *.eh symbols
+				}
+				else {
+					BaseAtom* abAtom = new AbsoluteAtom<A>(*this, &sym);
+					fAtoms.push_back(abAtom);
+					fAddrToAbsoluteAtom[sym.n_value()] = abAtom;
+				}
+			}
+			else if ( type == N_INDR ) {
+				fHaveIndirectSymbols = true;
 			}
 		}
 	}
-
-	// sort SymbolAtoms by address
-	std::sort(fAtoms.begin(), fAtoms.end(), SymbolAtomSorter<A>(fAddrToAtom));
 
 	// add all fixed size anonymous atoms from special sections
 	for (const macho_section<P>* sect=sectionsStart; sect < sectionsEnd; ++sect) {
@@ -1146,7 +1562,36 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 					// gcc sometimes over aligns class structure
 					uint32_t align = 1 << sect->align();
 					atomSize = ((12 * sizeof(pint_t)) + align-1) & (-align);
+				}
+				// get objc Garbage Collection info
+				else if ( ((strcmp(sect->sectname(), "__image_info") == 0) && (strcmp(sect->segname(), "__OBJC") == 0))
+					   || ((strncmp(sect->sectname(), "__objc_imageinfo", 16) == 0) && (strcmp(sect->segname(), "__DATA") == 0)) ) {
+					//	struct objc_image_info  {
+					//		uint32_t	version;	// initially 0
+					//		uint32_t	flags;
+					//	};
+					// #define OBJC_IMAGE_SUPPORTS_GC   2
+					// #define OBJC_IMAGE_GC_ONLY       4
+					//
+					const uint32_t* contents = (uint32_t*)(((char*)fHeader) + sect->offset());
+					if ( (sect->size() >= 8) && (contents[0] == 0) ) {
+						uint32_t flags = E::get32(contents[1]);
+						if ( (flags & 4) == 4 )
+							fObjConstraint = ObjectFile::Reader::kObjcGC;
+						else if ( (flags & 2) == 2 )
+							fObjConstraint = ObjectFile::Reader::kObjcRetainReleaseOrGC;
+						else
+							fObjConstraint = ObjectFile::Reader::kObjcRetainRelease;
+						if ( (flags & 1) == 1 )
+							fReplacementClasses = true;
+						// don't make atom for this section
+						atomSize = sect->size();
+						suppress = true;
 					}
+					else {
+						fprintf(stderr, "can't parse __OBJC/__image_info section in %s\n", fPath);
+					}
+				}
 				break;
 		}
 		if ( atomSize != 0 ) {
@@ -1168,7 +1613,9 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 		if ( ((sect->flags() & SECTION_TYPE) == S_CSTRING_LITERALS) || strcmp(sect->sectname(), "__cstring") == 0 ) {
 			uint32_t stringLen;
 			uint32_t stringAddr;
-			BaseAtom* firstEmptyString = NULL;
+			BaseAtom* mostAlignedEmptyString = NULL;
+			uint32_t mostAlignedEmptyStringTrailingZeros = 0;
+			std::vector<std::pair<uint32_t,BaseAtom*> > emptyStrings;
 			for(uint32_t sectOffset=0; sectOffset < sect->size(); sectOffset += stringLen) {
 				stringAddr = sect->addr() + sectOffset;
 				stringLen  = strlen((char*)(fHeader) + sect->offset() + sectOffset) + 1;
@@ -1176,13 +1623,15 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 				if ( fAddrToAtom.find(stringAddr) == fAddrToAtom.end() ) {
 					BaseAtom* newAtom = new AnonymousAtom<A>(*this, sect, stringAddr, stringLen);
 					if ( stringLen == 1 ) {
-						// because of padding it may look like there are lots of empty strings
-						// map them all to the first empty string
-						if ( firstEmptyString == NULL ) {
-							firstEmptyString = newAtom;
-							fAtoms.push_back(firstEmptyString);
+						// because of padding it may look like there are lots of empty strings, keep track of all
+						emptyStrings.push_back(std::make_pair<uint32_t,BaseAtom*>(stringAddr, newAtom));
+						// record empty string with greatest alignment requirement
+						uint32_t stringAddrTrailingZeros = (stringAddr==0) ? sect->align() : __builtin_ctz(stringAddr);
+						if ( (mostAlignedEmptyString == NULL) 
+							|| ( stringAddrTrailingZeros > mostAlignedEmptyStringTrailingZeros) ) {
+							mostAlignedEmptyString = newAtom;
+							mostAlignedEmptyStringTrailingZeros = stringAddrTrailingZeros;
 						}
-						fAddrToAtom[stringAddr] = firstEmptyString;
 					}
 					else {
 						fAtoms.push_back(newAtom);
@@ -1190,14 +1639,30 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 					}
 				}
 			}
+			// map all uses of empty strings to the most aligned one
+			if ( mostAlignedEmptyString != NULL ) {
+				// make most aligned atom a real atom
+				fAtoms.push_back(mostAlignedEmptyString);
+				// map all other empty atoms to this one
+				for (std::vector<std::pair<uint32_t,BaseAtom*> >::iterator it=emptyStrings.begin(); it != emptyStrings.end(); it++) {
+					fAddrToAtom[it->first] = mostAlignedEmptyString;
+				}
+			}
 		}
 	}
+
+	// sort all atoms so far by address and section
+	std::sort(fAtoms.begin(), fAtoms.end(), BaseAtomSorter());
+
+	//fprintf(stderr, "sorted atoms:\n");
+	//for (std::vector<BaseAtom*>::iterator it=fAtoms.begin(); it != fAtoms.end(); it++) 
+	//	fprintf(stderr, "0x%08llX %s\n", (*it)->getObjectAddress(), (*it)->getDisplayName());
 
 	// create atoms to cover any non-debug ranges not handled above
 	for (const macho_section<P>* sect=sectionsStart; sect < sectionsEnd; ++sect) {
 		pint_t sectionStartAddr = sect->addr();
 		pint_t sectionEndAddr   = sect->addr() + sect->size();
-		const bool setFollowOnAtom = ((fHeader->flags() & MH_SUBSECTIONS_VIA_SYMBOLS) == 0);
+		const bool setFollowOnAtom = ! this->canScatterAtoms();
 		if ( sect->size() != 0 ) {
 			// ignore dwarf sections.  If ld every supports processing dwarf, this logic will need to change
 			if ( (sect->flags() & S_ATTR_DEBUG) != 0 ) {
@@ -1223,26 +1688,26 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 						BaseAtom* previousAtom = NULL;
 						if ( fAddrToAtom.find(sectionStartAddr) == fAddrToAtom.end() ) {
 							BaseAtom* newAtom = new AnonymousAtom<A>(*this, sect, sect->addr(), 0);
-							fAtoms.push_back(newAtom);
 							fAddrToAtom[sect->addr()] = newAtom;
+							fAtoms.push_back(newAtom);
 							previousAtomAddr = sectionStartAddr;
 							previousAtom = newAtom;
+							std::sort(fAtoms.begin(), fAtoms.end(), BaseAtomSorter());
 						}
 						// calculate size of all atoms in this section and add follow-on references
-						for (std::map<uint32_t, BaseAtom*>::iterator it=fAddrToAtom.begin(); it != fAddrToAtom.end(); it++) {
-							// note: this algorithm depends on the map iterator returning entries in address order
-							if ( (it->first >= sectionStartAddr) && (it->first < sectionEndAddr) ) {
-								//fprintf(stderr, "  atom %s in section\n", it->second->getDisplayName());
-								if ( previousAtom != NULL ) {
-									previousAtom->setSize(it->first - previousAtomAddr);
-									// FIX FIX: this setting of followOn atoms does not work when there are multiple
-									// labels for the same atom
-									if ( setFollowOnAtom && (it->second != previousAtom) )
-										makeReference(A::kFollowOn, previousAtomAddr, it->first);
+						for (std::vector<BaseAtom*>::iterator it=fAtoms.begin(); it != fAtoms.end(); it++) {
+							BaseAtom* atom = (BaseAtom*)(*it);
+							uint32_t atomAddr = atom->getObjectAddress();
+							if ( atom->getSectionRecord() == sect ) {
+								//fprintf(stderr, "addr=0x%08X, atom=%s\n", atomAddr, atom->getDisplayName());
+								if ( (previousAtom != NULL) && (previousAtomAddr != atomAddr) ) {
+									previousAtom->setSize(atomAddr - previousAtomAddr);
+									if ( setFollowOnAtom && (atom != previousAtom) )
+										new Reference<A>(A::kFollowOn, AtomAndOffset(previousAtom), AtomAndOffset(atom));
 								}
-								previousAtomAddr = it->first;
-								previousAtom = it->second;
-							}
+								previousAtomAddr = atomAddr;
+								previousAtom = atom;
+							} 
 						}
 						if ( previousAtom != NULL ) {
 							// set last atom in section
@@ -1254,72 +1719,62 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 		}
 	}
 
-	// add relocation based references
-	for (const macho_section<P>* sect=sectionsStart; sect < sectionsEnd; ++sect) {
-		// ignore dwarf sections.  If ld every supports processing dwarf, this logic will need to change
-		if ( (sect->flags() & S_ATTR_DEBUG) == 0 ) {
-			switch ( sect->flags() & SECTION_TYPE ) {
-				case S_SYMBOL_STUBS:
-				case S_LAZY_SYMBOL_POINTERS:
-					// we ignore compiler generated stubs, so ignore those relocs too
-					break;
-				default:
-					const macho_relocation_info<P>* relocs = (macho_relocation_info<P>*)((char*)(fHeader) + sect->reloff());
-					const uint32_t relocCount = sect->nreloc();
-					//fprintf(stderr, "relocCount = %d in section %s\n", relocCount, sect->sectname());
-					for (uint32_t r = 0; r < relocCount; ++r) {
-						try {
-							if ( addRelocReference(sect, &relocs[r]) )
-								++r; // skip next
-						}
-						catch (const char* msg) {
-							throwf("in section %s,%s reloc %u: %s\n", sect->segname(), sect->sectname(), r, msg);
+	// check for object file that defines no objc classes, but uses objc classes
+	// check for dtrace provider info
+	for (uint32_t i=undefinedStartIndex; i < undefinedEndIndex; ++i) {
+		const macho_nlist<P>& sym = fSymbols[i];
+		if ( (sym.n_type() & N_STAB) == 0 ) {
+			if ( (sym.n_type() & N_TYPE) == N_UNDF ) {
+				const char* undefinedName = &fStrings[sym.n_strx()];
+				if ( !fAppleObjc && (strncmp(undefinedName, ".objc_class_name_", 16) == 0) ) {
+					fAppleObjc = true;
+				}
+				else if ( strncmp(undefinedName, "___dtrace_", 10) == 0 ) {
+					if ( strchr(undefinedName, '$') != NULL  ) {
+						if ( (strncmp(&undefinedName[10], "probe$", 6) != 0) && (strncmp(&undefinedName[10], "isenabled$", 10) != 0) ) {
+							// any undefined starting with __dtrace_*$ that is not ___dtrace_probe$* or ___dtrace_isenabled$*
+							// is extra provider info
+							fDtraceProviderInfo.push_back(undefinedName);
 						}
 					}
-			}
-		}
-	}
-
-	// check of object file that defines no classes, but uses classes
-	if ( !fAppleObjc ) {
-		for (uint32_t i=undefinedStartIndex; i < undefinedEndIndex; ++i) {
-			const macho_nlist<P>& sym = fSymbols[i];
-			if ( (sym.n_type() & N_STAB) == 0 ) {
-				if ( ((sym.n_type() & N_TYPE) == N_UNDF) && (strncmp(&fStrings[sym.n_strx()], ".objc_class_name_", 16) == 0) ) {
-					fAppleObjc = true;
-					break;
 				}
 			}
 		}
 	}
+	
+	// add relocation based references to sections that have atoms with pending names
+	for (const macho_section<P>* sect=sectionsStart; sect < sectionsEnd; ++sect) {
+		if ( fSectionsWithAtomsPendingAName.count(sect) != 0 )
+			addReferencesForSection(sect);
+	}
+	
+	// update any anonymous atoms that need references built in order to name themselves
+	for (typename std::vector<AnonymousAtom<A>*>::iterator it=fAtomsPendingAName.begin(); it != fAtomsPendingAName.end(); it++) {
+		(*it)->resolveName();
+	}
+
+	// add relocation based references to other sections
+	for (const macho_section<P>* sect=sectionsStart; sect < sectionsEnd; ++sect) {
+		if ( fSectionsWithAtomsPendingAName.count(sect) == 0 )
+			addReferencesForSection(sect);
+	}
+
 
 	// add objective-c references
 	if ( fAppleObjc ) {
 		for (const macho_section<P>* sect=sectionsStart; sect < sectionsEnd; ++sect) {
-			// ignore dwarf sections.  If ld every supports processing dwarf, this logic will need to change
-			if ( (strcmp(sect->sectname(), "__class") == 0) && (strcmp(sect->segname(), "__OBJC") == 0) ) {
-				// gcc sometimes over aligns class structure
-				uint32_t align = 1 << sect->align();
-				uint32_t classSize = ((12 * sizeof(pint_t)) + align-1) & (-align);
-				for (uint32_t offset = 0; offset < sect->size(); offset += classSize) {
-					// add by-name reference to super class
-					pint_t superClassNameAddr =  P::getP(*(pint_t*)(((uint8_t*)fHeader) + sect->offset() + offset + sizeof(pint_t)));
-					if ( superClassNameAddr != 0 ) {
-						const char* superStr = (char*)(fHeader) + sect->offset() + superClassNameAddr - sect->addr();
-						const char* superClassName;
-						asprintf((char**)&superClassName, ".objc_class_name_%s", superStr);
-						makeByNameReference(A::kNoFixUp, sect->addr()+offset+sizeof(pint_t), superClassName, 0);
-					}
-				}
-			}
-			else if ( (strcmp(sect->sectname(), "__cls_refs") == 0) && (strcmp(sect->segname(), "__OBJC") == 0) ) {
+			if ( (strcmp(sect->sectname(), "__cls_refs") == 0) && (strcmp(sect->segname(), "__OBJC") == 0) ) {
 				for (uint32_t offset = 0; offset < sect->size(); offset += sizeof(pint_t)) {
-					// scan through __cls_refs and add by-name reference for each required class
-					uint32_t classNameAddr =  P::getP(*(pint_t*)(((uint8_t*)fHeader) + sect->offset() + offset));
-					const char* classStr = (char*)(fHeader) + sect->offset() + classNameAddr - sect->addr();
-					const char* className;
-					asprintf((char**)&className, ".objc_class_name_%s", classStr);
-					makeByNameReference(A::kNoFixUp, sect->addr()+offset, className, 0);
+					AtomAndOffset ao = this->findAtomAndOffset(sect->addr()+offset);
+					ObjectFile::Reference* classRef = ao.atom->getReferences()[0];
+					if ( classRef->getFixUpOffset() == 0 ) {
+						const char* classStr = classRef->getTargetName();
+						if ( strncmp(classStr, "cstring=", 8) == 0 ) {
+							const char* className;
+							asprintf((char**)&className, ".objc_class_name_%s", &classStr[8]);
+							new Reference<A>(A::kNoFixUp, ao, className, 0);
+						}
+					}
 				}
 			}
 		}
@@ -1332,7 +1787,7 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 		pint_t nonLazyPtrValue = P::getP(*((pint_t*)((char*)(fHeader)+fileOffset)));
 		makeReference(A::kPointer, localNonLazy->fAddress, nonLazyPtrValue);
 	}
-
+	
 	// add implicit direct reference from each C++ function to its eh info
 	for (const macho_section<P>* sect=sectionsStart; sect < sectionsEnd; ++sect) {
 		if ( ((sect->flags() & SECTION_TYPE) == S_COALESCED) && (strcmp(sect->sectname(), "__eh_frame") == 0) ) {
@@ -1349,6 +1804,48 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 		}
 	}
 
+	// add command line aliases
+	for(std::vector<ObjectFile::ReaderOptions::AliasPair>::const_iterator it = fOptions.fAliases.begin(); it != fOptions.fAliases.end(); ++it) { 
+		BaseAtom* target = this->findAtomByName(it->realName);
+		if ( (target != NULL) && target->getSymbolTableInclusion() != ObjectFile::Atom::kSymbolTableNotIn )
+			fAtoms.push_back(new SymbolAliasAtom<A>(it->alias, NULL, *target));
+	}
+
+	// add dtrace probe locations
+	if ( fHasDTraceProbes ) {
+		for (uint32_t i=0; i < fSymbolCount; ++i) {
+			const macho_nlist<P>& sym = fSymbols[i];
+			if ( (sym.n_type() & N_STAB) == 0 ) {
+				if ( (sym.n_type() & N_TYPE) == N_SECT ) {
+					const char* symbolName = &fStrings[sym.n_strx()];
+					if ( strncmp(symbolName, "__dtrace_probe$", 15) == 0 ) {
+						//fprintf(stderr, "adding dtrace probe at 0x%08llX %s\n", sym.n_value(), symbolName);
+						makeByNameReference(A::kDtraceProbe, sym.n_value(), symbolName, 0);
+					}
+				}
+			}
+		}
+	}
+	
+	// turn indirect symbols int SymbolAliasAtom 
+	if ( fHaveIndirectSymbols ) {
+		for (uint32_t i=0; i < fSymbolCount; ++i) {
+			const macho_nlist<P>& sym = fSymbols[i];
+			if ( (sym.n_type() & N_STAB) == 0 ) {
+				if ( (sym.n_type() & N_TYPE) == N_INDR ) {
+					const char* aliasName = &fStrings[sym.n_strx()];
+					const char* targetName = &fStrings[sym.n_value()];
+					//fprintf(stderr, "found alias %s for %s\n", aliasName, targetName);
+					BaseAtom* target = this->findAtomByName(targetName);
+					// only currently support N_INDR based aliases to something in the same .o file 
+					if ( target != NULL ) {
+						fAtoms.push_back(new SymbolAliasAtom<A>(aliasName, &sym, *target));
+						//fprintf(stderr, "creating alias %s for %s\n", aliasName, targetName);
+					}
+				}
+			}
+		}
+	}
 
 	//for (std::map<uint32_t, BaseAtom*>::iterator it=fAddrToAtom.begin(); it != fAddrToAtom.end(); it++) {
 	//	fprintf(stderr, "[0x%0X -> 0x%0llX) : %s\n", it->first, it->first+it->second->getSize(), it->second->getDisplayName());
@@ -1363,7 +1860,7 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 				// if can't parse dwarf, warn and give up
 				fDwarfTranslationUnitFile = NULL;
 				fDwarfTranslationUnitDir = NULL;
-				fprintf(stderr, "ld64: warning can't parse dwarf compilation unit info in %s\n", this->getPath());
+				fprintf(stderr, "ld: warning can't parse dwarf compilation unit info in %s\n", this->getPath());
 				fDebugInfo = kDebugInfoNone;
 			}
 		}
@@ -1372,7 +1869,8 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 	// add line number info to atoms from dwarf
 	if ( (fDebugInfo == kDebugInfoDwarf) && (fOptions.fDebugInfoStripping != ObjectFile::ReaderOptions::kDebugInfoNone) ) {
 		// file with just data will have no __debug_line info
-		if ( (fDwarfDebugLineSect != NULL) && (fDwarfDebugLineSect->size() != 0) && (fAddrToAtom.size() != 0) ) {
+		if ( (fDwarfDebugLineSect != NULL) && (fDwarfDebugLineSect->size() != 0) && (fAddrToAtom.size() != 0)
+			&& (fDwarfDebugInfoSect != NULL) && (fDwarfDebugInfoSect->size() != 0) ) {
 			// validate stmt_list
 			if ( (stmtList != (uint64_t)-1) && (stmtList < fDwarfDebugLineSect->size()) ) {
 				const uint8_t* debug_line = (uint8_t*)(fHeader) + fDwarfDebugLineSect->offset();
@@ -1385,6 +1883,8 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 					uint32_t curAtomAddress = 0;
 					uint32_t curAtomSize = 0;
 					while ( line_next (lines, &result, line_stop_pc) ) {
+						//fprintf(stderr, "curAtom=%p, result.pc=0x%llX, result.line=%llu, result.end_of_sequence=%d, curAtomAddress=0x%X, curAtomSize=0x%X\n",
+						//		curAtom, result.pc, result.line, result.end_of_sequence, curAtomAddress, curAtomSize);
 						// work around weird debug line table compiler generates if no functions in __text section
 						if ( (curAtom == NULL) && (result.pc == 0) && result.end_of_sequence && (result.file == 1))
 							continue;
@@ -1402,9 +1902,28 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 							curAtom			= ao.atom;
 							if ( curAtom == NULL )
 								break; // file has line info but no functions
-							curAtomOffset	= ao.offset;
-							curAtomAddress	= result.pc - ao.offset;
-							curAtomSize		= curAtom->getSize();
+							if ( result.end_of_sequence && (curAtomAddress+curAtomSize < result.pc) ) {	
+								// a one line function can be returned by line_next() as one entry with pc at end of blob
+								// look for alt atom starting at end of previous atom
+								uint32_t previousEnd = curAtomAddress+curAtomSize;
+								AtomAndOffset alt = this->findAtomAndOffset(previousEnd);
+								if ( result.pc <= previousEnd - alt.offset + alt.atom->getSize() ) {
+									curAtom			= alt.atom;
+									curAtomOffset	= alt.offset;
+									curAtomAddress	= previousEnd - alt.offset;
+									curAtomSize		= curAtom->getSize();
+								}
+								else {
+									curAtomOffset	= ao.offset;
+									curAtomAddress	= result.pc - ao.offset;
+									curAtomSize		= curAtom->getSize();
+								}
+							}
+							else {
+								curAtomOffset	= ao.offset;
+								curAtomAddress	= result.pc - ao.offset;
+								curAtomSize		= curAtom->getSize();
+							}
 						}
 						const char* filename;
 						std::map<uint32_t,const char*>::iterator pos = fDwarfIndexToFile.find(result.file);
@@ -1429,7 +1948,7 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 					line_free(lines);
 				}
 				else {
-					fprintf(stderr, "ld64: warning could not parse dwarf line number info in %s\n", this->getPath());
+					fprintf(stderr, "ld: warning could not parse dwarf line number info in %s\n", this->getPath());
 				}
 			}
 		}
@@ -1480,10 +1999,13 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 							case N_OSO:
 							case N_OPT:
 							case N_LSYM:
+							case N_RSYM:
+							case N_PSYM:
 								// not associated with an atom, just copy
 								stab.string = symString;
 								break;
 							case N_GSYM:
+							{
 								// n_value field is NOT atom address ;-(
 								// need to find atom by name match
 								const char* colon = strchr(symString, ':');
@@ -1513,6 +2035,7 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 									useStab = false;
 								}
 								break;
+							}
 							case N_FUN:
 								// old style stabs without BNSYM
 								state = inFun;
@@ -1551,6 +2074,7 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 								break;
 							case N_LCSYM:
 							case N_STSYM:
+							{
 								BaseAtom* nestedAtom = (BaseAtom*)this->findAtomAndOffset(sym->n_value()).atom;
 								if ( nestedAtom != NULL ) {
 									stab.atom = nestedAtom;
@@ -1561,6 +2085,7 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 										type, (uint64_t)sym->n_value(), path);
 								}
 								break;
+							}
 							case N_LBRAC:
 							case N_RBRAC:
 							case N_SLINE:
@@ -1620,12 +2145,6 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 		}
 	}
 
-	// sort references in each atom
-	for (std::vector<ObjectFile::Atom*>::iterator it=fAtoms.begin(); it != fAtoms.end(); it++) {
-		BaseAtom* atom = (BaseAtom*)(*it);
-		atom->sortReferences();
-	}
-	
 #if 0
 	// special case precompiled header .o file (which has no content) to have one empty atom
 	if ( fAtoms.size() == 0 ) {
@@ -1637,7 +2156,69 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 		}
 	}
 #endif
+
+	// sort all atoms by address
+	std::sort(fAtoms.begin(), fAtoms.end(), BaseAtomSorter());
+
+	// set ordinal and sort references in each atom
+	uint32_t index = fOrdinalBase;
+	for (std::vector<BaseAtom*>::iterator it=fAtoms.begin(); it != fAtoms.end(); it++) {
+		BaseAtom* atom = (BaseAtom*)(*it);
+		atom->setOrdinal(index++);
+		atom->sortReferences();
+	}
+	
 }
+
+
+template <>
+void Reader<ppc>::setCpuConstraint(uint32_t cpusubtype)
+{
+	switch (cpusubtype) {
+		case CPU_SUBTYPE_POWERPC_ALL:
+			fCpuConstraint = ObjectFile::Reader::kCpuAny;
+			break;
+		case CPU_SUBTYPE_POWERPC_750:
+			fCpuConstraint = ObjectFile::Reader::kCpuG3;
+			break;
+		case CPU_SUBTYPE_POWERPC_7400:
+		case CPU_SUBTYPE_POWERPC_7450:
+			fCpuConstraint = ObjectFile::Reader::kCpuG4;
+			break;
+		case CPU_SUBTYPE_POWERPC_970:
+			fCpuConstraint = ObjectFile::Reader::kCpuG5;
+			break;
+		default:
+			fprintf(stderr, "ld: warning, unknown cpu-sub-type 0x%08X in %s\n", cpusubtype, fPath);
+	}
+}
+
+
+template <typename A>
+void Reader<A>::setCpuConstraint(uint32_t cpusubtype)
+{
+	// no cpu sub types for this architecture
+}
+
+template <typename A>
+void Reader<A>::addDtraceExtraInfos(uint32_t probeAddr, const char* providerName)
+{
+	// for every ___dtrace_stability$* and ___dtrace_typedefs$* undefine with
+	// a matching provider name, add a by-name kDtraceTypeReference at probe site
+ 	const char* dollar = strchr(providerName, '$');
+	if ( dollar != NULL ) {
+		int providerNameLen = dollar-providerName+1;
+		for ( std::vector<const char*>::iterator it = fDtraceProviderInfo.begin(); it != fDtraceProviderInfo.end(); ++it) {
+			const char* typeDollar = strchr(*it, '$');
+			if ( typeDollar != NULL ) {
+				if ( strncmp(typeDollar+1, providerName, providerNameLen) == 0 ) {
+					makeByNameReference(A::kDtraceTypeReference, probeAddr, *it, 0);
+				}
+			}
+		}
+	}
+}
+
 
 template <>
 void Reader<x86_64>::validSectionType(uint8_t type)
@@ -1663,7 +2244,7 @@ bool Reader<A>::getTranslationUnitSource(const char** dir, const char** name) co
 	if ( fDebugInfo == kDebugInfoDwarf ) {
 		*dir = fDwarfTranslationUnitDir;
 		*name = fDwarfTranslationUnitFile;
-		return true;
+		return (fDwarfTranslationUnitFile != NULL);
 	}
 	return false;
 }
@@ -1679,7 +2260,7 @@ BaseAtom* Reader<A>::findAtomByName(const char* name)
 		}
 	}
 	// try all atoms, because this might have been a tentative definition
-	for (std::vector<ObjectFile::Atom*>::iterator it=fAtoms.begin(); it != fAtoms.end(); it++) {
+	for (std::vector<BaseAtom*>::iterator it=fAtoms.begin(); it != fAtoms.end(); it++) {
 		BaseAtom* atom = (BaseAtom*)(*it);
 		const char* atomName = atom->getName();
 		if ( (atomName != NULL) && (strcmp(atomName, name) == 0) ) {
@@ -1747,10 +2328,11 @@ Reference<x86_64>* Reader<x86_64>::makeReferenceToSymbol(Kinds kind, uint32_t at
 {
 	// x86_64 uses external relocations everywhere, so external relocations do not imply by-name references
 	// instead check scope of target
-	if ( ((toSymbol->n_type() & N_TYPE) == N_SECT) && ((toSymbol->n_type() & N_EXT) == 0) ) 
+	const char* symbolName = &fStrings[toSymbol->n_strx()];
+	if ( ((toSymbol->n_type() & N_TYPE) == N_SECT) && (((toSymbol->n_type() & N_EXT) == 0) || (symbolName[0] == 'L')) ) 
 		return new Reference<x86_64>(kind, findAtomAndOffset(atAddr), findAtomAndOffset(toSymbol->n_value(), toSymbol->n_value()+toOffset));
 	else
-		return new Reference<x86_64>(kind, findAtomAndOffset(atAddr), &fStrings[toSymbol->n_strx()], toOffset);
+		return new Reference<x86_64>(kind, findAtomAndOffset(atAddr), symbolName, toOffset);
 }
 
 
@@ -1768,7 +2350,7 @@ Reference<x86_64>* Reader<x86_64>::makeReferenceToEH(const char* ehName, pint_t 
 			return makeReference(x86_64::kNoFixUp, funcAddr, ehAtomAddress);
 		}
 	}
-	fprintf(stderr, "ld64: warning, can't find matching function for eh symbol %s\n", ehName);
+	fprintf(stderr, "ld: warning, can't find matching function for eh symbol %s\n", ehName);
 	return NULL;
 }
 
@@ -2197,7 +2779,15 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 					}
 					if ( reloc->r_extern() ) {
 						offsetInTarget = srcAddr + displacement;
-						if ( weakImport )
+						if ( strncmp(targetName, "___dtrace_probe$", 16) == 0 ) {
+							makeByNameReference(A::kDtraceProbeSite, srcAddr, targetName, 0);
+							addDtraceExtraInfos(srcAddr, &targetName[16]);
+						}
+						else if ( strncmp(targetName, "___dtrace_isenabled$", 20) == 0 ) {
+							makeByNameReference(A::kDtraceIsEnabledSite, srcAddr, targetName, 0);
+							addDtraceExtraInfos(srcAddr, &targetName[20]);
+						}
+						else if ( weakImport )
 							makeByNameReference(A::kBranch24WeakImport, srcAddr, targetName, offsetInTarget);
 						else
 							makeByNameReference(A::kBranch24, srcAddr, targetName, offsetInTarget);
@@ -2206,7 +2796,16 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 						dstAddr = srcAddr + displacement;
 						// if this is a branch to a stub, we need to see if the stub is for a weak imported symbol
 						ObjectFile::Atom* atom = findAtomAndOffset(dstAddr).atom;
-						if ( (atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn)
+						targetName = atom->getName();
+						if ( (targetName != NULL) && (strncmp(targetName, "___dtrace_probe$", 16) == 0) ) {
+							makeByNameReference(A::kDtraceProbeSite, srcAddr, targetName, 0);
+							addDtraceExtraInfos(srcAddr, &targetName[16]);
+						}
+						else if ( (targetName != NULL) && (strncmp(targetName, "___dtrace_isenabled$", 20) == 0) ) {
+							makeByNameReference(A::kDtraceIsEnabledSite, srcAddr, targetName, 0);
+							addDtraceExtraInfos(srcAddr, &targetName[20]);
+						}
+						else if ( (atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn)
 							&& ((AnonymousAtom<A>*)atom)->isWeakImportStub() )
 							makeReference(A::kBranch24WeakImport, srcAddr, dstAddr);
 						else
@@ -2246,7 +2845,17 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 					}
 					else {
 						dstAddr = (nextReloc->r_address() << 16) + ((uint32_t)lowBits & 0x0000FFFF);
-						makeReference(A::kAbsLow16, srcAddr, dstAddr);
+						if ( reloc->r_symbolnum() == R_ABS ) {
+							// find absolute symbol that corresponds to pointerValue
+							std::map<uint32_t, BaseAtom*>::iterator pos = fAddrToAbsoluteAtom.find(dstAddr);
+							if ( pos != fAddrToAbsoluteAtom.end() ) 
+								makeByNameReference(A::kAbsLow16, srcAddr, pos->second->getName(), 0);
+							else
+								makeReference(A::kAbsLow16, srcAddr, dstAddr);
+						}
+						else {
+							makeReference(A::kAbsLow16, srcAddr, dstAddr);
+						}
 					}
 				}
 				break;
@@ -2264,7 +2873,17 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 					}
 					else {
 						dstAddr = (nextReloc->r_address() << 16) | ((uint32_t)lowBits & 0x0000FFFF);
-						makeReference(A::kAbsLow14, srcAddr, dstAddr);
+						if ( reloc->r_symbolnum() == R_ABS ) {
+							// find absolute symbol that corresponds to pointerValue
+							std::map<uint32_t, BaseAtom*>::iterator pos = fAddrToAbsoluteAtom.find(dstAddr);
+							if ( pos != fAddrToAbsoluteAtom.end() ) 
+								makeByNameReference(A::kAbsLow14, srcAddr, pos->second->getName(), 0);
+							else
+								makeReference(A::kAbsLow14, srcAddr, dstAddr);
+						}
+						else {
+							makeReference(A::kAbsLow14, srcAddr, dstAddr);
+						}
 					}
 				}
 				break;
@@ -2281,7 +2900,17 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 					}
 					else {
 						dstAddr = ((instruction & 0x0000FFFF) << 16) | (nextReloc->r_address() & 0x0000FFFF);
-						makeReference(A::kAbsHigh16, srcAddr, dstAddr);
+						if ( reloc->r_symbolnum() == R_ABS ) {
+							// find absolute symbol that corresponds to pointerValue
+							std::map<uint32_t, BaseAtom*>::iterator pos = fAddrToAbsoluteAtom.find(dstAddr);
+							if ( pos != fAddrToAbsoluteAtom.end() ) 
+								makeByNameReference(A::kAbsHigh16, srcAddr, pos->second->getName(), 0);
+							else
+								makeReference(A::kAbsHigh16, srcAddr, dstAddr);
+						}
+						else {
+							makeReference(A::kAbsHigh16, srcAddr, dstAddr);
+						}
 					}
 				}
 				break;
@@ -2299,7 +2928,17 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 					}
 					else {
 						dstAddr = ((instruction & 0x0000FFFF) << 16) + (int32_t)lowBits;
-						makeReference(A::kAbsHigh16AddLow, srcAddr, dstAddr);
+						if ( reloc->r_symbolnum() == R_ABS ) {
+							// find absolute symbol that corresponds to pointerValue
+							std::map<uint32_t, BaseAtom*>::iterator pos = fAddrToAbsoluteAtom.find(dstAddr);
+							if ( pos != fAddrToAbsoluteAtom.end() ) 
+								makeByNameReference(A::kAbsHigh16AddLow, srcAddr, pos->second->getName(), 0);
+							else
+								makeReference(A::kAbsHigh16AddLow, srcAddr, dstAddr);
+						}
+						else {
+							makeReference(A::kAbsHigh16AddLow, srcAddr, dstAddr);
+						}
 					}
 				}
 				break;
@@ -2318,13 +2957,24 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 				}
 				break;
 			case PPC_RELOC_JBSR:
-				// this is from -mlong-branch codegen.  We ignore the jump island
+				// this is from -mlong-branch codegen.  We ignore the jump island and make reference to the real target
 				if ( nextReloc->r_type() != PPC_RELOC_PAIR ) {
 					printf("PPC_RELOC_JBSR missing following pair\n");
 					break;
 				}
 				result = true;
 				makeReference(A::kBranch24, srcAddr, nextReloc->r_address());
+				if ( (instruction & 0x4C000000) == 0x48000000 ) {
+					displacement = (instruction & 0x03FFFFFC);
+					if ( (displacement & 0x02000000) != 0 )
+						displacement |= 0xFC000000;
+				}
+				else {
+					fprintf(stderr, "bad instruction for BR24 reloc");
+				}
+				if ( reloc->r_extern() ) {
+					fprintf(stderr, "PPC_RELOC_JBSR should not be using an external relocation");
+				}
 				break;
 			default:
 				printf("unknown relocation type %d\n", reloc->r_type());
@@ -2468,6 +3118,41 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 						printf("PPC_RELOC_SECTDIFF missing following pair\n");
 						break;
 					}
+					// need to read section content to see if this has an addend, if so adjust addresses
+					switch ( sreloc->r_length() ) {
+						case 0:
+							if ( (dstAddr - nextRelocValue) != *((uint8_t*)fixUpPtr) ) {
+								if (findAtomAndOffset(dstAddr).atom == findAtomAndOffset(srcAddr).atom )
+									dstAddr = *((uint8_t*)fixUpPtr) + nextRelocValue;
+								else
+									nextRelocValue = dstAddr - *((uint8_t*)fixUpPtr);
+							}
+							break;
+						case 1:
+							if ( (dstAddr - nextRelocValue) != BigEndian::get16(*((uint16_t*)fixUpPtr)) ) {
+								if (findAtomAndOffset(dstAddr).atom == findAtomAndOffset(srcAddr).atom )
+									dstAddr = BigEndian::get16(*((uint16_t*)fixUpPtr)) + nextRelocValue;
+								else
+									nextRelocValue = dstAddr - BigEndian::get16(*((uint16_t*)fixUpPtr));
+							}
+							break;
+						case 2:
+							if ( (dstAddr - nextRelocValue) != BigEndian::get32(*fixUpPtr) ) {
+								if (findAtomAndOffset(dstAddr).atom == findAtomAndOffset(srcAddr).atom )
+									dstAddr = BigEndian::get32(*fixUpPtr) + nextRelocValue;
+								else
+									nextRelocValue = dstAddr - BigEndian::get32(*fixUpPtr);
+							}
+							break;
+						case 3:
+							if ( (dstAddr - nextRelocValue) != BigEndian::get64(*((uint64_t*)fixUpPtr)) ) {
+								if (findAtomAndOffset(dstAddr).atom == findAtomAndOffset(srcAddr).atom )
+									dstAddr = BigEndian::get64(*((uint64_t*)fixUpPtr)) + nextRelocValue;
+								else
+									nextRelocValue = dstAddr - BigEndian::get64(*((uint64_t*)fixUpPtr));
+							}
+							break;
+					}
 					makeReference(pointerDiffKindForLength_powerpc(sreloc->r_length()), srcAddr, nextRelocValue, dstAddr);
 				}
 				break;
@@ -2488,6 +3173,8 @@ ppc::ReferenceKinds Reader<ppc>::pointerDiffKindForLength_powerpc(uint8_t r_leng
 {
 	if ( r_length == 2 )
 		return ppc::kPointerDiff32;
+	else if ( r_length == 1 )
+		return ppc::kPointerDiff16;
 	else
 		throw "bad diff relocations r_length for ppc architecture";
  }
@@ -2516,35 +3203,74 @@ bool Reader<x86>::addRelocReference(const macho_section<x86::P>* sect, const mac
 		switch ( reloc->r_type() ) {
 			case GENERIC_RELOC_VANILLA:
 				{
-					if ( reloc->r_length() != 2 )
-						throw "bad vanilla relocation length";
-					x86::ReferenceKinds kind;
+					x86::ReferenceKinds kind = x86::kPointer;
 					uint32_t pointerValue = E::get32(*fixUpPtr);
 					if ( reloc->r_pcrel() ) {
-						kind = x86::kPCRel32;
-						pointerValue += srcAddr + sizeof(uint32_t);
+						switch( reloc->r_length() ) {
+							case 0:
+							case 3:
+								throw "bad pc-rel vanilla relocation length";
+							case 1:
+								kind = x86::kPCRel16;
+								pointerValue = srcAddr + (int16_t)E::get16(*((uint16_t*)fixUpPtr)) + sizeof(uint16_t);
+								break;
+							case 2:
+								kind = x86::kPCRel32;
+								pointerValue += srcAddr + sizeof(uint32_t);
+								break;
+						}
 					}
 					else if ( strcmp(sect->segname(), "__TEXT") == 0 ) {
 						kind = x86::kAbsolute32;
+						if ( reloc->r_length() != 2 )
+							throw "bad vanilla relocation length";
 					}
 					else {
 						kind = x86::kPointer;
+						if ( reloc->r_length() != 2 )
+							throw "bad vanilla relocation length";
 					}
 					if ( reloc->r_extern() ) {
 						const macho_nlist<P>* targetSymbol = &fSymbols[reloc->r_symbolnum()];
 						if ( this->isWeakImportSymbol(targetSymbol) )
 							kind = x86::kPointerWeakImport;
 						const char* targetName = &fStrings[targetSymbol->n_strx()];
-						makeByNameReference(kind, srcAddr, targetName, pointerValue);
+						if ( strncmp(targetName, "___dtrace_probe$", 16) == 0 ) {
+							makeByNameReference(x86::kDtraceProbeSite, srcAddr, targetName, 0);
+							addDtraceExtraInfos(srcAddr, &targetName[16]);
+						}
+						else if ( strncmp(targetName, "___dtrace_isenabled$", 20) == 0 ) {
+							makeByNameReference(x86::kDtraceIsEnabledSite, srcAddr, targetName, 0);
+							addDtraceExtraInfos(srcAddr, &targetName[20]);
+						}
+						else
+							makeByNameReference(kind, srcAddr, targetName, pointerValue);
 					}
 					else {
 						// if this is a branch to a stub, we need to see if the stub is for a weak imported symbol
 						ObjectFile::Atom* atom = findAtomAndOffset(pointerValue).atom;
-						if ( reloc->r_pcrel() && (atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn)
+						const char* targetName = atom->getName();
+						if ( (targetName != NULL) && (strncmp(targetName, "___dtrace_probe$", 16) == 0) ) {
+							makeByNameReference(x86::kDtraceProbeSite, srcAddr, targetName, 0);
+							addDtraceExtraInfos(srcAddr, &targetName[16]);
+						}
+						else if ( (targetName != NULL) && (strncmp(targetName, "___dtrace_isenabled$", 20) == 0) ) {
+							makeByNameReference(x86::kDtraceIsEnabledSite, srcAddr, targetName, 0);
+							addDtraceExtraInfos(srcAddr, &targetName[20]);
+						}
+						else if ( reloc->r_pcrel() && (atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn)
 							&& ((AnonymousAtom<x86>*)atom)->isWeakImportStub() )
 							makeReference(x86::kPCRel32WeakImport, srcAddr, pointerValue);
-						else
+						else if ( reloc->r_symbolnum() != R_ABS )
 							makeReference(kind, srcAddr, pointerValue);
+						else {
+							// find absolute symbol that corresponds to pointerValue
+							std::map<uint32_t, BaseAtom*>::iterator pos = fAddrToAbsoluteAtom.find(pointerValue);
+							if ( pos != fAddrToAbsoluteAtom.end() ) 
+								makeByNameReference(kind, srcAddr, pos->second->getName(), 0);
+							else
+								throwf("R_ABS reloc but no absolute symbol at target address");
+						}
 					}
 				}
 				break;
@@ -2601,10 +3327,40 @@ bool Reader<x86>::addRelocReference(const macho_section<x86::P>* sect, const mac
 						printf("GENERIC_RELOC_SECTDIFF missing following pair\n");
 						break;
 					}
-					if ( sreloc->r_length() != 2 )
-						throw "bad length for GENERIC_RELOC_SECTDIFF";
-					betterDstAddr = LittleEndian::get32(*fixUpPtr);
-					makeReferenceWithToBase(x86::kPointerDiff, srcAddr, nextRelocValue, betterDstAddr+nextRelocValue, dstAddr);
+					x86::ReferenceKinds kind = x86::kPointerDiff;
+					uint32_t contentAddr = 0;
+					switch ( sreloc->r_length() ) {
+						case 0:
+						case 3:
+							throw "bad length for GENERIC_RELOC_SECTDIFF";
+						case 1:
+							kind = x86::kPointerDiff16;
+							contentAddr = LittleEndian::get16(*((uint16_t*)fixUpPtr));
+							break;
+						case 2:
+							kind = x86::kPointerDiff;
+							contentAddr = LittleEndian::get32(*fixUpPtr);
+							break;
+					}
+					AtomAndOffset srcao  = findAtomAndOffset(srcAddr);
+					AtomAndOffset fromao = findAtomAndOffset(nextRelocValue);
+					AtomAndOffset toao   = findAtomAndOffset(dstAddr);
+					// check for addend encoded in the section content
+					//fprintf(stderr, "addRef: dstAddr=0x%X, nextRelocValue=0x%X, contentAddr=0x%X\n",
+					//		dstAddr, nextRelocValue, contentAddr);
+					if ( (dstAddr - nextRelocValue) != contentAddr ) {
+						if ( toao.atom == srcao.atom )
+							toao.offset += (contentAddr + nextRelocValue) - dstAddr;
+						else if ( fromao.atom == srcao.atom )
+							toao.offset += (contentAddr + nextRelocValue) - dstAddr;
+						else
+							fromao.offset += (dstAddr - contentAddr) - nextRelocValue;
+					}
+					//fprintf(stderr, "addRef: src=%s+0x%X, from=%s+0x%X, to=%s+0x%X\n",
+					//	srcao.atom->getDisplayName(), srcao.offset, 
+					//	fromao.atom->getDisplayName(), fromao.offset, 
+					//	toao.atom->getDisplayName(), toao.offset);
+					new Reference<x86>(kind, srcao, fromao, toao);
 				}
 				break;
 			case GENERIC_RELOC_PAIR:
@@ -2642,10 +3398,20 @@ bool Reader<x86_64>::addRelocReference(const macho_section<x86_64::P>* sect, con
 			if ( reloc->r_length() != 3 ) 
 				throw "length < 3 and X86_64_RELOC_UNSIGNED not supported";
 			dstAddr = E::get64(*((uint64_t*)fixUpPtr));
-			if ( reloc->r_extern() ) 
+			if ( reloc->r_extern() ) {
 				makeReferenceToSymbol(x86_64::kPointer, srcAddr, targetSymbol, dstAddr);
-			else
+			}
+			else {
 				makeReference(x86_64::kPointer, srcAddr, dstAddr);
+				// verify that dstAddr is in the section being targeted
+				int sectNum = reloc->r_symbolnum();
+				const macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)fSegment + sizeof(macho_segment_command<P>));
+				const macho_section<P>* const targetSection = &sectionsStart[sectNum-1];
+				if ( (dstAddr < targetSection->addr()) || (dstAddr > (targetSection->addr()+targetSection->size())) ) {
+					throwf("local relocation for address 0x%08llX in section %s does not target section %s", 
+							srcAddr, sect->sectname(), targetSection->sectname());
+				}
+			}
 			break;
 		case X86_64_RELOC_SIGNED:
 		case X86_64_RELOC_SIGNED_1:
@@ -2711,6 +3477,14 @@ bool Reader<x86_64>::addRelocReference(const macho_section<x86_64::P>* sect, con
 						break;
 				}
 				makeReference(kind, srcAddr, dstAddr);
+				// verify that dstAddr is in the section being targeted
+				int sectNum = reloc->r_symbolnum();
+				const macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)fSegment + sizeof(macho_segment_command<P>));
+				const macho_section<P>* const targetSection = &sectionsStart[sectNum-1];
+				if ( (dstAddr < targetSection->addr()) || (dstAddr > (targetSection->addr()+targetSection->size())) ) {
+					throwf("local relocation for address 0x%08llX in section %s does not target section %s", 
+							srcAddr, sect->sectname(), targetSection->sectname());
+				}
 			}	
 			break;
 		case X86_64_RELOC_BRANCH:
@@ -2720,7 +3494,15 @@ bool Reader<x86_64>::addRelocReference(const macho_section<x86_64::P>* sect, con
 				throw "length != 2 and X86_64_RELOC_BRANCH not supported";
 			dstAddr = (int64_t)((int32_t)(E::get32(*fixUpPtr)));
 			if ( reloc->r_extern() ) {
-				if ( isWeakImportSymbol(targetSymbol) )
+				if ( strncmp(targetName, "___dtrace_probe$", 16) == 0 ) {
+					makeByNameReference(x86_64::kDtraceProbeSite, srcAddr, targetName, 0);
+					addDtraceExtraInfos(srcAddr, &targetName[16]);
+				}
+				else if ( strncmp(targetName, "___dtrace_isenabled$", 20) == 0 ) {
+					makeByNameReference(x86_64::kDtraceIsEnabledSite, srcAddr, targetName, 0);
+					addDtraceExtraInfos(srcAddr, &targetName[16]);
+				}
+				else if ( isWeakImportSymbol(targetSymbol) )
 					makeReferenceToSymbol(x86_64::kBranchPCRel32WeakImport, srcAddr, targetSymbol, dstAddr);
 				else
 					makeReferenceToSymbol(x86_64::kBranchPCRel32, srcAddr, targetSymbol, dstAddr);
@@ -2756,6 +3538,7 @@ bool Reader<x86_64>::addRelocReference(const macho_section<x86_64::P>* sect, con
 				makeReferenceToSymbol(x86_64::kPCRel32GOTLoad, srcAddr, targetSymbol, addend);
 			break;
 		case X86_64_RELOC_SUBTRACTOR:
+		{
 			if ( reloc->r_pcrel() )
 				throw "X86_64_RELOC_SUBTRACTOR cannot be pc-relative";
 			if ( reloc->r_length() < 2 )
@@ -2818,10 +3601,39 @@ bool Reader<x86_64>::addRelocReference(const macho_section<x86_64::P>* sect, con
 			else
 				ref->setToTargetOffset(dstAddr);
 			break;
+		}
 		default:
 			fprintf(stderr, "unknown relocation type %d\n", reloc->r_type());
 	}
 	return result;
+}
+
+
+template <typename A>
+void Reader<A>::addReferencesForSection(const macho_section<P>* sect)
+{
+	// ignore dwarf sections.  If ld ever supports processing dwarf, this logic will need to change
+	if ( (sect->flags() & S_ATTR_DEBUG) == 0 ) {
+		switch ( sect->flags() & SECTION_TYPE ) {
+			case S_SYMBOL_STUBS:
+			case S_LAZY_SYMBOL_POINTERS:
+				// we ignore compiler generated stubs, so ignore those relocs too
+				break;
+			default:
+				const macho_relocation_info<P>* relocs = (macho_relocation_info<P>*)((char*)(fHeader) + sect->reloff());
+				const uint32_t relocCount = sect->nreloc();
+				//fprintf(stderr, "relocCount = %d in section %s\n", relocCount, sect->sectname());
+				for (uint32_t r = 0; r < relocCount; ++r) {
+					try {
+						if ( addRelocReference(sect, &relocs[r]) )
+							++r; // skip next
+					}
+					catch (const char* msg) {
+						throwf("in section %s,%s reloc %u: %s\n", sect->segname(), sect->sectname(), r, msg);
+					}
+				}
+		}
+	}
 }
 
 
@@ -2853,14 +3665,40 @@ const char* Reference<x86>::getDescription() const
 			return temp;
 			}
 			break;
+		case x86::kPointerDiff16:
+			{
+			// by-name references have quoted names
+			const char* targetQuotes = (&(this->getTarget()) == NULL) ? "\"" : "";
+			const char* fromQuotes = (&(this->getFromTarget()) == NULL) ? "\"" : "";
+			sprintf(temp, "offset 0x%04X, 16-bit pointer difference: (&%s%s%s + 0x%08X) - (&%s%s%s + 0x%08X)",
+				fFixUpOffsetInSrc, targetQuotes, this->getTargetName(), targetQuotes, fToTarget.offset,
+							   fromQuotes, this->getFromTargetName(), fromQuotes, fFromTarget.offset );
+			return temp;
+			}
+			break;
 		case x86::kPCRel32WeakImport:
 			sprintf(temp, "offset 0x%04X, rel32 reference to weak imported ", fFixUpOffsetInSrc);
 			break;
 		case x86::kPCRel32:
 			sprintf(temp, "offset 0x%04X, rel32 reference to ", fFixUpOffsetInSrc);
 			break;
+		case x86::kPCRel16:
+			sprintf(temp, "offset 0x%04X, rel16 reference to ", fFixUpOffsetInSrc);
+			break;
 		case x86::kAbsolute32:
 			sprintf(temp, "offset 0x%04X, absolute32 reference to ", fFixUpOffsetInSrc);
+			break;
+		case x86::kDtraceProbe:
+			sprintf(temp, "offset 0x%04X, dtrace static probe ", fFixUpOffsetInSrc);
+			break;
+		case x86::kDtraceProbeSite:
+			sprintf(temp, "offset 0x%04X, dtrace static probe site", fFixUpOffsetInSrc);
+			break;
+		case x86::kDtraceIsEnabledSite:
+			sprintf(temp, "offset 0x%04X, dtrace static probe is-enabled site", fFixUpOffsetInSrc);
+			break;
+		case x86::kDtraceTypeReference:
+			sprintf(temp, "offset 0x%04X, dtrace type/stability reference", fFixUpOffsetInSrc);
 			break;
 	}
 	// always quote by-name references
@@ -2899,6 +3737,16 @@ const char* Reference<ppc>::getDescription() const
 		case ppc::kPointer:
 			sprintf(temp, "offset 0x%04X, pointer to ", fFixUpOffsetInSrc);
 			break;
+		case ppc::kPointerDiff16:
+			{
+			// by-name references have quoted names
+			const char* targetQuotes = (&(this->getTarget()) == NULL) ? "\"" : "";
+			const char* fromQuotes = (&(this->getFromTarget()) == NULL) ? "\"" : "";
+			sprintf(temp, "offset 0x%04X, 16-bit pointer difference: (&%s%s%s + %d) - (&%s%s%s + %d)",
+				fFixUpOffsetInSrc, targetQuotes, this->getTargetName(), targetQuotes, fToTarget.offset,
+							   fromQuotes, this->getFromTargetName(), fromQuotes, fFromTarget.offset );
+			return temp;
+			}
 		case ppc::kPointerDiff32:
 			{
 			// by-name references have quoted names
@@ -2920,13 +3768,13 @@ const char* Reference<ppc>::getDescription() const
 			sprintf(temp, "offset 0x%04X, pc-rel branch fixup to ", fFixUpOffsetInSrc);
 			break;
 		case ppc::kPICBaseLow16:
-			sprintf(temp, "offset 0x%04X, low  16 fixup from pic-base offset 0x%04X to ", fFixUpOffsetInSrc, fFromTarget.offset);
+			sprintf(temp, "offset 0x%04X, low  16 fixup from pic-base of %s plus 0x%04X to ", fFixUpOffsetInSrc, fFromTarget.atom->getDisplayName(), fFromTarget.offset);
 			break;
 		case ppc::kPICBaseLow14:
-			sprintf(temp, "offset 0x%04X, low  14 fixup from pic-base offset 0x%04X to ", fFixUpOffsetInSrc, fFromTarget.offset);
+			sprintf(temp, "offset 0x%04X, low  14 fixup from pic-base of %s plus 0x%04X to ", fFixUpOffsetInSrc, fFromTarget.atom->getDisplayName(), fFromTarget.offset);
 			break;
 		case ppc::kPICBaseHigh16:
-			sprintf(temp, "offset 0x%04X, high 16 fixup from pic-base offset 0x%04X to ", fFixUpOffsetInSrc, fFromTarget.offset);
+			sprintf(temp, "offset 0x%04X, high 16 fixup from pic-base of %s plus 0x%04X to ", fFixUpOffsetInSrc, fFromTarget.atom->getDisplayName(), fFromTarget.offset);
 			break;
 		case ppc::kAbsLow16:
 			sprintf(temp, "offset 0x%04X, low  16 fixup to absolute address of ", fFixUpOffsetInSrc);
@@ -2935,10 +3783,22 @@ const char* Reference<ppc>::getDescription() const
 			sprintf(temp, "offset 0x%04X, low  14 fixup to absolute address of ", fFixUpOffsetInSrc);
 			break;
 		case ppc::kAbsHigh16:
-			sprintf(temp, "offset 0x%04X, high 16 fixup to absolute address of ", fFixUpOffsetInSrc);
+			sprintf(temp, "offset 0x%04X, high 16 fixup or to absolute address of ", fFixUpOffsetInSrc);
 			break;
 		case ppc::kAbsHigh16AddLow:
-			sprintf(temp, "offset 0x%04X, high 16 fixup to absolute address of ", fFixUpOffsetInSrc);
+			sprintf(temp, "offset 0x%04X, high 16 fixup add to absolute address of ", fFixUpOffsetInSrc);
+			break;
+		case ppc::kDtraceProbe:
+			sprintf(temp, "offset 0x%04X, dtrace static probe ", fFixUpOffsetInSrc);
+			break;
+		case ppc::kDtraceProbeSite:
+			sprintf(temp, "offset 0x%04X, dtrace static probe site", fFixUpOffsetInSrc);
+			break;
+		case ppc::kDtraceIsEnabledSite:
+			sprintf(temp, "offset 0x%04X, dtrace static probe is-enabled site", fFixUpOffsetInSrc);
+			break;
+		case ppc::kDtraceTypeReference:
+			sprintf(temp, "offset 0x%04X, dtrace type/stability reference", fFixUpOffsetInSrc);
 			break;
 	}
 	// always quote by-name references
@@ -2996,6 +3856,16 @@ const char* Reference<ppc64>::getDescription() const
 							   fromQuotes, this->getFromTargetName(), fromQuotes, fFromTarget.offset );
 			return temp;
 			}
+		case ppc64::kPointerDiff16:
+			{
+			// by-name references have quoted names
+			const char* targetQuotes = (&(this->getTarget()) == NULL) ? "\"" : "";
+			const char* fromQuotes = (&(this->getFromTarget()) == NULL) ? "\"" : "";
+			sprintf(temp, "offset 0x%04llX, 16-bit pointer difference: (&%s%s%s + %u) - (&%s%s%s + %u)",
+				fFixUpOffsetInSrc, targetQuotes, this->getTargetName(), targetQuotes, fToTarget.offset,
+							   fromQuotes, this->getFromTargetName(), fromQuotes, fFromTarget.offset );
+			return temp;
+			}
 		case ppc64::kBranch24WeakImport:
 			sprintf(temp, "offset 0x%04llX, pc-rel branch fixup to weak imported ", fFixUpOffsetInSrc);
 			break;
@@ -3019,10 +3889,22 @@ const char* Reference<ppc64>::getDescription() const
 			sprintf(temp, "offset 0x%04llX, low  14 fixup to absolute address of ", fFixUpOffsetInSrc);
 			break;
 		case ppc64::kAbsHigh16:
-			sprintf(temp, "offset 0x%04llX, high 16 fixup to absolute address of ", fFixUpOffsetInSrc);
+			sprintf(temp, "offset 0x%04llX, high 16 fixup or to absolute address of ", fFixUpOffsetInSrc);
 			break;
 		case ppc64::kAbsHigh16AddLow:
-			sprintf(temp, "offset 0x%04llX, high 16 fixup to absolute address of ", fFixUpOffsetInSrc);
+			sprintf(temp, "offset 0x%04llX, high 16 fixup add to absolute address of ", fFixUpOffsetInSrc);
+			break;
+		case ppc64::kDtraceProbe:
+			sprintf(temp, "offset 0x%04llX, dtrace static probe ", fFixUpOffsetInSrc);
+			break;
+		case ppc64::kDtraceProbeSite:
+			sprintf(temp, "offset 0x%04llX, dtrace static probe site", fFixUpOffsetInSrc);
+			break;
+		case ppc64::kDtraceIsEnabledSite:
+			sprintf(temp, "offset 0x%04llX, dtrace static probe is-enabled site", fFixUpOffsetInSrc);
+			break;
+		case ppc64::kDtraceTypeReference:
+			sprintf(temp, "offset 0x%04llX, dtrace type/stability reference", fFixUpOffsetInSrc);
 			break;
 	}
 	// always quote by-name references
@@ -3103,6 +3985,18 @@ const char* Reference<x86_64>::getDescription() const
 			break;
 		case x86_64::kPCRel32GOTLoadWeakImport:
 			sprintf(temp, "offset 0x%04llX, rel32 reference to GOT entry for weak imported ", fFixUpOffsetInSrc);
+			break;
+		case x86_64::kDtraceProbe:
+			sprintf(temp, "offset 0x%04llX, dtrace static probe ", fFixUpOffsetInSrc);
+			break;
+		case x86_64::kDtraceProbeSite:
+			sprintf(temp, "offset 0x%04llX, dtrace static probe site", fFixUpOffsetInSrc);
+			break;
+		case x86_64::kDtraceIsEnabledSite:
+			sprintf(temp, "offset 0x%04llX, dtrace static probe is-enabled site", fFixUpOffsetInSrc);
+			break;
+		case x86_64::kDtraceTypeReference:
+			sprintf(temp, "offset 0x%04llX, dtrace type/stability reference", fFixUpOffsetInSrc);
 			break;
 	}
 	// always quote by-name references

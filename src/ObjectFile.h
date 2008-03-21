@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -59,21 +59,40 @@ struct LineInfo
 class ReaderOptions
 {
 public:
-						ReaderOptions() : fFullyLoadArchives(false), fLoadObjcClassesInArchives(false), fFlatNamespace(false), 
-										fForFinalLinkedImage(false), fWhyLoad(false), fDebugInfoStripping(kDebugInfoFull),
-										 fTraceDylibs(false), fTraceIndirectDylibs(false), fTraceArchives(false), fTraceOutputFile(NULL) {}
+						ReaderOptions() : fFullyLoadArchives(false), fLoadAllObjcObjectsFromArchives(false), fFlatNamespace(false), fLinkingMainExecutable(false), 
+										fForFinalLinkedImage(false), fForStatic(false), fForDyld(false), fMakeTentativeDefinitionsReal(false), 
+										fWhyLoad(false), fRootSafe(false), fSetuidSafe(false),fDebugInfoStripping(kDebugInfoFull),
+										fLogObjectFiles(false), fLogAllFiles(false),
+										fTraceDylibs(false), fTraceIndirectDylibs(false), fTraceArchives(false), 
+										fTraceOutputFile(NULL), fVersionMin(kMinUnset) {}
 	enum DebugInfoStripping { kDebugInfoNone, kDebugInfoMinimal, kDebugInfoFull };
+	enum VersionMin { kMinUnset, k10_1, k10_2, k10_3, k10_4, k10_5 };
 
-	bool				fFullyLoadArchives;
-	bool				fLoadObjcClassesInArchives;
-	bool				fFlatNamespace;
-	bool				fForFinalLinkedImage;
-	bool				fWhyLoad;
-	DebugInfoStripping	fDebugInfoStripping;
-	bool				fTraceDylibs;
-	bool				fTraceIndirectDylibs;
-	bool				fTraceArchives;
-	const char*			fTraceOutputFile;
+	struct AliasPair {
+		const char*			realName;
+		const char*			alias;
+	};
+
+	bool					fFullyLoadArchives;
+	bool					fLoadAllObjcObjectsFromArchives;
+	bool					fFlatNamespace;
+	bool					fLinkingMainExecutable;
+	bool					fForFinalLinkedImage;
+	bool					fForStatic;
+	bool					fForDyld;
+	bool					fMakeTentativeDefinitionsReal;
+	bool					fWhyLoad;
+	bool					fRootSafe;
+	bool					fSetuidSafe;
+	DebugInfoStripping		fDebugInfoStripping;
+	bool					fLogObjectFiles;
+	bool					fLogAllFiles;
+	bool					fTraceDylibs;
+	bool					fTraceIndirectDylibs;
+	bool					fTraceArchives;
+	const char*				fTraceOutputFile;
+	VersionMin				fVersionMin;
+	std::vector<AliasPair>	fAliases;
 };
 
 
@@ -90,6 +109,16 @@ public:
 		uint32_t	value;
 		const char* string;
 	};
+	enum ObjcConstraint { kObjcNone,  kObjcRetainRelease,  kObjcRetainReleaseOrGC,  kObjcGC };
+	enum CpuConstraint  { kCpuAny,  kCpuG3,  kCpuG4,  kCpuG5  };
+
+	class DylibHander
+	{
+	public:
+		virtual				~DylibHander()	{}
+		virtual Reader*		findDylib(const char* installPath, const char* fromPath) = 0;
+	};
+
 
 	static Reader* createReader(const char* path, const ReaderOptions& options);
 
@@ -99,24 +128,31 @@ public:
 	virtual std::vector<class Atom*>&	getAtoms() = 0;
 	virtual std::vector<class Atom*>*	getJustInTimeAtomsFor(const char* name) = 0;
 	virtual std::vector<Stab>*			getStabs() = 0;
-			unsigned int				getSortOrder() const { return fSortOrder; }
-			void						setSortOrder(unsigned int order) { fSortOrder=order; }
+	virtual ObjcConstraint				getObjCConstraint()			{ return kObjcNone; }
+	virtual CpuConstraint				getCpuConstraint()			{ return kCpuAny; }
+	virtual bool						objcReplacementClasses()	{ return false; }
+
+	// For relocatable object files only
+	virtual bool						canScatterAtoms()			{ return true; }
+	virtual void						optimize(std::vector<ObjectFile::Atom*>&, std::vector<ObjectFile::Atom*>&, uint32_t)		{ }
 
 	// For Dynamic Libraries only
 	virtual const char*					getInstallPath()			{ return NULL; }
 	virtual uint32_t					getTimestamp()				{ return 0; }
 	virtual uint32_t					getCurrentVersion()			{ return 0; }
 	virtual uint32_t					getCompatibilityVersion()	{ return 0; }
-	virtual std::vector<const char*>*	getDependentLibraryPaths()	{ return NULL; }
-	virtual bool						reExports(Reader*)			{ return false; }
+	virtual void						processIndirectLibraries(DylibHander* handler)	{ }
+	virtual void						setExplicitlyLinked()		{ }
+	virtual bool						explicitlyLinked()			{ return false; }
+	virtual bool						implicitlyLinked()			{ return false; }
+	virtual bool						providedExportAtom()		{ return false; }
 	virtual const char*					parentUmbrella()			{ return NULL; }
 	virtual std::vector<const char*>*	getAllowableClients()  		{ return NULL; }
 
-protected:
-										Reader() : fSortOrder(0) {}
-	virtual								~Reader() {}
 
-	unsigned int						fSortOrder;
+protected:
+										Reader() {}
+	virtual								~Reader() {}
 };
 
 class Segment
@@ -157,7 +193,7 @@ protected:
 struct Alignment 
 { 
 				Alignment(int p2, int m=0) : powerOf2(p2), modulus(m) {}
-	uint8_t		leadingZeros() const { return (modulus==0) ? powerOf2 : __builtin_clz(modulus); }
+	uint8_t		trailingZeros() const { return (modulus==0) ? powerOf2 : __builtin_ctz(modulus); }
 	uint16_t	powerOf2;  
 	uint16_t	modulus; 
 };
@@ -195,11 +231,16 @@ struct Alignment
 //	not-in			Anonymous atoms such literal c-strings, or other compiler generated data
 //	in-never-strip	Atom whose name the strip tool should never remove (e.g. REFERENCED_DYNAMICALLY in mach-o)
 //
+// Ordinal:
+// When a reader is created it is given a base ordinal number.  All atoms created by the reader
+// should return a contiguous range of ordinal values that start at the base ordinal.  The ordinal
+// values are used by the linker to sort the atom graph when producing the output file. 
+//
 class Atom
 {
 public:
 	enum Scope { scopeTranslationUnit, scopeLinkageUnit, scopeGlobal };
-	enum DefinitionKind { kRegularDefinition, kWeakDefinition, kTentativeDefinition, kExternalDefinition, kExternalWeakDefinition };
+	enum DefinitionKind { kRegularDefinition, kWeakDefinition, kTentativeDefinition, kExternalDefinition, kExternalWeakDefinition, kAbsoluteSymbol };
 	enum SymbolTableInclusion { kSymbolTableNotIn, kSymbolTableIn, kSymbolTableInAndNeverStrip, kSymbolTableInAsAbsolute };
 
 	virtual Reader*							getFile() const = 0;
@@ -216,8 +257,8 @@ public:
 	virtual bool							mustRemainInSection() const = 0;
 	virtual const char*						getSectionName() const = 0;
 	virtual Segment&						getSegment() const = 0;
-	virtual bool							requiresFollowOnAtom() const = 0;
 	virtual Atom&							getFollowOnAtom() const = 0;
+	virtual uint32_t						getOrdinal() const = 0;
 	virtual std::vector<LineInfo>*			getLineInfo() const = 0;
 	virtual Alignment						getAlignment() const = 0;
 	virtual void							copyRawContent(uint8_t buffer[]) const = 0;
@@ -225,41 +266,19 @@ public:
 
 
 			uint64_t						getSectionOffset() const	{ return fSectionOffset; }
-			uint64_t						getSegmentOffset() const	{ return fSegmentOffset; }
 			uint64_t						getAddress() const	{ return fSection->getBaseAddress() + fSectionOffset; }
-			unsigned int					getSortOrder() const { return fSortOrder; }
 			class Section*					getSection() const { return fSection; }
 
-			void							setSegmentOffset(uint64_t offset) { fSegmentOffset = offset; }
-			void							setSectionOffset(uint64_t offset) { fSectionOffset = offset; }
-			void							setSection(class Section* sect) { fSection = sect; }
-			unsigned int					setSortOrder(unsigned int order); // recursively sets follow-on atoms
+	virtual void							setSectionOffset(uint64_t offset) { fSectionOffset = offset; }
+	virtual void							setSection(class Section* sect) { fSection = sect; }
 
 protected:
-											Atom() : fSegmentOffset(0), fSectionOffset(0), fSortOrder(0), fSection(NULL) {}
+											Atom() :  fSectionOffset(0), fSection(NULL) {}
 		virtual								~Atom() {}
 
-		uint64_t							fSegmentOffset;
 		uint64_t							fSectionOffset;
-		unsigned int						fSortOrder;
 		class Section*						fSection;
 };
-
-
-
-// recursively sets follow-on atoms
-inline unsigned int Atom::setSortOrder(unsigned int order)
-{
-	if ( this->requiresFollowOnAtom() ) {
-		fSortOrder = order;
-		return this->getFollowOnAtom().setSortOrder(order+1);
-	}
-	else {
-		fSortOrder = order;
-		return (order + 1);
-	}
-}
-
 
 
 //
@@ -287,15 +306,15 @@ inline unsigned int Atom::setSortOrder(unsigned int order)
 class Reference
 {
 public:
+	enum TargetBinding { kUnboundByName, kBoundDirectly, kBoundByName, kDontBind };
 
-	virtual bool			isTargetUnbound() const = 0;
-	virtual bool			isFromTargetUnbound() const = 0;
+	virtual TargetBinding	getTargetBinding() const = 0;
+	virtual TargetBinding	getFromTargetBinding() const = 0;
 	virtual uint8_t			getKind() const = 0;
 	virtual uint64_t		getFixUpOffset() const = 0;
 	virtual const char*		getTargetName() const = 0;
 	virtual Atom&			getTarget() const = 0;
 	virtual uint64_t		getTargetOffset() const = 0;
-	virtual bool			hasFromTarget() const = 0;
 	virtual Atom&			getFromTarget() const = 0;
 	virtual const char*		getFromTargetName() const = 0;
 	virtual uint64_t		getFromTargetOffset() const = 0;

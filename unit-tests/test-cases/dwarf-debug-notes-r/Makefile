@@ -33,29 +33,27 @@ include ${TESTROOT}/include/common.makefile
 
 run: all
 
-all: foobar.o main.o crt1.o 
-	${CXX} ${CCXXFLAGS} foobar.o main.o -o dwarf-test-${ARCH} -L.
+all: foobar.o main.o 
+	${CXX} ${CCXXFLAGS} foobar.o main.o -o dwarf-test-${ARCH}
 	${FAIL_IF_BAD_MACHO} dwarf-test-${ARCH}
 	nm -ap dwarf-test-${ARCH} | ./stabs-filter.pl > dwarf-test-${ARCH}.stabs
 	${PASS_IFF} diff dwarf-test-${ARCH}.stabs expected-stabs
 
 foobar.o : foo.o bar.o
 	${LD} -r -arch ${ARCH} foo.o bar.o -o foobar.o
-	
+	${FAIL_IF_BAD_OBJ} foobar.o
+
 foo.o : foo.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 foo.cxx -c -o foo.o -mdynamic-no-pic
+	${CXX} ${CCXXFLAGS} -gdwarf-2 foo.cxx -c -o $@ -mdynamic-no-pic
+	${FAIL_IF_BAD_OBJ} $@
 
 bar.o : bar.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 bar.cxx -c -o bar.o -mdynamic-no-pic
+	${CXX} ${CCXXFLAGS} -gdwarf-2 bar.cxx -c -o $@  -mdynamic-no-pic
+	${FAIL_IF_BAD_OBJ} $@
 
 main.o : main.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 main.cxx -c -o main.o -mdynamic-no-pic
-
-# don't want any stabs in crt1.o to effect output, so my private stripped copy
-crt1.o : /usr/lib/crt1.o
-	strip -S /usr/lib/crt1.o -o crt1.o
+	${CXX} ${CCXXFLAGS} -gdwarf-2 main.cxx -c -o $@ -mdynamic-no-pic
+	${FAIL_IF_BAD_OBJ} $@
 
 clean:
-	rm -rf dwarf-test-${ARCH}  foo.o bar.o foobar.o main.o crt1.o dwarf-test-${ARCH}.stabs
-
-
+	rm -rf dwarf-test-*  *.o *.stabs

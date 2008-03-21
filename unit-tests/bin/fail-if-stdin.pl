@@ -15,10 +15,8 @@ if ( exists $ENV{UNIT_TEST_NAME} ) {
 
 if( eof STDIN )
 {
+    exit 0;
+}
 
-}
-else
-{
-    printf("FAIL $test_name\n");
-}
-exit 0;
+printf("FAIL $test_name\n");
+exit 1;

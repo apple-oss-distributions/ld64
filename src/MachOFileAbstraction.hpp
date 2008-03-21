@@ -548,6 +548,106 @@ private:
 };
 
 
+
+
+//
+// mach-o module table entry (for compatibility with old ld/dyld)
+//
+template <typename P> struct macho_dylib_module_content {};
+template <> struct macho_dylib_module_content<Pointer32<BigEndian> >    { struct dylib_module		fields; };
+template <> struct macho_dylib_module_content<Pointer32<LittleEndian> > { struct dylib_module		fields; };
+template <> struct macho_dylib_module_content<Pointer64<BigEndian> >    { struct dylib_module_64	fields; };
+template <> struct macho_dylib_module_content<Pointer64<LittleEndian> > { struct dylib_module_64	fields; };
+
+template <typename P>
+class macho_dylib_module {
+public:
+	uint32_t		module_name() const				INLINE { return E::get32(module.fields.module_name); }
+	void			set_module_name(uint32_t value)	INLINE { E::set32(module.fields.module_name, value);  }
+	
+	uint32_t		iextdefsym() const				INLINE { return E::get32(module.fields.iextdefsym); }
+	void			set_iextdefsym(uint32_t value)	INLINE { E::set32(module.fields.iextdefsym, value);  }
+	
+	uint32_t		nextdefsym() const				INLINE { return E::get32(module.fields.nextdefsym); }
+	void			set_nextdefsym(uint32_t value)	INLINE { E::set32(module.fields.nextdefsym, value);  }
+	
+	uint32_t		irefsym() const					INLINE { return E::get32(module.fields.irefsym); }
+	void			set_irefsym(uint32_t value)		INLINE { E::set32(module.fields.irefsym, value);  }
+	
+	uint32_t		nrefsym() const					INLINE { return E::get32(module.fields.nrefsym); }
+	void			set_nrefsym(uint32_t value)		INLINE { E::set32(module.fields.nrefsym, value);  }
+	
+	uint32_t		ilocalsym() const				INLINE { return E::get32(module.fields.ilocalsym); }
+	void			set_ilocalsym(uint32_t value)	INLINE { E::set32(module.fields.ilocalsym, value);  }
+	
+	uint32_t		nlocalsym() const				INLINE { return E::get32(module.fields.nlocalsym); }
+	void			set_nlocalsym(uint32_t value)	INLINE { E::set32(module.fields.nlocalsym, value);  }
+	
+	uint32_t		iextrel() const					INLINE { return E::get32(module.fields.iextrel); }
+	void			set_iextrel(uint32_t value)		INLINE { E::set32(module.fields.iextrel, value);  }
+	
+	uint32_t		nextrel() const					INLINE { return E::get32(module.fields.nextrel); }
+	void			set_nextrel(uint32_t value)		INLINE { E::set32(module.fields.nextrel, value);  }
+	
+	uint16_t		iinit() const					INLINE { return E::get32(module.fields.iinit_iterm) & 0xFFFF; }
+	uint16_t		iterm() const					INLINE { return E::get32(module.fields.iinit_iterm) > 16; }
+	void			set_iinit_iterm(uint16_t init, uint16_t term)	INLINE { E::set32(module.fields.iinit_iterm, (term<<16) | (init &0xFFFF));  }
+	
+	uint16_t		ninit() const					INLINE { return E::get32(module.fields.ninit_nterm) & 0xFFFF; }
+	uint16_t		nterm() const					INLINE { return E::get32(module.fields.ninit_nterm) > 16; }
+	void			set_ninit_nterm(uint16_t init, uint16_t term)	INLINE { E::set32(module.fields.ninit_nterm, (term<<16) | (init &0xFFFF));  }
+	
+	uint64_t		objc_module_info_addr() const				INLINE { return P::getP(module.fields.objc_module_info_addr); }
+	void			set_objc_module_info_addr(uint64_t value)	INLINE { P::setP(module.fields.objc_module_info_addr, value);  }
+	
+	uint32_t		objc_module_info_size() const				INLINE { return E::get32(module.fields.objc_module_info_size); }
+	void			set_objc_module_info_size(uint32_t value)	INLINE { E::set32(module.fields.objc_module_info_size, value);  }
+	
+	
+	typedef typename P::E		E;
+private:
+	macho_dylib_module_content<P>	module;
+};
+
+
+//
+// mach-o dylib_reference entry
+//
+template <typename P>
+class macho_dylib_reference {
+public:
+	uint32_t		isym() const				INLINE { return E::getBits(fields, 0, 24); }
+	void			set_isym(uint32_t value)	INLINE { E::setBits(fields, value, 0, 24); }
+	
+	uint8_t			flags() const				INLINE { return E::getBits(fields, 24, 8); }
+	void			set_flags(uint8_t value)	INLINE { E::setBits(fields, value, 24, 8); }
+	
+	typedef typename P::E		E;
+private:
+	uint32_t		fields;
+};
+
+
+
+//
+// mach-o two-level hints load command
+//
+template <typename P>
+class macho_dylib_table_of_contents {
+public:
+	uint32_t		symbol_index() const				INLINE { return E::get32(fields.symbol_index); }
+	void			set_symbol_index(uint32_t value)	INLINE { E::set32(fields.symbol_index, value); }
+
+	uint32_t		module_index() const				INLINE { return E::get32(fields.module_index); }
+	void			set_module_index(uint32_t value)	INLINE { E::set32(fields.module_index, value);  }
+		
+	typedef typename P::E		E;
+private:
+	dylib_table_of_contents	fields;
+};
+
+
+
 //
 // mach-o two-level hints load command
 //
@@ -602,6 +702,55 @@ private:
 	pint_t					thread_registers[1];
 };
 
+
+//
+// mach-o misc data 
+//
+template <typename P>
+class macho_linkedit_data_command {
+public:
+	uint32_t		cmd() const					INLINE { return E::get32(fields.cmd); }
+	void			set_cmd(uint32_t value)		INLINE { E::set32(fields.cmd, value); }
+
+	uint32_t		cmdsize() const				INLINE { return E::get32(fields.cmdsize); }
+	void			set_cmdsize(uint32_t value)	INLINE { E::set32(fields.cmdsize, value); }
+
+	uint32_t		dataoff() const				INLINE { return E::get32(fields.dataoff); }
+	void			set_dataoff(uint32_t value)	INLINE { E::set32(fields.dataoff, value);  }
+	
+	uint32_t		datasize() const			INLINE { return E::get32(fields.datasize); }
+	void			set_datasize(uint32_t value)INLINE { E::set32(fields.datasize, value);  }
+	
+	
+	typedef typename P::E		E;
+private:
+	linkedit_data_command	fields;
+};
+
+
+//
+// mach-o rpath  
+//
+template <typename P>
+class macho_rpath_command {
+public:
+	uint32_t		cmd() const						INLINE { return E::get32(fields.cmd); }
+	void			set_cmd(uint32_t value)			INLINE { E::set32(fields.cmd, value); }
+
+	uint32_t		cmdsize() const					INLINE { return E::get32(fields.cmdsize); }
+	void			set_cmdsize(uint32_t value)		INLINE { E::set32(fields.cmdsize, value); }
+
+	uint32_t		path_offset() const				INLINE { return E::get32(fields.path.offset); }
+	void			set_path_offset(uint32_t value)	INLINE { E::set32(fields.path.offset, value);  }
+	
+	const char*		path() const					INLINE { return (const char*)&fields + path_offset(); }
+	void			set_path_offset()				INLINE { set_path_offset(sizeof(fields)); }
+	
+	
+	typedef typename P::E		E;
+private:
+	rpath_command	fields;
+};
 
 
 
@@ -692,13 +841,16 @@ public:
 	void			set_r_type(uint8_t x)		INLINE { uint32_t temp = E::get32(other); BigEndian::setBitsRaw(temp, x, 4, 4);  E::set32(other, temp); }
 
 	uint32_t		r_address() const			INLINE { return BigEndian::getBitsRaw(E::get32(other), 8, 24); }
-	void			set_r_address(uint32_t x)	INLINE { uint32_t temp = E::get32(other); BigEndian::setBitsRaw(temp, x, 8, 24);  E::set32(other, temp); }
+	void			set_r_address(uint32_t x)			{ if ( x > 0x00FFFFFF ) throw "scattered reloc r_address too large"; 
+														uint32_t temp = E::get32(other); BigEndian::setBitsRaw(temp, x, 8, 24);  E::set32(other, temp); }
 
 	uint32_t		r_value() const				INLINE { return E::get32(value); }
 	void			set_r_value(uint32_t x)		INLINE { E::set32(value, x); }
 
 	uint32_t		r_other() const				INLINE { return other; }
 	
+	void			set_r_length()				INLINE { set_r_length((sizeof(typename P::uint_t)==8) ? 3 : 2); }
+
 	typedef typename P::E		E;
 private:
 	uint32_t		other;

@@ -39,7 +39,7 @@
 /* Begin PBXBuildFile section */
 		F9023C4E06D5A272001BBF46 /* ld.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9023C3F06D5A254001BBF46 /* ld.cpp */; };
 		F933E3D9092E855B0083EAC8 /* ObjectDump.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F971EED706D5AD240041D381 /* ObjectDump.cpp */; };
-		F97288E707D277570031794D /* SectCreate.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F97288E607D277570031794D /* SectCreate.cpp */; };
+		F97F5029070D0BB200B9FCD7 /* ld.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = F97F5028070D0BB200B9FCD7 /* ld.1 */; };
 		F9B1A2640A3A563E00DA8FAB /* rebase.1 in CopyFiles */ = {isa = PBXBuildFile; fileRef = F9B1A2580A3A448800DA8FAB /* rebase.1 */; };
 		F9C0D4BD06DD28D2001C7193 /* Options.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9C0D48A06DD1E1B001C7193 /* Options.cpp */; };
 		F9EA72D5097454FF008B4F1D /* machochecker.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9EA72D4097454FF008B4F1D /* machochecker.cpp */; };
@@ -120,6 +120,7 @@
 			dstPath = /usr/share/man/man1;
 			dstSubfolderSpec = 0;
 			files = (
+				F97F5029070D0BB200B9FCD7 /* ld.1 in CopyFiles */,
 				F9FCC3F20A54A75600CEB866 /* ld64.1 in CopyFiles */,
 			);
 			runOnlyForDeploymentPostprocessing = 1;
@@ -137,8 +138,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		3DA587190ACC53BE0015C432 /* LLVMReader.hpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.h; name = LLVMReader.hpp; path = src/LLVMReader.hpp; sourceTree = "<group>"; };
 		C02A29DE0953B26E001FB8C1 /* ChangeLog */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text; path = ChangeLog; sourceTree = "<group>"; };
-		F9023C3906D5A23E001BBF46 /* ld64 */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ld64; sourceTree = BUILT_PRODUCTS_DIR; };
+		F9023C3906D5A23E001BBF46 /* ld */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ld; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9023C3E06D5A254001BBF46 /* ExecutableFile.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = ExecutableFile.h; path = src/ExecutableFile.h; sourceTree = "<group>"; };
 		F9023C3F06D5A254001BBF46 /* ld.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ld.cpp; path = src/ld.cpp; sourceTree = "<group>"; };
 		F9023C4106D5A254001BBF46 /* ObjectFile.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = ObjectFile.h; path = src/ObjectFile.h; sourceTree = "<group>"; };
@@ -151,9 +153,8 @@
 		F933E3CE092E84250083EAC8 /* MachOWriterExecutable.hpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.h; name = MachOWriterExecutable.hpp; path = src/MachOWriterExecutable.hpp; sourceTree = "<group>"; };
 		F971EED306D5ACF60041D381 /* ObjectDump */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ObjectDump; sourceTree = BUILT_PRODUCTS_DIR; };
 		F971EED706D5AD240041D381 /* ObjectDump.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ObjectDump.cpp; path = src/ObjectDump.cpp; sourceTree = "<group>"; };
-		F97288E607D277570031794D /* SectCreate.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = SectCreate.cpp; path = src/SectCreate.cpp; sourceTree = "<group>"; };
-		F972890007D27FD00031794D /* SectCreate.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = SectCreate.h; path = src/SectCreate.h; sourceTree = "<group>"; };
 		F97F5028070D0BB200B9FCD7 /* ld.1 */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text.man; name = ld.1; path = doc/man/man1/ld.1; sourceTree = "<group>"; };
+		F98D26850AA779BD00416316 /* OpaqueSection.hpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.h; name = OpaqueSection.hpp; path = src/OpaqueSection.hpp; sourceTree = "<group>"; };
 		F9B1A2580A3A448800DA8FAB /* rebase.1 */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text.man; name = rebase.1; path = doc/man/man1/rebase.1; sourceTree = "<group>"; };
 		F9C0D48A06DD1E1B001C7193 /* Options.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = Options.cpp; path = src/Options.cpp; sourceTree = "<group>"; };
 		F9C0D48B06DD1E1B001C7193 /* Options.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = Options.h; path = src/Options.h; sourceTree = "<group>"; };
@@ -209,13 +210,13 @@
 				F933E3CB092E84250083EAC8 /* MachOReaderArchive.hpp */,
 				F933E3CC092E84250083EAC8 /* MachOReaderDylib.hpp */,
 				F933E3CE092E84250083EAC8 /* MachOWriterExecutable.hpp */,
+				3DA587190ACC53BE0015C432 /* LLVMReader.hpp */,
 				F9023C3E06D5A254001BBF46 /* ExecutableFile.h */,
 				F9023C4106D5A254001BBF46 /* ObjectFile.h */,
+				F98D26850AA779BD00416316 /* OpaqueSection.hpp */,
 				F9023C3F06D5A254001BBF46 /* ld.cpp */,
 				F9C0D48A06DD1E1B001C7193 /* Options.cpp */,
 				F9C0D48B06DD1E1B001C7193 /* Options.h */,
-				F97288E607D277570031794D /* SectCreate.cpp */,
-				F972890007D27FD00031794D /* SectCreate.h */,
 				F9EA7582097882F3008B4F1D /* debugline.c */,
 				F9EA7583097882F3008B4F1D /* debugline.h */,
 				F9EA72D4097454FF008B4F1D /* machochecker.cpp */,
@@ -231,7 +232,7 @@
 		F9023C3A06D5A23E001BBF46 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				F9023C3906D5A23E001BBF46 /* ld64 */,
+				F9023C3906D5A23E001BBF46 /* ld */,
 				F971EED306D5ACF60041D381 /* ObjectDump */,
 				F9EA72CB097454A6008B4F1D /* machocheck */,
 				F9EC77EE0A2F85F6002A3E39 /* rebase */,
@@ -249,6 +250,7 @@
 				F9023C3606D5A23E001BBF46 /* Sources */,
 				F9023C3706D5A23E001BBF46 /* Frameworks */,
 				F97F5025070D0B6300B9FCD7 /* CopyFiles */,
+				F9FCC3EF0A54A4ED00CEB866 /* ShellScript */,
 			);
 			buildRules = (
 				F9E8D4BE07FCAF2A00FD5801 /* PBXBuildRule */,
@@ -258,7 +260,7 @@
 			);
 			name = ld;
 			productName = ld64;
-			productReference = F9023C3906D5A23E001BBF46 /* ld64 */;
+			productReference = F9023C3906D5A23E001BBF46 /* ld */;
 			productType = "com.apple.product-type.tool";
 		};
 		F971EED206D5ACF60041D381 /* ObjectDump */ = {
@@ -346,7 +348,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/csh;
-			shellScript = "# Let tests set MACOSX_DEPLOYMENT_TARGET as they need\nunsetenv MACOSX_DEPLOYMENT_TARGET\n\n# always use new linker\nsetenv LD_NO_CLASSIC_LINKER\n\n# run full test suite\n$SRCROOT/unit-tests/run-all-unit-tests\n\nexit 0";
+			shellScript = "# Let tests set MACOSX_DEPLOYMENT_TARGET as they need\nunsetenv MACOSX_DEPLOYMENT_TARGET\n\n# always use new linker\nsetenv LD_NO_CLASSIC_LINKER\nsetenv LD_NO_CLASSIC_LINKER_STATIC\n\n# run full test suite\n\"$SRCROOT\"/unit-tests/run-all-unit-tests\n\nexit 0";
+			showEnvVarsInLog = 0;
+		};
+		F9FCC3EF0A54A4ED00CEB866 /* ShellScript */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 8;
+			files = (
+			);
+			inputPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 1;
+			shellPath = /bin/sh;
+			shellScript = "cd ${DSTROOT}/usr/bin\nln -s ld ld64";
+			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -357,7 +374,6 @@
 			files = (
 				F9023C4E06D5A272001BBF46 /* ld.cpp in Sources */,
 				F9C0D4BD06DD28D2001C7193 /* Options.cpp in Sources */,
-				F97288E707D277570031794D /* SectCreate.cpp in Sources */,
 				F9EA7584097882F3008B4F1D /* debugline.c in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -458,10 +474,11 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INSTALL_PATH = /usr/bin;
+				MACOSX_DEPLOYMENT_TARGET = 10.5;
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
 				OTHER_LDFLAGS = "";
 				PREBINDING = NO;
-				PRODUCT_NAME = ld64;
+				PRODUCT_NAME = ld;
 				SECTORDER_FLAGS = "";
 				VERSIONING_SYSTEM = "apple-generic";
 				WARNING_CFLAGS = "-Wall";
@@ -508,7 +525,7 @@
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
 				OTHER_LDFLAGS = "";
 				PREBINDING = NO;
-				PRODUCT_NAME = ld64;
+				PRODUCT_NAME = ld;
 				SECTORDER_FLAGS = "";
 				VALID_ARCHS = "i386 ppc";
 				VERSIONING_SYSTEM = "apple-generic";

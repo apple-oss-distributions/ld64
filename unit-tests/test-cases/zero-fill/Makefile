@@ -35,6 +35,4 @@ all:
 	${PASS_IFF_GOOD_MACHO} test-${ARCH}
 
 clean:
-	rm  test-${ARCH}
-	
-
+	rm -rf test-*

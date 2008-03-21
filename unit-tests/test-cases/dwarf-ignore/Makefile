@@ -36,6 +36,4 @@ all:
 	size -l dwarf-hello-${ARCH} | grep __DWARF | ${PASS_IFF_EMPTY}
 
 clean:
-	rm -rf dwarf-hello-${ARCH} 
-	
-
+	rm -rf dwarf-hello-*

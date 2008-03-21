@@ -38,17 +38,26 @@ all:
 	rm -f foo-${ARCH}
 
 # Test with stabs
-	${CC} ${CCFLAGS} foo.c -o foo-${ARCH} -gfull
+	${CC} ${CCFLAGS} foo.c -o foo-${ARCH} -gfull -gstabs+
 	${FAIL_IF_BAD_MACHO} foo-${ARCH}
 	${OTOOL} -hlv foo-${ARCH} | grep LC_UUID | ${FAIL_IF_STDIN}
 
 # Test with two files one with UUID
 	${CC} ${CCFLAGS} bar.c -c -gdwarf-2
+	${FAIL_IF_BAD_OBJ} bar.o
+
 	${LD} -arch ${ARCH} bar.o -r -o bar-${ARCH}.o -no_uuid
+	${FAIL_IF_BAD_OBJ} bar-${ARCH}.o
+
 	${CC} ${CCFLAGS} foo.c -c -gdwarf-2
+	${FAIL_IF_BAD_OBJ} foo.o
+
 	${LD} -arch ${ARCH} foo.o -r -o foo-${ARCH}.o
+	${FAIL_IF_BAD_OBJ} foo-${ARCH}.o
+
 	${CC} ${CCFLAGS} foo-${ARCH}.o bar-${ARCH}.o -o temp-${ARCH}
 	${FAIL_IF_BAD_MACHO} temp-${ARCH}
+
 	${OTOOL} -hlv temp-${ARCH} | grep LC_UUID | ${FAIL_IF_EMPTY}
 	rm -f foo.o bar.o foo-${ARCH}.o bar-${ARCH}.o temp-${ARCH}
 
@@ -58,4 +67,4 @@ all:
 	${OTOOL} -hlv foo-${ARCH} | grep LC_UUID | ${PASS_IFF_EMPTY}
 
 clean:
-	rm -rf foo-${ARCH} bar-${ARCH}.dylib temp-${ARCH}.dylib
+	rm -rf foo-*

@@ -44,9 +44,6 @@ all:
 	${FAIL_IF_BAD_MACHO} dylib2-${ARCH}
 	nm -j dylib2-${ARCH} | grep dead_door_knob | ${FAIL_IF_EMPTY}
 	nm -j dylib2-${ARCH} | grep deadwood | ${PASS_IFF_EMPTY}
-	
 
 clean:
-	rm -rf main-${ARCH} dylib-${ARCH} dylib2-${ARCH}
-	
-
+	rm -rf main-* dylib-* dylib2-*

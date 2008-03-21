@@ -35,11 +35,10 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} hello.c -c -o hello.o  -mmacosx-version-min=10.4
-	${LD} -lcrt1.o hello.o -o hello -lSystem 2> fail.log
-	${FAIL_IF_BAD_MACHO} hello
-	file hello | grep ${ARCH} | ${PASS_IFF_STDIN}
+	${FAIL_IF_BAD_OBJ} hello.o
+	${LD} -r -lcrt1.o hello.o -o hello-r.o -lSystem
+	${FAIL_IF_ERROR} ${OBJECTDUMP} hello-r.o >/dev/null
+	file hello-r.o | grep ${ARCH} | ${PASS_IFF_STDIN}
 
 clean:
-	rm  hello.o hello fail.log
-	
-
+	rm -rf *.o

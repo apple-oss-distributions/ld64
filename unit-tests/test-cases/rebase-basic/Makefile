@@ -32,15 +32,22 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	${CC} -arch ${ARCH} -c foo.c -o foo.${ARCH}.o
-	${CC} -arch ${ARCH} -c bar.m -o bar.${ARCH}.o
-	${CC} -arch ${ARCH} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -o libfoo.${ARCH}.dylib -framework Foundation -single_module -mmacosx-version-min=10.5
-	${CC} -arch ${ARCH} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -o libfoo-alt.${ARCH}.dylib -framework Foundation -single_module -mmacosx-version-min=10.5 -seg1addr 0x12340000 -install_name libfoo.${ARCH}.dylib
+	${CC} -c foo.c -o foo.${ARCH}.o
+	${FAIL_IF_BAD_OBJ} foo.${ARCH}.o
+
+	${CC} -c bar.m -o bar.${ARCH}.o
+	${FAIL_IF_BAD_OBJ} bar.${ARCH}.o
+
+	${CC} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -o libfoo.${ARCH}.dylib -framework Foundation -single_module -mmacosx-version-min=10.5
+	${FAIL_IF_BAD_MACHO} libfoo.${ARCH}.dylib
+
+	${CC} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -o libfoo-alt.${ARCH}.dylib -framework Foundation -single_module -mmacosx-version-min=10.5 -seg1addr 0x12340000 -install_name libfoo.${ARCH}.dylib
+	${FAIL_IF_BAD_MACHO} libfoo-alt.${ARCH}.dylib
+
 	rebase -arch ${ARCH} -low_address 0x12340000 libfoo.${ARCH}.dylib
 	${FAIL_IF_BAD_MACHO} libfoo.${ARCH}.dylib
+
 	${PASS_IFF} diff libfoo.${ARCH}.dylib libfoo-alt.${ARCH}.dylib
 
 clean:
-	rm foo.${ARCH}.o bar.${ARCH}.o libfoo.${ARCH}.dylib libfoo-alt.${ARCH}.dylib
-	
-
+	rm *.o *.dylib

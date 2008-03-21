@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -38,8 +38,6 @@ namespace ExecutableFile {
 	{
 		ObjectFile::Reader*		reader;
 		DynamicLibraryOptions	options;
-		bool					indirect;	// library found indirect.  Do not make load command
-		ObjectFile::Reader*		directReader;	// direct library which re-exports this library
 	};
 
 	class Writer : public ObjectFile::Reader
@@ -50,13 +48,16 @@ namespace ExecutableFile {
 		virtual const char*								getPath() = 0;
 		virtual std::vector<class ObjectFile::Atom*>&	getAtoms() = 0;
 		virtual std::vector<class ObjectFile::Atom*>*	getJustInTimeAtomsFor(const char* name) = 0;
-
+		virtual ObjectFile::Atom&						makeObjcInfoAtom(ObjectFile::Reader::ObjcConstraint objcContraint, 
+																		bool objcReplacementClasses) = 0;
 		virtual class ObjectFile::Atom*					getUndefinedProxyAtom(const char* name) = 0;
 		virtual uint64_t								write(std::vector<class ObjectFile::Atom*>& atoms,
 															  std::vector<class ObjectFile::Reader::Stab>& stabs,
 															  class ObjectFile::Atom* entryPointAtom,
 															  class ObjectFile::Atom* dyldHelperAtom,
-															  bool createUUID) = 0;
+															  bool createUUID, bool canScatter,
+															  ObjectFile::Reader::CpuConstraint cpuConstraint,
+															  bool biggerThanTwoGigs) = 0;
 
 	protected:
 									Writer(std::vector<DyLibUsed>&) {};

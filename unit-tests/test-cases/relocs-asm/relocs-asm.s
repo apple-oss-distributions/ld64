@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -186,6 +186,18 @@ _test_branches:
 	
 	# call external + addend
 	jne	_external+16
+	
+_pointer_diffs:
+	nop
+	call	_get_ret_eax	
+1:	movl _foo-1b(%eax),%esi
+	movl _foo+10-1b(%eax),%esi
+	movl _test_branches-1b(%eax),%esi
+	movl _test_branches+3-1b(%eax),%esi
+	
+_word_relocs:
+	callw	_pointer_diffs
+
 #endif
 
 
@@ -272,9 +284,34 @@ _test_diffs:
 Llocal2:
 	.long 0
 	.long Llocal2-_test_branches
+	.long . - _test_branches
+	.long . - _test_branches + 8
+	.long _test_branches - .
+	.long _test_branches - . + 8
+	.long _test_branches - . - 8
 #if __ppc64__
 	.quad Llocal2-_test_branches
 #endif
+
+_foo: nop
+
+	.align 2	
+_distance_from_foo:
+	.long	0
+	.long	. - _foo
+	.long	. - 8 - _foo
+	
+	
+_distance_to_foo:
+	.long	_foo - .
+	.long	_foo - . + 4
+	
+
+_distance_to_here:	
+	.long	_foo - _distance_to_here
+	.long	_foo - _distance_to_here - 4 
+	.long	_foo - _distance_to_here - 12 
+	.long	0
 
 
 #if __x86_64__

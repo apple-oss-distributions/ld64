@@ -35,6 +35,4 @@ all:
 	${PASS_IFF_GOOD_MACHO} hello-${ARCH}
 
 clean:
-	rm  hello-${ARCH}
-	
-
+	rm  hello-*

@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2006-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -37,6 +37,8 @@
 #include <mach-o/x86_64/reloc.h>
 
 #include <vector>
+#include <set>
+#include <ext/hash_set>
 
 #include "MachOFileAbstraction.hpp"
 #include "Architectures.hpp"
@@ -71,11 +73,20 @@ private:
 	typedef typename A::P::E				E;
 	typedef typename A::P::uint_t			pint_t;
 	
+	class CStringEquals
+	{
+	public:
+		bool operator()(const char* left, const char* right) const { return (strcmp(left, right) == 0); }
+	};
+
+	typedef __gnu_cxx::hash_set<const char*, __gnu_cxx::hash<const char*>, CStringEquals>  StringSet;
+
 												MachOChecker(const uint8_t* fileContent, uint32_t fileLength, const char* path);
 	void										checkMachHeader();
 	void										checkLoadCommands();
 	void										checkSection(const macho_segment_command<P>* segCmd, const macho_section<P>* sect);
 	uint8_t										loadCommandSizeMask();
+	void										checkSymbolTable();
 	void										checkIndirectSymbolTable();
 	void										checkRelocations();
 	void										checkExternalReloation(const macho_relocation_info<P>* reloc);
@@ -90,13 +101,13 @@ private:
 	const char*									fStringsEnd;
 	const macho_nlist<P>*						fSymbols;
 	uint32_t									fSymbolCount;
+	const macho_dysymtab_command<P>*			fDynamicSymbolTable;
 	const uint32_t*								fIndirectTable;
 	uint32_t									fIndirectTableCount;
 	const macho_relocation_info<P>*				fLocalRelocations;
 	uint32_t									fLocalRelocationsCount;
 	const macho_relocation_info<P>*				fExternalRelocations;
 	uint32_t									fExternalRelocationsCount;
-	pint_t										fRelocBase;
 	bool										fWriteableSegmentWithAddrOver4G;
 	const macho_segment_command<P>*				fFirstSegment;
 	const macho_segment_command<P>*				fFirstWritableSegment;
@@ -185,9 +196,9 @@ template <> uint8_t MachOChecker<x86_64>::loadCommandSizeMask() { return 0x07; }
 
 template <typename A>
 MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, const char* path)
- : fHeader(NULL), fLength(fileLength), fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fIndirectTableCount(0),
+ : fHeader(NULL), fLength(fileLength), fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fDynamicSymbolTable(NULL), fIndirectTableCount(0),
  fLocalRelocations(NULL),  fLocalRelocationsCount(0),  fExternalRelocations(NULL),  fExternalRelocationsCount(0),
- fRelocBase(0), fWriteableSegmentWithAddrOver4G(false), fFirstSegment(NULL), fFirstWritableSegment(NULL)
+ fWriteableSegmentWithAddrOver4G(false), fFirstSegment(NULL), fFirstWritableSegment(NULL)
 {
 	// sanity check
 	if ( ! validFile(fileContent) )
@@ -205,6 +216,8 @@ MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, c
 	checkIndirectSymbolTable();
 
 	checkRelocations();
+	
+	checkSymbolTable();
 }
 
 
@@ -215,10 +228,11 @@ void MachOChecker<A>::checkMachHeader()
 		throw "sizeofcmds in mach_header is larger than file";
 	
 	uint32_t flags = fHeader->flags();
-	uint32_t invalidBits = MH_INCRLINK | MH_LAZY_INIT | 0xFFFC0000;
+	const uint32_t invalidBits = MH_INCRLINK | MH_LAZY_INIT | 0xFFE00000;
 	if ( flags & invalidBits )
 		throw "invalid bits in mach_header flags";
-		
+	if ( (flags & MH_NO_REEXPORTED_DYLIBS) && (fHeader->filetype() != MH_DYLIB) ) 
+		throw "MH_NO_REEXPORTED_DYLIBS bit of mach_header flags only valid for dylibs";
 }
 
 template <typename A>
@@ -250,12 +264,18 @@ void MachOChecker<A>::checkLoadCommands()
 			case LC_ID_DYLINKER:
 			case macho_routines_command<P>::CMD:
 			case LC_SUB_FRAMEWORK:
-			case LC_SUB_UMBRELLA:
 			case LC_SUB_CLIENT:
 			case LC_TWOLEVEL_HINTS:
 			case LC_PREBIND_CKSUM:
 			case LC_LOAD_WEAK_DYLIB:
 			case LC_UUID:
+			case LC_REEXPORT_DYLIB:
+			case LC_SEGMENT_SPLIT_INFO:
+				break;
+			case LC_SUB_UMBRELLA:
+			case LC_SUB_LIBRARY:
+				if ( fHeader->flags() & MH_NO_REEXPORTED_DYLIBS )
+					throw "MH_NO_REEXPORTED_DYLIBS bit of mach_header flags should not be set in an image with LC_SUB_LIBRARY or LC_SUB_UMBRELLA";
 				break;
 			default:
 				throwf("load command #%d is an unknown kind 0x%X", i, cmd->cmd());
@@ -324,9 +344,13 @@ void MachOChecker<A>::checkLoadCommands()
 			// cache interesting segments
 			if ( fFirstSegment == NULL )
 				fFirstSegment = segCmd;
-			if ( (fFirstWritableSegment == NULL) && ((segCmd->initprot() & VM_PROT_WRITE) != 0) )
-				fFirstWritableSegment = segCmd;
-				
+			if ( (segCmd->initprot() & VM_PROT_WRITE) != 0 ) {
+				if ( fFirstWritableSegment == NULL )
+					fFirstWritableSegment = segCmd;
+				if ( segCmd->vmaddr() > 0x100000000ULL )
+					fWriteableSegmentWithAddrOver4G = true;
+			}
+	
 			// check section ranges
 			const macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
 			const macho_section<P>* const sectionsEnd = &sectionsStart[segCmd->nsects()];
@@ -372,7 +396,7 @@ void MachOChecker<A>::checkLoadCommands()
 		}
 	}
 
-	// check LC_SYMTAB and LC_DYSYMTAB
+	// check LC_SYMTAB, LC_DYSYMTAB, and LC_SEGMENT_SPLIT_INFO
 	cmd = cmds;
 	bool foundDynamicSymTab = false;
 	for (uint32_t i = 0; i < cmd_count; ++i) {
@@ -386,12 +410,18 @@ void MachOChecker<A>::checkLoadCommands()
 						throw "symbol table not in __LINKEDIT";
 					if ( (symtab->symoff() + fSymbolCount*sizeof(macho_nlist<P>*)) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
 						throw "symbol table end not in __LINKEDIT";
+					if ( (symtab->symoff() % sizeof(pint_t)) != 0 )
+						throw "symbol table start not pointer aligned";
 					fStrings = (char*)fHeader + symtab->stroff();
 					fStringsEnd = fStrings + symtab->strsize();
 					if ( symtab->stroff() < linkEditSegment->fileoff() )
 						throw "string pool not in __LINKEDIT";
 					if ( (symtab->stroff()+symtab->strsize()) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
 						throw "string pool extends beyond __LINKEDIT";
+					if ( (symtab->stroff() % 4) != 0 ) // work around until rdar://problem/4737991 is fixed
+						throw "string pool start not pointer aligned";
+					if ( (symtab->strsize() % sizeof(pint_t)) != 0 )	
+						throw "string pool size not a multiple of pointer size";
 				}
 				break;
 			case LC_DYSYMTAB:
@@ -399,31 +429,52 @@ void MachOChecker<A>::checkLoadCommands()
 					if ( isStaticExecutable )
 						throw "LC_DYSYMTAB should not be used in static executable";
 					foundDynamicSymTab = true;
-					const macho_dysymtab_command<P>* dsymtab = (struct macho_dysymtab_command<P>*)cmd;
-					fIndirectTable = (uint32_t*)((char*)fHeader + dsymtab->indirectsymoff());
-					fIndirectTableCount = dsymtab->nindirectsyms();
+					fDynamicSymbolTable = (struct macho_dysymtab_command<P>*)cmd;
+					fIndirectTable = (uint32_t*)((char*)fHeader + fDynamicSymbolTable->indirectsymoff());
+					fIndirectTableCount = fDynamicSymbolTable->nindirectsyms();
 					if ( fIndirectTableCount != 0  ) {
-						if ( dsymtab->indirectsymoff() < linkEditSegment->fileoff() )
+						if ( fDynamicSymbolTable->indirectsymoff() < linkEditSegment->fileoff() )
 							throw "indirect symbol table not in __LINKEDIT";
-						if ( (dsymtab->indirectsymoff()+fIndirectTableCount*8) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+						if ( (fDynamicSymbolTable->indirectsymoff()+fIndirectTableCount*8) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
 							throw "indirect symbol table not in __LINKEDIT";
+						if ( (fDynamicSymbolTable->indirectsymoff() % sizeof(pint_t)) != 0 )
+							throw "indirect symbol table not pointer aligned";
 					}
-					fLocalRelocationsCount = dsymtab->nlocrel();
+					fLocalRelocationsCount = fDynamicSymbolTable->nlocrel();
 					if ( fLocalRelocationsCount != 0 ) {
-						fLocalRelocations = (const macho_relocation_info<P>*)((char*)fHeader + dsymtab->locreloff());
-						if ( dsymtab->locreloff() < linkEditSegment->fileoff() )
+						fLocalRelocations = (const macho_relocation_info<P>*)((char*)fHeader + fDynamicSymbolTable->locreloff());
+						if ( fDynamicSymbolTable->locreloff() < linkEditSegment->fileoff() )
 							throw "local relocations not in __LINKEDIT";
-						if ( (dsymtab->locreloff()+fLocalRelocationsCount*sizeof(macho_relocation_info<P>)) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+						if ( (fDynamicSymbolTable->locreloff()+fLocalRelocationsCount*sizeof(macho_relocation_info<P>)) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
 							throw "local relocations not in __LINKEDIT";
+						if ( (fDynamicSymbolTable->locreloff() % sizeof(pint_t)) != 0 )
+							throw "local relocations table not pointer aligned";
 					}
-					fExternalRelocationsCount = dsymtab->nextrel();
+					fExternalRelocationsCount = fDynamicSymbolTable->nextrel();
 					if ( fExternalRelocationsCount != 0 ) {
-						fExternalRelocations = (const macho_relocation_info<P>*)((char*)fHeader + dsymtab->extreloff());
-						if ( dsymtab->extreloff() < linkEditSegment->fileoff() )
-							throw "local relocations not in __LINKEDIT";
-						if ( (dsymtab->extreloff()+fExternalRelocationsCount*sizeof(macho_relocation_info<P>)) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
-							throw "local relocations not in __LINKEDIT";
+						fExternalRelocations = (const macho_relocation_info<P>*)((char*)fHeader + fDynamicSymbolTable->extreloff());
+						if ( fDynamicSymbolTable->extreloff() < linkEditSegment->fileoff() )
+							throw "external relocations not in __LINKEDIT";
+						if ( (fDynamicSymbolTable->extreloff()+fExternalRelocationsCount*sizeof(macho_relocation_info<P>)) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+							throw "external relocations not in __LINKEDIT";
+						if ( (fDynamicSymbolTable->extreloff() % sizeof(pint_t)) != 0 )
+							throw "external relocations table not pointer aligned";
 					}
+				}
+				break;
+			case LC_SEGMENT_SPLIT_INFO:
+				{
+					if ( isStaticExecutable )
+						throw "LC_SEGMENT_SPLIT_INFO should not be used in static executable";
+					const macho_linkedit_data_command<P>* info = (struct macho_linkedit_data_command<P>*)cmd;
+					if ( info->dataoff() < linkEditSegment->fileoff() )
+						throw "split seg info not in __LINKEDIT";
+					if ( (info->dataoff()+info->datasize()) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+						throw "split seg info not in __LINKEDIT";
+					if ( (info->dataoff() % sizeof(pint_t)) != 0 )
+						throw "split seg info table not pointer aligned";
+					if ( (info->datasize() % sizeof(pint_t)) != 0 )
+						throw "split seg info size not a multiple of pointer size";
 				}
 				break;
 		}
@@ -433,9 +484,7 @@ void MachOChecker<A>::checkLoadCommands()
 		throw "missing dynamic symbol table";
 	if ( fStrings == NULL )
 		throw "missing symbol table";
-	
-	fRelocBase = this->relocBase();
-	
+		
 }
 
 template <typename A>
@@ -489,6 +538,23 @@ void MachOChecker<A>::checkIndirectSymbolTable()
 	}
 }
 
+
+template <typename A>
+void MachOChecker<A>::checkSymbolTable()
+{
+	// verify no duplicate external symbol names
+	if ( fDynamicSymbolTable != NULL ) {
+		StringSet externalNames;
+		const macho_nlist<P>* const	exportedStart = &fSymbols[fDynamicSymbolTable->iextdefsym()];
+		const macho_nlist<P>* const exportedEnd = &exportedStart[fDynamicSymbolTable->nextdefsym()];
+		for(const macho_nlist<P>* p = exportedStart; p < exportedEnd; ++p) {
+			const char* symName = &fStrings[p->n_strx()];
+			if ( externalNames.find(symName) != externalNames.end() )
+				throwf("duplicate external symbol: %s", symName);
+			externalNames.insert(symName);
+		}
+	}
+}
 
 
 template <>
@@ -549,7 +615,17 @@ bool MachOChecker<A>::addressInWritableSegment(pint_t address)
 template <>
 void MachOChecker<ppc>::checkExternalReloation(const macho_relocation_info<P>* reloc)
 {
-	// FIX
+	if ( reloc->r_length() != 2 ) 
+		throw "bad external relocation length";
+	if ( reloc->r_type() != GENERIC_RELOC_VANILLA ) 
+		throw "unknown external relocation type";
+	if ( reloc->r_pcrel() != 0 ) 
+		throw "bad external relocation pc_rel";
+	if ( reloc->r_extern() == 0 )
+		throw "local relocation found with external relocations";
+	if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+		throw "external relocation address not in writable segment";
+	// FIX: check r_symbol
 }
 
 template <>
@@ -564,14 +640,24 @@ void MachOChecker<ppc64>::checkExternalReloation(const macho_relocation_info<P>*
 	if ( reloc->r_extern() == 0 )
 		throw "local relocation found with external relocations";
 	if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
-		throw "local relocation address not in writable segment";
+		throw "external relocation address not in writable segment";
 	// FIX: check r_symbol
 }
 
 template <>
 void MachOChecker<x86>::checkExternalReloation(const macho_relocation_info<P>* reloc)
 {
-	// FIX
+	if ( reloc->r_length() != 2 ) 
+		throw "bad external relocation length";
+	if ( reloc->r_type() != GENERIC_RELOC_VANILLA ) 
+		throw "unknown external relocation type";
+	if ( reloc->r_pcrel() != 0 ) 
+		throw "bad external relocation pc_rel";
+	if ( reloc->r_extern() == 0 )
+		throw "local relocation found with external relocations";
+	if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+		throw "external relocation address not in writable segment";
+	// FIX: check r_symbol
 }
 
 
@@ -649,9 +735,19 @@ void MachOChecker<x86_64>::checkLocalReloation(const macho_relocation_info<P>* r
 template <typename A>
 void MachOChecker<A>::checkRelocations()
 {
+	// external relocations should be sorted to minimize dyld symbol lookups
+	// therefore every reloc with the same r_symbolnum value should be contiguous 
+	std::set<uint32_t> previouslySeenSymbolIndexes;
+	uint32_t lastSymbolIndex = 0xFFFFFFFF;
 	const macho_relocation_info<P>* const externRelocsEnd = &fExternalRelocations[fExternalRelocationsCount];
 	for (const macho_relocation_info<P>* reloc = fExternalRelocations; reloc < externRelocsEnd; ++reloc) {
 		this->checkExternalReloation(reloc);
+		if ( reloc->r_symbolnum() != lastSymbolIndex ) {
+			if ( previouslySeenSymbolIndexes.count(reloc->r_symbolnum()) != 0 )
+				throw "external relocations not sorted";
+			previouslySeenSymbolIndexes.insert(lastSymbolIndex);
+			lastSymbolIndex = reloc->r_symbolnum();
+		}
 	}
 	
 	const macho_relocation_info<P>* const localRelocsEnd = &fLocalRelocations[fLocalRelocationsCount];
@@ -679,33 +775,38 @@ static void check(const char* path)
 		if ( mh->magic == OSSwapBigToHostInt32(FAT_MAGIC) ) {
 			const struct fat_header* fh = (struct fat_header*)p;
 			const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
-			for (unsigned long i=0; i < fh->nfat_arch; ++i) {
-				if ( archs[i].cputype == CPU_TYPE_POWERPC ) {
-					if ( MachOChecker<ppc>::validFile(p + archs[i].offset) )
-						MachOChecker<ppc>::make(p + archs[i].offset, archs[i].size, path);
+			for (unsigned long i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
+				size_t offset = OSSwapBigToHostInt32(archs[i].offset);
+				size_t size = OSSwapBigToHostInt32(archs[i].size);
+				unsigned int cputype = OSSwapBigToHostInt32(archs[i].cputype);
+
+				switch(cputype) {
+				case CPU_TYPE_POWERPC:
+					if ( MachOChecker<ppc>::validFile(p + offset) )
+						MachOChecker<ppc>::make(p + offset, size, path);
 					else
 						throw "in universal file, ppc slice does not contain ppc mach-o";
-				}
-				else if ( archs[i].cputype == CPU_TYPE_I386 ) {
-					if ( MachOChecker<x86>::validFile(p + archs[i].offset) )
-						MachOChecker<x86>::make(p + archs[i].offset, archs[i].size, path);
+					break;
+				case CPU_TYPE_I386:
+					if ( MachOChecker<x86>::validFile(p + offset) )
+						MachOChecker<x86>::make(p + offset, size, path);
 					else
 						throw "in universal file, i386 slice does not contain i386 mach-o";
-				}
-				else if ( archs[i].cputype == CPU_TYPE_POWERPC64 ) {
-					if ( MachOChecker<ppc64>::validFile(p + archs[i].offset) )
-						MachOChecker<ppc64>::make(p + archs[i].offset, archs[i].size, path);
+					break;
+				case CPU_TYPE_POWERPC64:
+					if ( MachOChecker<ppc64>::validFile(p + offset) )
+						MachOChecker<ppc64>::make(p + offset, size, path);
 					else
 						throw "in universal file, ppc64 slice does not contain ppc64 mach-o";
-				}
-				else if ( archs[i].cputype == CPU_TYPE_X86_64 ) {
-					if ( MachOChecker<x86_64>::validFile(p + archs[i].offset) )
-						MachOChecker<x86_64>::make(p + archs[i].offset, archs[i].size, path);
+					break;
+				case CPU_TYPE_X86_64:
+					if ( MachOChecker<x86_64>::validFile(p + offset) )
+						MachOChecker<x86_64>::make(p + offset, size, path);
 					else
 						throw "in universal file, x86_64 slice does not contain x86_64 mach-o";
-				}
-				else {
-						throw "in universal file, unknown architecture slice";
+					break;
+				default:
+						throwf("in universal file, unknown architecture slice 0x%x\n", cputype);
 				}
 			}
 		}

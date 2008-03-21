@@ -33,16 +33,15 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} test.m -c -o test.${ARCH}.o
+	${FAIL_IF_BAD_OBJ} test.${ARCH}.o
+
 	${LD} -arch ${ARCH} -r test.${ARCH}.o -o test-r.${ARCH}.o
-	nm test-r.${ARCH}.o | grep '.objc_class_name_NSObject' | ${FAIL_IF_EMPTY} 
-	nm test-r.${ARCH}.o | grep '.objc_class_name_NSData'   | ${FAIL_IF_EMPTY} 
-	nm test-r.${ARCH}.o | grep '.objc_class_name_NSArray'  | ${FAIL_IF_EMPTY} 
-	nm test-r.${ARCH}.o | grep '.objc_class_name_NSString' | ${PASS_IFF_STDIN} 
+	${FAIL_IF_BAD_OBJ} test-r.${ARCH}.o
+
+	nm test-r.${ARCH}.o | grep -i 'objc_class_.*_NSObject' | ${FAIL_IF_EMPTY} 
+	nm test-r.${ARCH}.o | grep -i 'objc_class_.*_NSData'   | ${FAIL_IF_EMPTY} 
+	nm test-r.${ARCH}.o | grep -i 'objc_class_.*_NSArray'  | ${FAIL_IF_EMPTY} 
+	nm test-r.${ARCH}.o | grep -i 'objc_class_.*_NSString' | ${PASS_IFF_STDIN} 
 
 clean:
-	rm -rf test.${ARCH}.o test.${ARCH}.o.dump
-		
-
-	#${OBJECTDUMP} -no_content test.${ARCH}.o > test.${ARCH}.o.dump
-	#grep '.objc_class_name_NSObject' test.${ARCH}.o.dump | ${FAIL_IF_EMPTY} 
-	#grep '.objc_class_name_NSString' test.${ARCH}.o.dump | ${PASS_IFF_STDIN} 
+	rm -rf *.o *.dump
