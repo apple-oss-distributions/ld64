@@ -336,7 +336,7 @@ void MachOChecker<A>::checkLoadCommands()
 					throwf("section %s vm address not within segment", sect->sectname());
 				if ( (sect->addr()+sect->size()) > endAddr )
 					throwf("section %s vm address not within segment", sect->sectname());
-				if ( (sect->flags() &SECTION_TYPE) != S_ZEROFILL ) {
+				if ( ((sect->flags() &SECTION_TYPE) != S_ZEROFILL) && (segCmd->filesize() != 0) ) {
 					if ( sect->offset() < startOffset )
 						throwf("section %s file offset not within segment", sect->sectname());
 					if ( (sect->offset()+sect->size()) > endOffset )
@@ -402,10 +402,12 @@ void MachOChecker<A>::checkLoadCommands()
 					const macho_dysymtab_command<P>* dsymtab = (struct macho_dysymtab_command<P>*)cmd;
 					fIndirectTable = (uint32_t*)((char*)fHeader + dsymtab->indirectsymoff());
 					fIndirectTableCount = dsymtab->nindirectsyms();
-					if ( dsymtab->indirectsymoff() < linkEditSegment->fileoff() )
-						throw "indirect symbol table not in __LINKEDIT";
-					if ( (dsymtab->indirectsymoff()+fIndirectTableCount*8) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
-						throw "indirect symbol table not in __LINKEDIT";
+					if ( fIndirectTableCount != 0  ) {
+						if ( dsymtab->indirectsymoff() < linkEditSegment->fileoff() )
+							throw "indirect symbol table not in __LINKEDIT";
+						if ( (dsymtab->indirectsymoff()+fIndirectTableCount*8) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+							throw "indirect symbol table not in __LINKEDIT";
+					}
 					fLocalRelocationsCount = dsymtab->nlocrel();
 					if ( fLocalRelocationsCount != 0 ) {
 						fLocalRelocations = (const macho_relocation_info<P>*)((char*)fHeader + dsymtab->locreloff());

@@ -169,7 +169,7 @@ private:
 	void						partitionIntoSections();
 	bool						addBranchIslands();
 	bool						addPPCBranchIslands();
-	uint8_t						branch24Reference();
+	bool						isBranch24Reference(uint8_t kind);
 	void						adjustLoadCommandsAndPadding();
 	void						createDynamicLinkerCommand();
 	void						createDylibCommands();
@@ -357,7 +357,7 @@ public:
 	virtual bool							requiresFollowOnAtom() const	{ return false; }
 	virtual ObjectFile::Atom&				getFollowOnAtom() const			{ return *((ObjectFile::Atom*)NULL); }
 	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const			{ return NULL; }
-	virtual uint8_t							getAlignment() const			{ return 2; }
+	virtual ObjectFile::Alignment			getAlignment() const			{ return ObjectFile::Alignment(2); }
 	virtual void							copyRawContent(uint8_t buffer[]) const { throw "don't use copyRawContent"; }
 	virtual void							setScope(Scope)					{ }
 
@@ -386,7 +386,7 @@ public:
 	virtual bool							isZeroFill() const		{ return true; }
 	virtual uint64_t						getSize() const 		{ return fSize; }
 	virtual const char*						getSectionName() const	{ return "._zeropage"; }
-	virtual uint8_t							getAlignment() const	{ return 12; }
+	virtual ObjectFile::Alignment			getAlignment() const	{ return ObjectFile::Alignment(12); }
 	void									setSize(uint64_t size)	{ fSize = size; }
 private:
 	using WriterAtom<A>::fWriter;
@@ -404,7 +404,7 @@ public:
 	virtual ObjectFile::Atom::Scope					getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
 	virtual ObjectFile::Atom::SymbolTableInclusion	getSymbolTableInclusion() const { return ObjectFile::Atom::kSymbolTableNotIn; }
 	virtual uint64_t								getSize() const				{ return 0; }
-	virtual uint8_t									getAlignment() const		{ return 12; }
+	virtual ObjectFile::Alignment					getAlignment() const		{ return ObjectFile::Alignment(12); }
 	virtual const char*								getSectionName() const		{ return "._mach_header"; }
 	virtual void									copyRawContent(uint8_t buffer[]) const {}
 };
@@ -420,7 +420,7 @@ public:
 	virtual ObjectFile::Atom::Scope					getScope() const;
 	virtual ObjectFile::Atom::SymbolTableInclusion	getSymbolTableInclusion() const;
 	virtual uint64_t								getSize() const				{ return sizeof(macho_header<typename A::P>); }
-	virtual uint8_t									getAlignment() const		{ return 12; }
+	virtual ObjectFile::Alignment					getAlignment() const		{ return ObjectFile::Alignment(12); }
 	virtual const char*								getSectionName() const		{ return "._mach_header"; }
 	virtual void									copyRawContent(uint8_t buffer[]) const;
 private:
@@ -438,7 +438,7 @@ public:
 	virtual bool							isZeroFill() const		{ return true; }
 	virtual uint64_t						getSize() const 		{ return fWriter.fOptions.customStackSize(); }
 	virtual const char*						getSectionName() const	{ return "._stack"; }
-	virtual uint8_t							getAlignment() const	{ return 12; }
+	virtual ObjectFile::Alignment			getAlignment() const	{ return ObjectFile::Alignment(12); }
 private:
 	using WriterAtom<A>::fWriter;
 	typedef typename A::P					P;
@@ -450,6 +450,8 @@ class LoadCommandAtom : public WriterAtom<A>
 {
 protected:
 											LoadCommandAtom(Writer<A>& writer, Segment& segment) : WriterAtom<A>(writer, segment) {}
+	virtual ObjectFile::Alignment			getAlignment() const	{ return ObjectFile::Alignment(log2(sizeof(typename A::P::uint_t))); }
+	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	static uint64_t							alignedSize(uint64_t size);
 };
 
@@ -463,8 +465,6 @@ public:
 												{ writer.fSegmentCommands = this; }
 	virtual const char*						getDisplayName() const	{ return "segment load commands"; }
 	virtual uint64_t						getSize() const			{ return fSize; }
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 
 	void									computeSize();
@@ -485,8 +485,6 @@ public:
 											SymbolTableLoadCommandsAtom(Writer<A>&);
 	virtual const char*						getDisplayName() const { return "symbol table load commands"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 	unsigned int							commandCount();
 
@@ -505,8 +503,6 @@ public:
 												: LoadCommandAtom<A>(writer, Segment::fgTextSegment) {}
 	virtual const char*						getDisplayName() const { return "thread load commands"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
 	using WriterAtom<A>::fWriter;
@@ -522,8 +518,6 @@ public:
 											DyldLoadCommandsAtom(Writer<A>& writer)  : LoadCommandAtom<A>(writer, Segment::fgTextSegment) {}
 	virtual const char*						getDisplayName() const	{ return "dyld load command"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
 	using WriterAtom<A>::fWriter;
@@ -538,8 +532,6 @@ public:
 		LoadCommandAtom<A>(writer, Segment::fgTextSegment), clientString(client) {}
 	virtual const char*							getDisplayName() const  { return "allowable_client load command"; }
 	virtual uint64_t							getSize() const;
-	virtual uint8_t								getAlignment() const    { return 2; }
-	virtual const char*							getSectionName() const  { return "._load_commands"; }
 	virtual void								copyRawContent(uint8_t buffer[]) const;
 private:
 	using WriterAtom<A>::fWriter;
@@ -555,8 +547,6 @@ public:
 											 : LoadCommandAtom<A>(writer, Segment::fgTextSegment), fInfo(info) {}
 	virtual const char*						getDisplayName() const	{ return "dylib load command"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
 	using WriterAtom<A>::fWriter;
@@ -571,8 +561,6 @@ public:
 											DylibIDLoadCommandsAtom(Writer<A>& writer) : LoadCommandAtom<A>(writer, Segment::fgTextSegment) {}
 	virtual const char*						getDisplayName() const { return "dylib ID load command"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
 	using WriterAtom<A>::fWriter;
@@ -586,8 +574,6 @@ public:
 											RoutinesLoadCommandsAtom(Writer<A>& writer) : LoadCommandAtom<A>(writer, Segment::fgTextSegment) {}
 	virtual const char*						getDisplayName() const { return "routines load command"; }
 	virtual uint64_t						getSize() const			{ return sizeof(macho_routines_command<typename A::P>); }
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
 	using WriterAtom<A>::fWriter;
@@ -602,8 +588,6 @@ public:
 											 : LoadCommandAtom<A>(writer, Segment::fgTextSegment), fName(name) {}
 	virtual const char*						getDisplayName() const	{ return "sub-umbrella load command"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
 	typedef typename A::P					P;
@@ -618,8 +602,6 @@ public:
 												: LoadCommandAtom<A>(writer, Segment::fgTextSegment), fNameStart(nameStart), fNameLength(nameLen) {}
 	virtual const char*						getDisplayName() const	{ return "sub-library load command"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
 	using WriterAtom<A>::fWriter;
@@ -636,8 +618,6 @@ public:
 													: LoadCommandAtom<A>(writer, Segment::fgTextSegment), fName(name) {}
 	virtual const char*						getDisplayName() const	{ return "umbrella load command"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
 	using WriterAtom<A>::fWriter;
@@ -653,8 +633,6 @@ public:
 												: LoadCommandAtom<A>(writer, Segment::fgTextSegment), fEmit(false) { ::uuid_generate_random(fUUID);}
 	virtual const char*						getDisplayName() const	{ return "uuid load command"; }
 	virtual uint64_t						getSize() const			{ return fEmit ? sizeof(macho_uuid_command<typename A::P>) : 0; }
-	virtual uint8_t							getAlignment() const	{ return 2; }
-	virtual const char*						getSectionName() const	{ return "._load_commands"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 	virtual void						    emit()					{ fEmit = true; }
 private:
@@ -672,7 +650,6 @@ public:
 													: WriterAtom<A>(writer, Segment::fgTextSegment), fSize(0) {}
 	virtual const char*						getDisplayName() const	{ return "header padding"; }
 	virtual uint64_t						getSize() const			{ return fSize; }
-	virtual uint8_t							getAlignment() const	{ return 2; }
 	virtual const char*						getSectionName() const	{ return "._load_cmds_pad"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 
@@ -700,7 +677,7 @@ public:
 											SectionRelocationsLinkEditAtom(Writer<A>& writer) : LinkEditAtom<A>(writer) { }
 	virtual const char*						getDisplayName() const	{ return "section relocations"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 3; }
+	virtual ObjectFile::Alignment			getAlignment() const	{ return ObjectFile::Alignment(3); }
 	virtual const char*						getSectionName() const	{ return "._section_relocs"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
@@ -715,7 +692,7 @@ public:
 											LocalRelocationsLinkEditAtom(Writer<A>& writer) : LinkEditAtom<A>(writer) { }
 	virtual const char*						getDisplayName() const	{ return "local relocations"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 3; }
+	virtual ObjectFile::Alignment			getAlignment() const	{ return ObjectFile::Alignment(3); }
 	virtual const char*						getSectionName() const	{ return "._local_relocs"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
@@ -730,7 +707,6 @@ public:
 											SymbolTableLinkEditAtom(Writer<A>& writer) : LinkEditAtom<A>(writer) { }
 	virtual const char*						getDisplayName() const	{ return "symbol table"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
 	virtual const char*						getSectionName() const	{ return "._symbol_table"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
@@ -745,7 +721,7 @@ public:
 											ExternalRelocationsLinkEditAtom(Writer<A>& writer) : LinkEditAtom<A>(writer) { }
 	virtual const char*						getDisplayName() const	{ return "external relocations"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 3; }
+	virtual ObjectFile::Alignment			getAlignment() const	{ return ObjectFile::Alignment(3); }
 	virtual const char*						getSectionName() const	{ return "._extern_relocs"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 private:
@@ -765,7 +741,6 @@ public:
 											IndirectTableLinkEditAtom(Writer<A>& writer) : LinkEditAtom<A>(writer) { }
 	virtual const char*						getDisplayName() const	{ return "indirect symbol table"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
 	virtual const char*						getSectionName() const	{ return "._indirect_syms"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 
@@ -789,7 +764,6 @@ public:
 											StringsLinkEditAtom(Writer<A>& writer);
 	virtual const char*						getDisplayName() const	{ return "string pool"; }
 	virtual uint64_t						getSize() const;
-	virtual uint8_t							getAlignment() const	{ return 2; }
 	virtual const char*						getSectionName() const	{ return "._string_pool"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 
@@ -856,8 +830,8 @@ public:
 											StubAtom(Writer<A>& writer, ObjectFile::Atom& target);
 	virtual const char*						getName() const				{ return fName; }
 	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
-	virtual uint8_t							getAlignment() const		{ return 2; }
 	virtual uint64_t						getSize() const;
+	virtual ObjectFile::Alignment			getAlignment() const;
 	virtual const char*						getSectionName() const		{ return "__symbol_stub1"; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
@@ -878,7 +852,6 @@ public:
 											StubHelperAtom(Writer<A>& writer, ObjectFile::Atom& target, ObjectFile::Atom& lazyPointer);
 	virtual const char*						getName() const				{ return fName; }
 	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
-	virtual uint8_t							getAlignment() const		{ return 2; }
 	virtual uint64_t						getSize() const;
 	virtual const char*						getSectionName() const		{ return "__stub_helper"; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const	{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
@@ -989,7 +962,7 @@ struct ExportSorter
 template <typename A>
 Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile::DyLibUsed>& dynamicLibraries)
 	: ExecutableFile::Writer(dynamicLibraries), fFilePath(strdup(path)), fOptions(options), fLoadCommandsSection(NULL),
-	  fLoadCommandsSegment(NULL), fPadSegmentInfo(NULL), fPageZeroAtom(NULL), fLargestAtomSize(1), 
+	  fLoadCommandsSegment(NULL), fPadSegmentInfo(NULL), fPageZeroAtom(NULL), fSymbolTableCount(0), fLargestAtomSize(1), 
 	  fEmitVirtualSections(false), fHasWeakExports(false), fReferencesWeakImports(false),
 	  fSeenFollowOnReferences(false), fWritableSegmentPastFirst4GB(false), fFirstWritableSegment(NULL)
 {
@@ -997,7 +970,7 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 	if ( fOptions.outputKind() == Options::kObjectFile )
 		permissions = 0666;
 	// Calling unlink first assures the file is gone so that open creates it with correct permissions
-	// It also handles the case where fFilePath file is not writeable but its directory is
+	// It also handles the case where fFilePath file is not writable but its directory is
 	// And it means we don't have to truncate the file when done writing (in case new is smaller than old)
 	(void)unlink(fFilePath);
 	fFileDescriptor = open(fFilePath, O_CREAT | O_WRONLY | O_TRUNC, permissions);
@@ -1705,15 +1678,42 @@ uint32_t Writer<x86_64>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Ref
 			return 1;
 
 		case x86_64::kPCRel32:
-		case x86_64::kPCRel32_1:
-		case x86_64::kPCRel32_2:
-		case x86_64::kPCRel32_4:
 			reloc1.set_r_address(address);
 			reloc1.set_r_symbolnum(symbolIndex);
 			reloc1.set_r_pcrel(true);
 			reloc1.set_r_length(2);
 			reloc1.set_r_extern(external);
 			reloc1.set_r_type(X86_64_RELOC_SIGNED);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32_1:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_SIGNED_1);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32_2:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_SIGNED_2);
+			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
+			return 1;
+
+		case x86_64::kPCRel32_4:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolIndex);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(X86_64_RELOC_SIGNED_4);
 			fSectionRelocs.insert(fSectionRelocs.begin(), reloc1);
 			return 1;
 
@@ -1741,6 +1741,7 @@ uint32_t Writer<x86_64>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Ref
 	}
 	return 0;
 }
+
 
 template <>
 uint32_t Writer<x86>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Reference* ref)
@@ -3200,6 +3201,7 @@ bool Writer<x86_64>::weakImportReferenceKind(uint8_t kind)
 }
 
 
+
 template <>
 bool Writer<ppc>::GOTReferenceKind(uint8_t kind)
 {
@@ -3231,6 +3233,7 @@ bool Writer<x86_64>::GOTReferenceKind(uint8_t kind)
 	return false;
 }
 
+
 template <typename A>
 void Writer<A>::scanForAbsoluteReferences()
 {
@@ -3256,7 +3259,7 @@ void  Writer<ppc64>::scanForAbsoluteReferences()
 						//fprintf(stderr, "found -mdyanmic-no-pic codegen in %s in %s\n", atom->getDisplayName(), atom->getFile()->getPath());
 						// shrink page-zero and add pad segment to compensate
 						fPadSegmentInfo = new SegmentInfo();
-						strcpy(fPadSegmentInfo->fName, "__4BGFILL");
+						strcpy(fPadSegmentInfo->fName, "__4GBFILL");
 						fPageZeroAtom->setSize(0x1000);
 						return;
 				}
@@ -3467,7 +3470,7 @@ void Writer<A>::partitionIntoSections()
 				currentSectionInfo = new SectionInfo();
 				strcpy(currentSectionInfo->fSectionName, atom->getSectionName());
 				strcpy(currentSectionInfo->fSegmentName, atom->getSegment().getName());
-				currentSectionInfo->fAlignment = atom->getAlignment();
+				currentSectionInfo->fAlignment = atom->getAlignment().powerOf2;
 				currentSectionInfo->fAllZeroFill = atom->isZeroFill();
 				currentSectionInfo->fVirtualSection = ( (currentSectionInfo->fSectionName[0] == '.') || 
 						(oneSegmentCommand && (atom->getDefinitionKind()==ObjectFile::Atom::kTentativeDefinition)) && !fOptions.makeTentativeDefinitionsReal() );
@@ -3499,7 +3502,7 @@ void Writer<A>::partitionIntoSections()
 				currentSectionInfo->fAtoms.reserve(fAllAtoms->size()/4); // reduce reallocations by starting large
 				strcpy(currentSectionInfo->fSectionName, atom->getSectionName());
 				strcpy(currentSectionInfo->fSegmentName, atom->getSegment().getName());
-				currentSectionInfo->fAlignment = atom->getAlignment();
+				currentSectionInfo->fAlignment = atom->getAlignment().powerOf2;
 				// check for -sectalign override
 				std::vector<Options::SectionAlignment>&	alignmentOverrides = fOptions.sectionAlignments();
 				for(std::vector<Options::SectionAlignment>::iterator it=alignmentOverrides.begin(); it != alignmentOverrides.end(); ++it) {
@@ -3542,13 +3545,20 @@ void Writer<A>::partitionIntoSections()
 		// change section object to be Writer's SectionInfo object
 		atom->setSection(currentSectionInfo);
 		// section alignment is that of a contained atom with the greatest alignment
-		uint8_t atomAlign = atom->getAlignment();
+		uint8_t atomAlign = atom->getAlignment().powerOf2;
 		if ( currentSectionInfo->fAlignment < atomAlign )
 			currentSectionInfo->fAlignment = atomAlign;
 		// calculate section offset for this atom
 		uint64_t offset = currentSectionInfo->fSize;
 		uint64_t alignment = 1 << atomAlign;
-		offset = ( (offset+alignment-1) & (-alignment) );
+		uint64_t currentModulus = (offset % alignment);
+		uint64_t requiredModulus = atom->getAlignment().modulus;
+		if ( currentModulus != requiredModulus ) {
+			if ( requiredModulus > currentModulus )
+				offset += requiredModulus-currentModulus;
+			else
+				offset += requiredModulus+alignment-currentModulus;		
+		}
 		atom->setSectionOffset(offset);
 		uint64_t curAtomSize = atom->getSize();
 		currentSectionInfo->fSize = offset + curAtomSize;
@@ -3599,16 +3609,27 @@ bool Writer<x86_64>::addBranchIslands()
 	return false;
 }
 
+
 template <>
-inline uint8_t Writer<ppc>::branch24Reference()
+bool Writer<ppc>::isBranch24Reference(uint8_t kind)
 {
-	return ppc::kBranch24;
+	switch (kind) {
+		case ppc::kBranch24:
+		case ppc::kBranch24WeakImport:
+			return true;
+	}
+	return false;
 }
 
 template <>
-inline uint8_t Writer<ppc64>::branch24Reference()
+bool Writer<ppc64>::isBranch24Reference(uint8_t kind)
 {
-	return ppc64::kBranch24;
+	switch (kind) {
+		case ppc64::kBranch24:
+		case ppc64::kBranch24WeakImport:
+			return true;
+	}
+	return false;
 }
 
 //
@@ -3636,16 +3657,17 @@ inline uint8_t Writer<ppc64>::branch24Reference()
 template <typename A>
 bool Writer<A>::addPPCBranchIslands()
 {
+	bool log = false;
 	bool result = false;
 	// Can only possibly need branch islands if __TEXT segment > 16M
 	if ( fLoadCommandsSegment->fSize > 16000000 ) {
-		//fprintf(stderr, "ld64: checking for branch islands, __TEXT segment size=%llu\n", fLoadCommandsSegment->fSize);
+		if ( log) fprintf(stderr, "ld64: checking for branch islands, __TEXT segment size=%llu\n", fLoadCommandsSegment->fSize);
 		const uint32_t kBetweenRegions = 15000000; // place regions of islands every 15MB in __text section
 		SectionInfo* textSection = NULL;
 		for (std::vector<SectionInfo*>::iterator it=fLoadCommandsSegment->fSections.begin(); it != fLoadCommandsSegment->fSections.end(); it++) {
 			if ( strcmp((*it)->fSectionName, "__text") == 0 ) {
 				textSection = *it;
-				//fprintf(stderr, "ld64: checking for branch islands, __text section size=%llu\n", textSection->fSize);
+				if ( log) fprintf(stderr, "ld64: checking for branch islands, __text section size=%llu\n", textSection->fSize);
 				break;
 			}
 		}
@@ -3661,33 +3683,68 @@ bool Writer<A>::addPPCBranchIslands()
 			std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
 			for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
 				ObjectFile::Reference* ref = *rit;
-				if ( ref->getKind() == this->branch24Reference() ) {
+				if ( this->isBranch24Reference(ref->getKind()) ) {
 					ObjectFile::Atom& target = ref->getTarget();
 					int64_t srcAddr = atom->getAddress() + ref->getFixUpOffset();
 					int64_t dstAddr = target.getAddress() + ref->getTargetOffset();
 					int64_t displacement = dstAddr - srcAddr;
+					TargetAndOffset finalTargetAndOffset = { &target, ref->getTargetOffset() };
 					const int64_t kFifteenMegLimit = kBetweenRegions;
-					if ( (displacement > kFifteenMegLimit) || (displacement < (-kFifteenMegLimit)) ) {
-						for (int i=0; i < kIslandRegionsCount; ++i) {
-							AtomToIsland* region=&regionsMap[i];
+					if ( displacement > kFifteenMegLimit ) {
+						// create forward branch chain
+						ObjectFile::Atom* nextTarget = &target;
+						uint64_t nextTargetOffset = ref->getTargetOffset();
+						for (int i=kIslandRegionsCount-1; i >=0 ; --i) {
+							AtomToIsland* region = &regionsMap[i];
 							int64_t islandRegionAddr = kBetweenRegions * (i+1);
-							if ( ((srcAddr < islandRegionAddr) && (dstAddr > islandRegionAddr))
-							   ||((dstAddr < islandRegionAddr) && (srcAddr > islandRegionAddr)) ) {
-								TargetAndOffset islandTarget = { &target, ref->getTargetOffset() };
-								AtomToIsland::iterator pos = region->find(islandTarget);
+							if ( (srcAddr < islandRegionAddr) && (islandRegionAddr <= dstAddr) ) {
+								AtomToIsland::iterator pos = region->find(finalTargetAndOffset);
 								if ( pos == region->end() ) {
-									BranchIslandAtom<A>* island = new BranchIslandAtom<A>(*this, target.getDisplayName(), i, target, ref->getTargetOffset());
+									BranchIslandAtom<A>* island = new BranchIslandAtom<A>(*this, target.getDisplayName(), i, *nextTarget, nextTargetOffset);
 									island->setSection(textSection);
-									(*region)[islandTarget] = island;
+									(*region)[finalTargetAndOffset] = island;
+									if (log) fprintf(stderr, "added island %s to region %d for %s\n", island->getDisplayName(), i, atom->getDisplayName());
 									regionsIslands[i].push_back(island);
 									++islandCount;
-									ref->setTarget(*island, 0);
+									nextTarget = island;
+									nextTargetOffset = 0;
 								}
 								else {
-									ref->setTarget(*(pos->second), 0);
+									nextTarget = pos->second;
+									nextTargetOffset = 0;
 								}
 							}
 						}
+						if (log) fprintf(stderr, "using island %s for %s\n", nextTarget->getDisplayName(), atom->getDisplayName());
+						ref->setTarget(*nextTarget, nextTargetOffset);
+					}
+					else if ( displacement < (-kFifteenMegLimit) ) {
+						// create back branching chain
+						ObjectFile::Atom* prevTarget = &target;
+						uint64_t prevTargetOffset = ref->getTargetOffset();
+						for (int i=0; i < kIslandRegionsCount ; ++i) {
+							AtomToIsland* region = &regionsMap[i];
+							int64_t islandRegionAddr = kBetweenRegions * (i+1);
+							if ( (dstAddr <= islandRegionAddr) && (islandRegionAddr < srcAddr) ) {
+								AtomToIsland::iterator pos = region->find(finalTargetAndOffset);
+								if ( pos == region->end() ) {
+									BranchIslandAtom<A>* island = new BranchIslandAtom<A>(*this, target.getDisplayName(), i, *prevTarget, prevTargetOffset);
+									island->setSection(textSection);
+									(*region)[finalTargetAndOffset] = island;
+									if (log) fprintf(stderr, "added back island %s to region %d for %s\n", island->getDisplayName(), i, atom->getDisplayName());
+									regionsIslands[i].push_back(island);
+									++islandCount;
+									prevTarget = island;
+									prevTargetOffset = 0;
+								}
+								else {
+									prevTarget = pos->second;
+									prevTargetOffset = 0;
+								}
+							}
+						}
+						if (log) fprintf(stderr, "using back island %s for %s\n", prevTarget->getDisplayName(), atom->getDisplayName());
+						ref->setTarget(*prevTarget, prevTargetOffset);
 					}
 				}
 			}
@@ -3695,32 +3752,36 @@ bool Writer<A>::addPPCBranchIslands()
 
 		// insert islands into __text section and adjust section offsets
 		if ( islandCount > 0 ) {
-			//fprintf(stderr, "ld64: %u branch islands required\n", islandCount);
+			if ( log) fprintf(stderr, "ld64: %u branch islands required\n", islandCount);
 			std::vector<ObjectFile::Atom*> newAtomList;
 			newAtomList.reserve(textSection->fAtoms.size()+islandCount);
 			uint64_t islandRegionAddr = kBetweenRegions;
+			uint64_t textSectionAlignment = (1 << textSection->fAlignment);
 			int regionIndex = 0;
+			uint64_t atomSlide = 0;
 			uint64_t sectionOffset = 0;
 			for (std::vector<ObjectFile::Atom*>::iterator it=textSection->fAtoms.begin(); it != textSection->fAtoms.end(); it++) {
 				ObjectFile::Atom* atom = *it;
 				newAtomList.push_back(atom);
 				if ( atom->getAddress() > islandRegionAddr ) {
+					uint64_t islandStartOffset = atom->getSectionOffset();
+					sectionOffset = islandStartOffset + atomSlide;
 					std::vector<ObjectFile::Atom*>* regionIslands = &regionsIslands[regionIndex];
 					for (std::vector<ObjectFile::Atom*>::iterator rit=regionIslands->begin(); rit != regionIslands->end(); rit++) {
 						ObjectFile::Atom* islandAtom = *rit;
 						newAtomList.push_back(islandAtom);
-						uint64_t alignment = 1 << (islandAtom->getAlignment());
+						uint64_t alignment = 1 << (islandAtom->getAlignment().powerOf2);
 						sectionOffset = ( (sectionOffset+alignment-1) & (-alignment) );
 						islandAtom->setSectionOffset(sectionOffset);
 						sectionOffset += islandAtom->getSize();
 					}
 					++regionIndex;
 					islandRegionAddr += kBetweenRegions;
+					uint64_t islandRegionAlignmentBlocks = (sectionOffset - islandStartOffset + textSectionAlignment - 1) / textSectionAlignment;
+					atomSlide += (islandRegionAlignmentBlocks * textSectionAlignment);
 				}
-				uint64_t alignment = 1 << (atom->getAlignment());
-				sectionOffset = ( (sectionOffset+alignment-1) & (-alignment) );
-				atom->setSectionOffset(sectionOffset);
-				sectionOffset += atom->getSize();
+				if ( atomSlide != 0 )
+					atom->setSectionOffset(atom->getSectionOffset()+atomSlide);
 			}
 			// put any remaining islands at end of __text section
 			if ( regionIndex < kIslandRegionsCount ) {
@@ -3729,7 +3790,7 @@ bool Writer<A>::addPPCBranchIslands()
 				for (std::vector<ObjectFile::Atom*>::iterator rit=regionIslands->begin(); rit != regionIslands->end(); rit++) {
 					ObjectFile::Atom* islandAtom = *rit;
 					newAtomList.push_back(islandAtom);
-					uint64_t alignment = 1 << (islandAtom->getAlignment());
+					uint64_t alignment = 1 << (islandAtom->getAlignment().powerOf2);
 					sectionOffset = ( (sectionOffset+alignment-1) & (-alignment) );
 					islandAtom->setSectionOffset(sectionOffset);
 					sectionOffset += islandAtom->getSize();
@@ -3757,7 +3818,7 @@ void Writer<A>::adjustLoadCommandsAndPadding()
 	const unsigned int atomCount = loadCommandAtoms.size();
 	for (unsigned int i=0; i < atomCount; ++i) {
 		ObjectFile::Atom* atom = loadCommandAtoms[i];
-		uint64_t alignment = 1 << atom->getAlignment();
+		uint64_t alignment = 1 << atom->getAlignment().powerOf2;
 		offset = ( (offset+alignment-1) & (-alignment) );
 		atom->setSectionOffset(offset);
 		uint32_t atomSize = atom->getSize();
@@ -3974,7 +4035,7 @@ void Writer<A>::adjustLinkEditSections()
 		lastSeg->fSections[i]->setBaseAddress(address);
 		for (unsigned int j=0; j < atomCount; ++j) {
 			ObjectFile::Atom* atom = atoms[j];
-			uint64_t alignment = 1 << atom->getAlignment();
+			uint64_t alignment = 1 << atom->getAlignment().powerOf2;
 			sectionOffset = ( (sectionOffset+alignment-1) & (-alignment) );
 			atom->setSectionOffset(sectionOffset);
 			uint64_t size = atom->getSize();
@@ -4185,6 +4246,7 @@ void MachHeaderAtom<x86_64>::setHeaderInfo(macho_header<x86_64::P>& header) cons
 	header.set_cpusubtype(CPU_SUBTYPE_X86_64_ALL);
 }
 
+
 template <typename A>
 CustomStackAtom<A>::CustomStackAtom(Writer<A>& writer)
  : WriterAtom<A>(writer, Segment::fgStackSegment)
@@ -4219,6 +4281,7 @@ bool CustomStackAtom<x86_64>::stackGrowsDown()
 {
 	return true;
 }
+
 
 template <typename A>
 void SegmentLoadCommandsAtom<A>::computeSize()
@@ -4266,7 +4329,6 @@ uint64_t LoadCommandAtom<x86_64>::alignedSize(uint64_t size)
 {
 	return ((size+7) & (-8));	// 8-byte align all load commands for 64-bit mach-o
 }
-
 
 template <typename A>
 void SegmentLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
@@ -4949,6 +5011,17 @@ bool StubAtom<ppc>::pic() const
 	return ( fWriter.fOptions.outputKind() != Options::kDynamicExecutable );
 }
 
+template <>
+ObjectFile::Alignment StubAtom<ppc>::getAlignment() const
+{
+	return 2;
+}
+
+template <>
+ObjectFile::Alignment StubAtom<ppc64>::getAlignment() const
+{
+	return 2;
+}
 
 template <>
 StubAtom<ppc>::StubAtom(Writer<ppc>& writer, ObjectFile::Atom& target)
@@ -5037,7 +5110,7 @@ uint64_t StubAtom<x86_64>::getSize() const
 }
 
 template <>
-uint8_t StubAtom<x86>::getAlignment() const
+ObjectFile::Alignment StubAtom<x86>::getAlignment() const
 {
 	// special case x86 fast stubs to be byte aligned
 	return 0;
@@ -5108,7 +5181,7 @@ void StubAtom<x86_64>::copyRawContent(uint8_t buffer[]) const
 
 // x86_64 stubs are 7 bytes and need no alignment
 template <>
-uint8_t StubAtom<x86_64>::getAlignment() const
+ObjectFile::Alignment StubAtom<x86_64>::getAlignment() const
 {
 	return 0;
 }

@@ -29,7 +29,6 @@
 #include <fcntl.h>
 #include <vector>
 
-
 #include "Options.h"
 
 void throwf(const char* format, ...)
@@ -375,8 +374,14 @@ void Options::parseArch(const char* architecture)
 		fArchitecture = CPU_TYPE_I386;
 	else if ( strcmp(architecture, "x86_64") == 0 )
 		fArchitecture = CPU_TYPE_X86_64;
+	// compatibility support for cpu-sub-types
+	else if ( (strcmp(architecture, "ppc750") == 0)
+			|| (strcmp(architecture, "ppc7400") == 0)
+			|| (strcmp(architecture, "ppc7450") == 0)
+			|| (strcmp(architecture, "ppc970") == 0) )
+		fArchitecture = CPU_TYPE_POWERPC;
 	else
-		throw "-arch followed by unknown architecture name";
+		throwf(" unknown/unsupported architecture name for: -arch %s", architecture);
 }
 
 bool Options::checkForFile(const char* format, const char* dir, const char* rootName, FileInfo& result)
@@ -452,23 +457,45 @@ Options::FileInfo Options::findLibrary(const char* rootName)
 	throwf("library not found for -l%s", rootName);
 }
 
+Options::FileInfo Options::findFramework(const char* frameworkName)
+{
+	if ( frameworkName == NULL )
+		throw "-frameowrk missing next argument";
+	char temp[strlen(frameworkName)+1];
+	strcpy(temp, frameworkName);
+	const char* name = temp;
+	const char* suffix = NULL;
+	char* comma = strchr(temp, ',');
+	if ( comma != NULL ) {
+		*comma = '\0';
+		suffix = &comma[1];
+	}
+	return findFramework(name, suffix);
+}
 
-Options::FileInfo Options::findFramework(const char* rootName)
+Options::FileInfo Options::findFramework(const char* rootName, const char* suffix)
 {
 	struct stat statBuffer;
-	const int rootNameLen = strlen(rootName);
 	for (std::vector<const char*>::iterator it = fFrameworkSearchPaths.begin();
 		 it != fFrameworkSearchPaths.end();
 		 it++) {
 		// ??? Shouldn't we be using String here and just initializing it?
 		// ??? Use str.c_str () to pull out the string for the stat call.
 		const char* dir = *it;
-		char possiblePath[strlen(dir)+2*rootNameLen+20];
+		char possiblePath[PATH_MAX];
 		strcpy(possiblePath, dir);
 		strcat(possiblePath, "/");
 		strcat(possiblePath, rootName);
 		strcat(possiblePath, ".framework/");
 		strcat(possiblePath, rootName);
+		if ( suffix != NULL ) {
+			char realPath[PATH_MAX];
+			// no symlink in framework to suffix variants, so follow main symlink
+			if ( realpath(possiblePath, realPath) != NULL ) {
+				strcpy(possiblePath, realPath);
+				strcat(possiblePath, suffix);
+			}
+		}
 		bool found = (stat(possiblePath, &statBuffer) == 0);
 		if ( fTraceDylibSearching )
 			printf("[Logging for XBS]%sfound framework: '%s'\n",
@@ -481,7 +508,11 @@ Options::FileInfo Options::findFramework(const char* rootName)
 			return result;
 		}
 	}
-	throwf("framework not found %s", rootName);
+	// try without suffix
+	if ( suffix != NULL ) 
+		return findFramework(rootName, NULL);
+	else
+		throwf("framework not found %s", rootName);
 }
 
 Options::FileInfo Options::findFile(const char* path)
@@ -1816,3 +1847,7 @@ void Options::checkIllegalOptionCombinations()
 		throw "-r and -dead_strip cannot be used together\n";
 
 }
+
+
+
+

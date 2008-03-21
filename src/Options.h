@@ -172,7 +172,8 @@ private:
 	void						buildSearchPaths(int argc, const char* argv[]);
 	void						parseArch(const char* architecture);
 	FileInfo					findLibrary(const char* rootName);
-	FileInfo					findFramework(const char* rootName);
+	FileInfo					findFramework(const char* frameworkName);
+	FileInfo					findFramework(const char* rootName, const char* suffix);
 	bool						checkForFile(const char* format, const char* dir, const char* rootName,
 											 FileInfo& result);
 	uint32_t					parseVersionNumber(const char*);
@@ -192,7 +193,6 @@ private:
 	CommonsMode					parseCommonsTreatment(const char* mode);
 	Treatment					parseTreatment(const char* treatment);
 	void						reconfigureDefaults();
-
 
 
 	ObjectFile::ReaderOptions			fReaderOptions;

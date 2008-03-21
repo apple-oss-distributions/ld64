@@ -95,7 +95,7 @@ public:
 	virtual bool								requiresFollowOnAtom() const{ return false; }
 	virtual ObjectFile::Atom&					getFollowOnAtom() const		{ return *((ObjectFile::Atom*)NULL); }
 	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const			{ return NULL; }
-	virtual uint8_t								getAlignment() const		{ return 0; }
+	virtual ObjectFile::Alignment				getAlignment() const		{ return ObjectFile::Alignment(0); }
 	virtual void								copyRawContent(uint8_t buffer[]) const  {}
 
 	virtual void								setScope(Scope)				{ }
@@ -500,6 +500,7 @@ bool Reader<x86_64>::validFile(const uint8_t* fileContent, bool executableOrDyli
 			return false;
 	}
 }
+
 
 
 

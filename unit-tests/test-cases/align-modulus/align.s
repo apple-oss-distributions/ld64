@@ -1,6 +1,5 @@
-/* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
- *
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+/*
+ * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,39 +20,17 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
-#include <Foundation/Foundation.h>
 
+	.data
+	.align 0
+_a:	.byte 3
+	.byte 3
+	.byte 3
+	.globl _b
+_b: .byte 4			;# address is 3
+	.align 4
+L1: .quad 0
+_c: .long 8
 
-@interface Foo : NSObject
-{
-	int ivar;
-}
-- (id) init;
-- (void) foo;
-@end
-
-
-@implementation Foo
-- (id) init
-{
-	self = [super init];
-	return self;
-}
-
-- (void) foo
-{
-	[self class];
-}
-@end
-
-
-
-@interface Base
-@end
-
-
-@implementation Base
-@end
-
-
-
+	.subsections_via_symbols
+	

@@ -220,13 +220,17 @@ _test_loads:
 
 	# 1-byte store
   	movb  $0x12, _a(%rip)
+  	movb  $0x12, _a+2(%rip)
+  	movb  $0x12, L0(%rip)
 
 	# 4-byte store
   	movl  $0x12345678, _a(%rip)
+  	movl  $0x12345678, _a+4(%rip)
+  	movl  $0x12345678, L0(%rip)
 	
 	# test local labels
-#	lea L1(%rip), %rax		### assembler bug
-#  	movl L0(%rip), %eax		### assembler bug
+	lea L1(%rip), %rax		
+  	movl L0(%rip), %eax		
 
 	ret
 
@@ -281,9 +285,9 @@ _prev:
 L1:	.quad _test_branches - _test_diffs
   	.quad _test_branches - _test_diffs + 4
   	.long _test_branches - _test_diffs
-#	.long LCL0-.				### assembler bug: content value should be (address(LCL0) - 0x24)
+#	.long LCL0-.				### assembler bug: should SUB/UNSIGNED with content= LCL0-24, or single pc-rel SIGNED reloc with content = LCL0-.+4
   	.quad L1
-#  	.quad L0					### assembler bug: should be internal reloc to L0
+  	.quad L0					
   	.quad _test_branches - .
   	.quad _test_branches - L1
   	.quad L1 - _prev			

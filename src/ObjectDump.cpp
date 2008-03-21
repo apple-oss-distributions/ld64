@@ -208,7 +208,7 @@ static void dumpAtom(ObjectFile::Atom* atom)
 	printf("size:    0x%012llX\n", atom->getSize());
 	
 	// alignment
-	printf("align:    %d\n", atom->getAlignment());
+	printf("align:    %u mod %u\n", atom->getAlignment().modulus, (1 << atom->getAlignment().powerOf2) );
 
 	// content
 	if ( sDumpContent ) { 

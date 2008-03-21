@@ -40,7 +40,7 @@ all: foobar.o main.o crt1.o
 	${PASS_IFF} diff dwarf-test-${ARCH}.stabs expected-stabs
 
 foobar.o : foo.o bar.o
-	${LD} -r foo.o bar.o -o foobar.o
+	${LD} -r -arch ${ARCH} foo.o bar.o -o foobar.o
 	
 foo.o : foo.cxx
 	${CXX} ${CCXXFLAGS} -gdwarf-2 foo.cxx -c -o foo.o -mdynamic-no-pic

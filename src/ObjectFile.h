@@ -154,6 +154,13 @@ protected:
 };
 
 
+struct Alignment 
+{ 
+				Alignment(int p2, int m=0) : powerOf2(p2), modulus(m) {}
+	uint8_t		leadingZeros() const { return (modulus==0) ? powerOf2 : __builtin_clz(modulus); }
+	uint16_t	powerOf2;  
+	uint16_t	modulus; 
+};
 
 //
 // An atom is the fundamental unit of linking.  A C function or global variable is an atom.
@@ -212,7 +219,7 @@ public:
 	virtual bool							requiresFollowOnAtom() const = 0;
 	virtual Atom&							getFollowOnAtom() const = 0;
 	virtual std::vector<LineInfo>*			getLineInfo() const = 0;
-	virtual uint8_t							getAlignment() const = 0;
+	virtual Alignment						getAlignment() const = 0;
 	virtual void							copyRawContent(uint8_t buffer[]) const = 0;
 	virtual void							setScope(Scope) = 0;
 

@@ -38,6 +38,7 @@
 
 
 #include <string>
+#include <map>
 #include <set>
 #include <string>
 #include <vector>
@@ -318,14 +319,14 @@ private:
 	void				writeDotOutput();
 	static bool			minimizeStab(ObjectFile::Reader::Stab& stab);
 	static const char*	truncateStabString(const char* str);
-	void				collectStabs();
+	void				collectDebugInfo();
 	void				writeOutput();
 	ObjectFile::Atom*	entryPoint();
 	ObjectFile::Atom*	dyldHelper();
 	const char*			assureFullPath(const char* path);
 	void				markLive(ObjectFile::Atom& atom, Linker::WhyLiveBackChain* previous);
-	void				collectStabs(ObjectFile::Reader* reader, std::map<class ObjectFile::Atom*, uint32_t>& atomOrdinals);
-	void				synthesizeStabs(ObjectFile::Reader* reader);
+	void				collectStabs(ObjectFile::Reader* reader, std::map<const class ObjectFile::Atom*, uint32_t>& atomOrdinals);
+	void				synthesizeDebugNotes(std::vector<class ObjectFile::Atom*>& allAtomsByReader);
 	void				printStatistics();
 	void				printTime(const char* msg, uint64_t partTime, uint64_t totalTime);
 	char*				commatize(uint64_t in, char* out);
@@ -392,6 +393,7 @@ private:
 	std::set<ObjectFile::Atom*>							fLiveAtoms;
 	std::set<ObjectFile::Atom*>							fLiveRootAtoms;
 	std::vector<class ObjectFile::Reader::Stab>			fStabs;
+	std::vector<class ObjectFile::Atom*>				fAtomsWithUnresolvedReferences;
 	bool												fCreateUUID;
 	SectionOrder										fSectionOrder;
 	unsigned int										fNextSortOrder;
@@ -408,6 +410,7 @@ private:
 	uint64_t											fStartLoadUndefinesTime;
 	uint64_t											fStartResolveTime;
 	uint64_t											fStartSortTime;
+	uint64_t											fStartDebugTime;
 	uint64_t											fStartWriteTime;
 	uint64_t											fEndTime;
 	uint64_t											fTotalObjectSize;
@@ -570,7 +573,7 @@ void Linker::link()
 	this->sortAtoms();
 	this->tweakLayout();
 	this->writeDotOutput();
-	this->collectStabs();
+	this->collectDebugInfo();
 	this->writeOutput();
 	this->printStatistics();
 
@@ -645,7 +648,8 @@ void Linker::printStatistics()
 		printTime(" build atom list",		fStartLoadUndefinesTime -	fStartBuildAtomsTime,		totalTime);
 		printTime(" load undefines",		fStartResolveTime -			fStartLoadUndefinesTime,	totalTime);
 		printTime(" resolve references",	fStartSortTime -			fStartResolveTime,			totalTime);
-		printTime(" sort output",			fStartWriteTime -			fStartSortTime,				totalTime);
+		printTime(" sort output",			fStartDebugTime -			fStartSortTime,				totalTime);
+		printTime(" process debug info",	fStartWriteTime -			fStartDebugTime,			totalTime);
 		printTime(" write output",			fEndTime -					fStartWriteTime,			totalTime);
 		fprintf(stderr, "pageins=%u, pageouts=%u, faults=%u\n", endVMInfo.pageins-fStartVMInfo.pageins,
 										endVMInfo.pageouts-fStartVMInfo.pageouts, endVMInfo.faults-fStartVMInfo.faults);
@@ -873,7 +877,8 @@ void Linker::addJustInTimeAtoms(const char* name)
 	// give indirect readers a chance
 	for (std::list<IndirectLibrary>::iterator it=fIndirectDynamicLibraries.begin(); it != fIndirectDynamicLibraries.end(); it++) {
 		ObjectFile::Reader* reader = it->reader;
-		if ( reader != NULL ) {
+		// for two-level namespace, only search re-exported indirect libraries
+		if ( (reader != NULL) && ((it->reExportedViaDirectLibrary != NULL) || (fOptions.nameSpace() != Options::kTwoLevelNameSpace)) ) {
 			std::vector<class ObjectFile::Atom*>* atoms = reader->getJustInTimeAtomsFor(name);
 			if ( atoms != NULL ) {
 				this->addAtoms(*atoms);
@@ -1006,6 +1011,7 @@ void Linker::markLive(ObjectFile::Atom& atom, struct Linker::WhyLiveBackChain* p
 				}
 				else {
 					// mark as undefined, for later error processing
+					fAtomsWithUnresolvedReferences.push_back(&atom);
 					fGlobalSymbolTable.require(targetName);
 				}
 			}
@@ -1089,6 +1095,39 @@ void Linker::deadStripResolve()
 		markLive(**it, &rootChain);
 	}
 
+	// it is possible that there are unresolved references that can be resolved now
+	// this can happen if the first reference to a common symbol in an archive.
+	// common symbols are not in the archive TOC, but the .o could have been pulled in later.
+	// <rdar://problem/4654131> ld64 while linking cc1 [ when dead_strip is ON]
+	for (std::vector<ObjectFile::Atom*>::iterator it=fAtomsWithUnresolvedReferences.begin(); it != fAtomsWithUnresolvedReferences.end(); it++) {
+		std::vector<class ObjectFile::Reference*>& references = (*it)->getReferences();
+		for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
+			ObjectFile::Reference* reference = *rit;
+			if ( reference->isTargetUnbound() ) {
+				ObjectFile::Atom* target = fGlobalSymbolTable.find(reference->getTargetName());
+				if ( target != NULL ) {
+					reference->setTarget(*target, reference->getTargetOffset());
+					fLiveAtoms.insert(target);
+					// by just adding this atom to fLiveAtoms set, we are assuming it has no
+					// references, which is true for commons.
+					if ( target->getDefinitionKind() != ObjectFile::Atom::kTentativeDefinition )
+						fprintf(stderr, "warning: ld64 internal error %s is not a tentative definition\n", target->getDisplayName());
+				}
+			}
+			if ( reference->hasFromTarget() && reference->isFromTargetUnbound() ) {
+				ObjectFile::Atom* target = fGlobalSymbolTable.find(reference->getFromTargetName());
+				if ( target != NULL ) {
+					reference->setFromTarget(*target);
+					fLiveAtoms.insert(target);
+					// by just adding this atom to fLiveAtoms set, we are assuming it has no
+					// references, which is true for commons.
+					if ( target->getDefinitionKind() != ObjectFile::Atom::kTentativeDefinition )
+						fprintf(stderr, "warning: ld64 internal error %s is not a tentative definition\n", target->getDisplayName());
+				}
+			}
+		}
+	}
+	
 	// now remove all non-live atoms from fAllAtoms
 	fAllAtoms.erase(std::remove_if(fAllAtoms.begin(), fAllAtoms.end(), NotLive(fLiveAtoms)), fAllAtoms.end());
 }
@@ -1103,7 +1142,6 @@ void Linker::sortAtoms()
 	//	fprintf(stderr, "\t%s\n", (*it)->getDisplayName());
 	//}
 }
-
 
 
 // make sure given addresses are within reach of branches, etc
@@ -1325,7 +1363,7 @@ typedef __gnu_cxx::hash_map<const char*, std::vector<uint32_t>, __gnu_cxx::hash<
 static PathToSums sKnownBINCLs;
 
 
-void Linker::collectStabs(ObjectFile::Reader* reader, std::map<class ObjectFile::Atom*, uint32_t>& atomOrdinals)
+void Linker::collectStabs(ObjectFile::Reader* reader, std::map<const class ObjectFile::Atom*, uint32_t>& atomOrdinals)
 {
 	bool log = false;
 	bool minimal = ( fOptions.readerOptions().fDebugInfoStripping == ObjectFile::ReaderOptions::kDebugInfoMinimal );
@@ -1374,7 +1412,7 @@ void Linker::collectStabs(ObjectFile::Reader* reader, std::map<class ObjectFile:
 				break;
 			case N_FUN:
 				{
-					std::map<class ObjectFile::Atom*, uint32_t>::iterator pos = atomOrdinals.find(it->atom);
+					std::map<const class ObjectFile::Atom*, uint32_t>::iterator pos = atomOrdinals.find(it->atom);
 					if ( pos != atomOrdinals.end() ) {
 						uint32_t ordinal = pos->second;
 						if ( ordinal > highestOrdinal ) {
@@ -1550,166 +1588,208 @@ void Linker::collectStabs(ObjectFile::Reader* reader, std::map<class ObjectFile:
 }
 
 
-void Linker::synthesizeStabs(ObjectFile::Reader* reader)
+// used to prune out atoms that don't need debug notes generated
+class NoDebugNoteAtom
+{
+public:
+	NoDebugNoteAtom(const std::map<class ObjectFile::Reader*, uint32_t>& readersWithDwarfOrdinals) 
+			: fReadersWithDwarfOrdinals(readersWithDwarfOrdinals) {}
+
+	bool operator()(const ObjectFile::Atom* atom) const {
+		if ( atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn )
+			return true;
+		if ( atom->getName() == NULL )
+			return true;
+		if ( fReadersWithDwarfOrdinals.find(atom->getFile()) == fReadersWithDwarfOrdinals.end() )
+			return true;
+		return false;
+	}
+
+private:
+	const std::map<class ObjectFile::Reader*, uint32_t>& fReadersWithDwarfOrdinals;
+};
+
+// used to sort atoms with debug notes
+class ReadersWithDwarfSorter
+{
+public:
+	ReadersWithDwarfSorter(const std::map<class ObjectFile::Reader*, uint32_t>& readersWithDwarfOrdinals, 
+						   const std::map<const class ObjectFile::Atom*, uint32_t>& atomOrdinals) 
+			: fReadersWithDwarfOrdinals(readersWithDwarfOrdinals), fAtomOrdinals(atomOrdinals) {}
+
+	bool operator()(const ObjectFile::Atom* left, const ObjectFile::Atom* right) const
+	{
+		// first sort by reader
+		unsigned int leftReaderIndex  = fReadersWithDwarfOrdinals.find(left->getFile())->second;
+		unsigned int rightReaderIndex = fReadersWithDwarfOrdinals.find(right->getFile())->second;
+		if ( leftReaderIndex != rightReaderIndex )
+			return (leftReaderIndex < rightReaderIndex);
+
+		// then sort by atom ordinal
+		unsigned int leftAtomIndex  = fAtomOrdinals.find(left)->second;
+		unsigned int rightAtomIndex = fAtomOrdinals.find(right)->second;
+		return leftAtomIndex < rightAtomIndex;
+	}
+
+private:
+	const std::map<class ObjectFile::Reader*, uint32_t>& fReadersWithDwarfOrdinals;
+	const std::map<const class ObjectFile::Atom*, uint32_t>& fAtomOrdinals;
+};
+
+
+
+
+
+void Linker::synthesizeDebugNotes(std::vector<class ObjectFile::Atom*>& allAtomsByReader)
 {
 	// synthesize "debug notes" and add them to master stabs vector
 	const char* dirPath = NULL;
 	const char* filename = NULL;
 	bool wroteStartSO = false;
-	std::vector<const char*> seenFiles;
-	for (std::vector<class ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); ++it) {
+	__gnu_cxx::hash_set<const char*, __gnu_cxx::hash<const char*>, CStringEquals>  seenFiles;
+	for (std::vector<ObjectFile::Atom*>::iterator it=allAtomsByReader.begin(); it != allAtomsByReader.end(); it++) {
 		ObjectFile::Atom* atom = *it;
-		if ( atom->getFile() == reader ) {
-			const char* name = atom->getName();
-			if ( (name != NULL) && (atom->getSymbolTableInclusion() != ObjectFile::Atom::kSymbolTableNotIn) ) {
-				const char* newDirPath;
-				const char* newFilename;
-				if ( atom->getTranslationUnitSource(&newDirPath, &newFilename) ) {
-					// gdb like directory SO's to end in '/', but dwarf DW_AT_comp_dir usually does not have trailing '/'
-					if ( (newDirPath != NULL) && (strlen(newDirPath) > 1 ) && (newDirPath[strlen(newDirPath)-1] != '/') )
-						asprintf((char**)&newDirPath, "%s/", newDirPath);
-					// need SO's whenever the translation unit source file changes
-					if ( newFilename != filename ) {
-						if ( filename != NULL ) {
-							// translation unit change, emit ending SO
-							ObjectFile::Reader::Stab endFileStab;
-							endFileStab.atom		= NULL;
-							endFileStab.type		= N_SO;
-							endFileStab.other		= 1;
-							endFileStab.desc		= 0;
-							endFileStab.value		= 0;
-							endFileStab.string		= "";
-							fStabs.push_back(endFileStab);
+		const char* newDirPath;
+		const char* newFilename;
+		//fprintf(stderr, "debug note for %s\n", atom->getDisplayName());
+		if ( atom->getTranslationUnitSource(&newDirPath, &newFilename) ) {
+			// need SO's whenever the translation unit source file changes
+			if ( newFilename != filename ) {
+				// gdb like directory SO's to end in '/', but dwarf DW_AT_comp_dir usually does not have trailing '/'
+				if ( (newDirPath != NULL) && (strlen(newDirPath) > 1 ) && (newDirPath[strlen(newDirPath)-1] != '/') )
+					asprintf((char**)&newDirPath, "%s/", newDirPath);
+				if ( filename != NULL ) {
+					// translation unit change, emit ending SO
+					ObjectFile::Reader::Stab endFileStab;
+					endFileStab.atom		= NULL;
+					endFileStab.type		= N_SO;
+					endFileStab.other		= 1;
+					endFileStab.desc		= 0;
+					endFileStab.value		= 0;
+					endFileStab.string		= "";
+					fStabs.push_back(endFileStab);
+				}
+				// new translation unit, emit start SO's
+				ObjectFile::Reader::Stab dirPathStab;
+				dirPathStab.atom		= NULL;
+				dirPathStab.type		= N_SO;
+				dirPathStab.other		= 0;
+				dirPathStab.desc		= 0;
+				dirPathStab.value		= 0;
+				dirPathStab.string		= newDirPath;
+				fStabs.push_back(dirPathStab);
+				ObjectFile::Reader::Stab fileStab;
+				fileStab.atom		= NULL;
+				fileStab.type		= N_SO;
+				fileStab.other		= 0;
+				fileStab.desc		= 0;
+				fileStab.value		= 0;
+				fileStab.string		= newFilename;
+				fStabs.push_back(fileStab);
+				// Synthesize OSO for start of file
+				ObjectFile::Reader::Stab objStab;
+				objStab.atom		= NULL;
+				objStab.type		= N_OSO;
+				objStab.other		= 0;
+				objStab.desc		= 1;
+				objStab.value		= atom->getFile()->getModificationTime();
+				objStab.string		= assureFullPath(atom->getFile()->getPath());
+				fStabs.push_back(objStab);
+				wroteStartSO = true;
+				// add the source file path to seenFiles so it does not show up in SOLs
+				seenFiles.insert(newFilename);
+			}
+			filename = newFilename;
+			dirPath = newDirPath;
+			if ( atom->getSegment().isContentExecutable() && (strncmp(atom->getSectionName(), "__text", 6) == 0) ) {
+				// Synthesize BNSYM and start FUN stabs
+				ObjectFile::Reader::Stab beginSym;
+				beginSym.atom		= atom;
+				beginSym.type		= N_BNSYM;
+				beginSym.other		= 1;
+				beginSym.desc		= 0;
+				beginSym.value		= 0;
+				beginSym.string		= "";
+				fStabs.push_back(beginSym);
+				ObjectFile::Reader::Stab startFun;
+				startFun.atom		= atom;
+				startFun.type		= N_FUN;
+				startFun.other		= 1;
+				startFun.desc		= 0;
+				startFun.value		= 0;
+				startFun.string		= atom->getName();
+				fStabs.push_back(startFun);
+				// Synthesize any SOL stabs needed
+				std::vector<ObjectFile::LineInfo>* lineInfo = atom->getLineInfo();
+				if ( lineInfo != NULL ) {
+					const char* curFile = NULL;
+					for (std::vector<ObjectFile::LineInfo>::iterator it = lineInfo->begin(); it != lineInfo->end(); ++it) {
+						if ( it->fileName != curFile ) {
+							if ( seenFiles.count(it->fileName) == 0 ) {
+								seenFiles.insert(it->fileName);
+								ObjectFile::Reader::Stab sol;
+								sol.atom		= 0;
+								sol.type		= N_SOL;
+								sol.other		= 0;
+								sol.desc		= 0;
+								sol.value		= 0;
+								sol.string		= it->fileName;
+								fStabs.push_back(sol);
+							}
+							curFile = it->fileName;
 						}
-						// new translation unit, emit start SO's
-						ObjectFile::Reader::Stab dirPathStab;
-						dirPathStab.atom		= NULL;
-						dirPathStab.type		= N_SO;
-						dirPathStab.other		= 0;
-						dirPathStab.desc		= 0;
-						dirPathStab.value		= 0;
-						dirPathStab.string		= newDirPath;
-						fStabs.push_back(dirPathStab);
-						ObjectFile::Reader::Stab fileStab;
-						fileStab.atom		= NULL;
-						fileStab.type		= N_SO;
-						fileStab.other		= 0;
-						fileStab.desc		= 0;
-						fileStab.value		= 0;
-						fileStab.string		= newFilename;
-						fStabs.push_back(fileStab);
-						// Synthesize OSO for start of file
-						ObjectFile::Reader::Stab objStab;
-						objStab.atom		= NULL;
-						objStab.type		= N_OSO;
-						objStab.other		= 0;
-						objStab.desc		= 1;
-						objStab.value		= reader->getModificationTime();
-						objStab.string		= assureFullPath(reader->getPath());
-						fStabs.push_back(objStab);
-						wroteStartSO = true;
 					}
-					filename = newFilename;
-					dirPath = newDirPath;
-					seenFiles.push_back(filename);
-					if ( atom->getSegment().isContentExecutable() && (strncmp(atom->getSectionName(), "__text", 6) == 0) ) {
-						// Synthesize BNSYM and start FUN stabs
-						ObjectFile::Reader::Stab beginSym;
-						beginSym.atom		= atom;
-						beginSym.type		= N_BNSYM;
-						beginSym.other		= 1;
-						beginSym.desc		= 0;
-						beginSym.value		= 0;
-						beginSym.string		= "";
-						fStabs.push_back(beginSym);
-						ObjectFile::Reader::Stab startFun;
-						startFun.atom		= atom;
-						startFun.type		= N_FUN;
-						startFun.other		= 1;
-						startFun.desc		= 0;
-						startFun.value		= 0;
-						startFun.string		= name;
-						fStabs.push_back(startFun);
-						// Synthesize any SOL stabs needed
-						std::vector<ObjectFile::LineInfo>* lineInfo = atom->getLineInfo();
-						if ( lineInfo != NULL ) {
-							// might be nice to set the source file path to seenFiles so it does not show up in SOLs
-							const char* curFile = NULL;
-							for (std::vector<ObjectFile::LineInfo>::iterator it = lineInfo->begin(); it != lineInfo->end(); ++it) {
-								if ( it->fileName != curFile ) {
-									bool alreadySeen = false;
-									for (std::vector<const char*>::iterator sit = seenFiles.begin(); sit != seenFiles.end(); ++sit) {
-										if ( strcmp(it->fileName, *sit) == 0 ) {
-											alreadySeen = true;
-											break;
-										}
-									}
-									if ( ! alreadySeen ) {
-										seenFiles.push_back(it->fileName);
-										ObjectFile::Reader::Stab sol;
-										sol.atom		= 0;
-										sol.type		= N_SOL;
-										sol.other		= 0;
-										sol.desc		= 0;
-										sol.value		= 0;
-										sol.string		= it->fileName;
-										fStabs.push_back(sol);
-									}
-									curFile = it->fileName;
-								}
-							}
-						}
-						// Synthesize end FUN and ENSYM stabs
-						ObjectFile::Reader::Stab endFun;
-						endFun.atom			= atom;
-						endFun.type			= N_FUN;
-						endFun.other		= 0;
-						endFun.desc			= 0;
-						endFun.value		= 0;
-						endFun.string		= "";
-						fStabs.push_back(endFun);
-						ObjectFile::Reader::Stab endSym;
-						endSym.atom			= atom;
-						endSym.type			= N_ENSYM;
-						endSym.other		= 1;
-						endSym.desc			= 0;
-						endSym.value		= 0;
-						endSym.string		= "";
-						fStabs.push_back(endSym);
+				}
+				// Synthesize end FUN and ENSYM stabs
+				ObjectFile::Reader::Stab endFun;
+				endFun.atom			= atom;
+				endFun.type			= N_FUN;
+				endFun.other		= 0;
+				endFun.desc			= 0;
+				endFun.value		= 0;
+				endFun.string		= "";
+				fStabs.push_back(endFun);
+				ObjectFile::Reader::Stab endSym;
+				endSym.atom			= atom;
+				endSym.type			= N_ENSYM;
+				endSym.other		= 1;
+				endSym.desc			= 0;
+				endSym.value		= 0;
+				endSym.string		= "";
+				fStabs.push_back(endSym);
+			}
+			else {
+				ObjectFile::Reader::Stab globalsStab;
+				if ( atom->getScope() == ObjectFile::Atom::scopeTranslationUnit ) {
+					// Synthesize STSYM stab for statics
+					const char* name = atom->getName();
+					if ( name[0] == '_' ) {
+						globalsStab.atom		= atom;
+						globalsStab.type		= N_STSYM;
+						globalsStab.other		= 1;
+						globalsStab.desc		= 0;
+						globalsStab.value		= 0;
+						globalsStab.string		= name;
+						fStabs.push_back(globalsStab);
 					}
-					else {
-						ObjectFile::Reader::Stab globalsStab;
-						if ( atom->getScope() == ObjectFile::Atom::scopeTranslationUnit ) {
-							// Synthesize STSYM stab for statics
-							const char* name = atom->getName();
-							if ( name[0] == '_' ) {
-								globalsStab.atom		= atom;
-								globalsStab.type		= N_STSYM;
-								globalsStab.other		= 1;
-								globalsStab.desc		= 0;
-								globalsStab.value		= 0;
-								globalsStab.string		= name;
-								fStabs.push_back(globalsStab);
-							}
-						}
-						else {
-							// Synthesize GSYM stab for other globals (but not .eh exception frame symbols)
-							const char* name = atom->getName();
-							if ( (name[0] == '_') && (strcmp(atom->getSectionName(), "__eh_frame") != 0) ) {
-								globalsStab.atom		= atom;
-								globalsStab.type		= N_GSYM;
-								globalsStab.other		= 1;
-								globalsStab.desc		= 0;
-								globalsStab.value		= 0;
-								globalsStab.string		= name;
-								fStabs.push_back(globalsStab);
-							}
-						}
+				}
+				else {
+					// Synthesize GSYM stab for other globals (but not .eh exception frame symbols)
+					const char* name = atom->getName();
+					if ( (name[0] == '_') && (strcmp(atom->getSectionName(), "__eh_frame") != 0) ) {
+						globalsStab.atom		= atom;
+						globalsStab.type		= N_GSYM;
+						globalsStab.other		= 1;
+						globalsStab.desc		= 0;
+						globalsStab.value		= 0;
+						globalsStab.string		= name;
+						fStabs.push_back(globalsStab);
 					}
 				}
 			}
 		}
 	}
+
 	if ( wroteStartSO ) {
 		//  emit ending SO
 		ObjectFile::Reader::Stab endFileStab;
@@ -1723,19 +1803,18 @@ void Linker::synthesizeStabs(ObjectFile::Reader* reader)
 	}
 }
 
-void Linker::collectStabs()
+
+
+
+void Linker::collectDebugInfo()
 {
+	std::map<const class ObjectFile::Atom*, uint32_t>	atomOrdinals;
+	fStartDebugTime = mach_absolute_time();
 	if ( fOptions.readerOptions().fDebugInfoStripping != ObjectFile::ReaderOptions::kDebugInfoNone ) {
 
-		// make mapping from atoms to ordinal
-		std::map<class ObjectFile::Atom*, uint32_t>	atomOrdinals;
-		uint32_t ordinal = 1;
-		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); it++) {
-			atomOrdinals[*it] = ordinal++;
-		}
-
-		fStabs.reserve(1024); // try to minimize re-allocations
-		// get stabs from each reader, in command line order
+		// determine mixture of stabs and dwarf
+		bool someStabs = false;
+		bool someDwarf = false;
 		for (std::vector<class ObjectFile::Reader*>::iterator it=fReadersThatHaveSuppliedAtoms.begin();
 				it != fReadersThatHaveSuppliedAtoms.end();
 				it++) {
@@ -1743,17 +1822,16 @@ void Linker::collectStabs()
 			if ( reader != NULL ) {
 				switch ( reader->getDebugInfoKind() ) {
 					case ObjectFile::Reader::kDebugInfoNone:
-						// do nothing
 						break;
 					case ObjectFile::Reader::kDebugInfoStabs:
-						collectStabs(reader, atomOrdinals);
+						someStabs = true;
 						break;
 					case ObjectFile::Reader::kDebugInfoDwarf:
-						synthesizeStabs(reader);
+						someDwarf = true;
 						fCreateUUID = true;
 						break;
 				    case ObjectFile::Reader::kDebugInfoStabsUUID:
-						collectStabs(reader, atomOrdinals);
+						someStabs = true;
 						fCreateUUID = true;
 						break;
 					default:
@@ -1761,10 +1839,70 @@ void Linker::collectStabs()
 				}
 			}
 		}
-		// remove stabs associated with atoms that won't be in output
-		std::set<class ObjectFile::Atom*>	allAtomsSet;
-		allAtomsSet.insert(fAllAtoms.begin(), fAllAtoms.end());
-		fStabs.erase(std::remove_if(fStabs.begin(), fStabs.end(), NotInSet(allAtomsSet)), fStabs.end());
+		
+		if ( someDwarf || someStabs ) {
+			// try to minimize re-allocations
+			fStabs.reserve(1024); 
+
+			// make mapping from atoms to ordinal
+			uint32_t ordinal = 1;
+			for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); it++) {
+				atomOrdinals[*it] = ordinal++;
+			}
+		}
+			
+		// process all dwarf .o files as a batch
+		if ( someDwarf ) {
+			// make mapping from readers with dwarf to ordinal
+			std::map<class ObjectFile::Reader*, uint32_t>	readersWithDwarfOrdinals;
+			uint32_t readerOrdinal = 1;
+			for (std::vector<class ObjectFile::Reader*>::iterator it=fReadersThatHaveSuppliedAtoms.begin();
+					it != fReadersThatHaveSuppliedAtoms.end();
+					it++) {
+				ObjectFile::Reader* reader = *it;
+				if ( (reader != NULL) && (reader->getDebugInfoKind() == ObjectFile::Reader::kDebugInfoDwarf) ) {
+					readersWithDwarfOrdinals[reader] = readerOrdinal++;
+				}
+			}
+		
+			// make a vector of atoms 
+			std::vector<class ObjectFile::Atom*> allAtomsByReader(fAllAtoms.begin(), fAllAtoms.end());
+			// remove those not from a reader that has dwarf
+			allAtomsByReader.erase(std::remove_if(allAtomsByReader.begin(), allAtomsByReader.end(), 
+								NoDebugNoteAtom(readersWithDwarfOrdinals)), allAtomsByReader.end());
+			// sort by reader then atom ordinal
+			std::sort(allAtomsByReader.begin(), allAtomsByReader.end(), ReadersWithDwarfSorter(readersWithDwarfOrdinals, atomOrdinals));
+			// add debug notes for each atom
+			this->synthesizeDebugNotes(allAtomsByReader);
+		}
+		
+		// process all stabs .o files one by one
+		if ( someStabs ) {
+			// get stabs from each reader, in command line order
+			for (std::vector<class ObjectFile::Reader*>::iterator it=fReadersThatHaveSuppliedAtoms.begin();
+					it != fReadersThatHaveSuppliedAtoms.end();
+					it++) {
+				ObjectFile::Reader* reader = *it;
+				if ( reader != NULL ) {
+					switch ( reader->getDebugInfoKind() ) {
+						case ObjectFile::Reader::kDebugInfoDwarf:
+						case ObjectFile::Reader::kDebugInfoNone:
+							// do nothing
+							break;
+						case ObjectFile::Reader::kDebugInfoStabs:
+						case ObjectFile::Reader::kDebugInfoStabsUUID:
+							collectStabs(reader, atomOrdinals);
+							break;
+						default:
+							throw "Unhandled type of debug information";
+					}
+				}
+			}
+			// remove stabs associated with atoms that won't be in output
+			std::set<class ObjectFile::Atom*>	allAtomsSet;
+			allAtomsSet.insert(fAllAtoms.begin(), fAllAtoms.end());
+			fStabs.erase(std::remove_if(fStabs.begin(), fStabs.end(), NotInSet(allAtomsSet)), fStabs.end());
+		}
 	}
 }
 
@@ -1799,7 +1937,7 @@ ObjectFile::Reader* Linker::createReader(const Options::FileInfo& info)
 				uint32_t fileOffset = OSSwapBigToHostInt32(archs[i].offset);
 				len = OSSwapBigToHostInt32(archs[i].size);
 				// if requested architecture is page aligned within fat file, then remap just that portion of file
-				if ( (fileOffset && 0x00000FFF) == 0 ) {
+				if ( (fileOffset & 0x00000FFF) == 0 ) {
 					// unmap whole file
 					munmap((caddr_t)p, info.fileLen);
 					// re-map just part we need
@@ -2300,7 +2438,7 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 			case kWeakAndWeak:
 				// have another weak atom, use whichever has largest alignment requirement
 				// because codegen of some client may require alignment
-				useNew = ( newAtom.getAlignment() > existingAtom->getAlignment() );
+				useNew = ( newAtom.getAlignment().leadingZeros() > existingAtom->getAlignment().leadingZeros() );
 				break;
 			case kWeakAndTent:
 				// replace existing weak atom with tentative one ???
@@ -2323,6 +2461,9 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				// use largest
 				if ( newAtom.getSize() < existingAtom->getSize() ) {
 					useNew = false;
+				} else {
+					if ( newAtom.getAlignment().leadingZeros() < existingAtom->getAlignment().leadingZeros() )
+						fprintf(stderr, "ld64 warning: alignment lost in merging tentative definition %s\n", newAtom.getDisplayName());
 				}
 				break;
 			case kTentAndExtern:

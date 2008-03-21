@@ -406,6 +406,8 @@ void Rebaser<A>::adjustSymbolTable()
 		if ( entry->n_sect() != NO_SECT )
 			entry->set_n_value(entry->n_value() + fSlide);
 	}
+	
+	// FIXME еее adjust dylib_module if it exists
 }
 
 template <typename A>

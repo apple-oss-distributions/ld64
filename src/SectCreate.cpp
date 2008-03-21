@@ -80,7 +80,7 @@ public:
 	virtual bool								requiresFollowOnAtom() const{ return false; }
 	virtual ObjectFile::Atom&					getFollowOnAtom() const		{ return *((ObjectFile::Atom*)NULL); }
 	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const			{ return NULL; }
-	virtual uint8_t								getAlignment() const		{ return 4; }
+	virtual ObjectFile::Alignment				getAlignment() const		{ return ObjectFile::Alignment(4); }
 	virtual void								copyRawContent(uint8_t buffer[]) const;
 
 	virtual void								setScope(Scope)				{ }

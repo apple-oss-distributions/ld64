@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -21,39 +21,11 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
-#include <Foundation/Foundation.h>
+#include <stdio.h>
 
+extern int bar();
 
-@interface Foo : NSObject
+int foo()
 {
-	int ivar;
+	return bar();
 }
-- (id) init;
-- (void) foo;
-@end
-
-
-@implementation Foo
-- (id) init
-{
-	self = [super init];
-	return self;
-}
-
-- (void) foo
-{
-	[self class];
-}
-@end
-
-
-
-@interface Base
-@end
-
-
-@implementation Base
-@end
-
-
-
