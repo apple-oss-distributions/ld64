@@ -36,6 +36,8 @@ all-ppc64: hasnl
 
 all-i386: hasnl
 
+all-armv6: hasnl
+
 all-x86_64: all-true
 
 all-true:

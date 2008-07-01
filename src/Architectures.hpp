@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -35,7 +35,7 @@ struct ppc
 {
 	typedef Pointer32<BigEndian>		P;
 	
-	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff16, kPointerDiff32, kPointerDiff64,  
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff16, kPointerDiff32, kPointerDiff64,  
 							kBranch24, kBranch24WeakImport, kBranch14,
 							kPICBaseLow16, kPICBaseLow14, kPICBaseHigh16, 
 							kAbsLow16, kAbsLow14, kAbsHigh16, kAbsHigh16AddLow, 
@@ -46,7 +46,7 @@ struct ppc64
 {
 	typedef Pointer64<BigEndian>		P;
 	
-	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff16, kPointerDiff32, kPointerDiff64,
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff16, kPointerDiff32, kPointerDiff64,
 							kBranch24, kBranch24WeakImport, kBranch14,
 							kPICBaseLow16, kPICBaseLow14, kPICBaseHigh16, 
 							kAbsLow16, kAbsLow14, kAbsHigh16, kAbsHigh16AddLow, 
@@ -57,8 +57,8 @@ struct x86
 {
 	typedef Pointer32<LittleEndian>		P;
 	
-	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff, kPointerDiff16,
-							kPCRel32, kPCRel32WeakImport, kAbsolute32,  kPCRel16, 
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff, kPointerDiff16,
+							kPCRel32, kPCRel32WeakImport, kAbsolute32,  kPCRel16, kPCRel8,
 							kDtraceProbe, kDtraceProbeSite, kDtraceIsEnabledSite, kDtraceTypeReference  };
 };
 
@@ -66,18 +66,22 @@ struct x86_64
 {
 	typedef Pointer64<LittleEndian>		P;
 	
-	enum ReferenceKinds {  kNoFixUp, kFollowOn, kPointer, kPointerWeakImport, kPointerDiff, kPointerDiff32, 
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff, kPointerDiff32, 
 							kPCRel32, kPCRel32_1, kPCRel32_2, kPCRel32_4,
 							kBranchPCRel32, kBranchPCRel32WeakImport,
 							kPCRel32GOTLoad, kPCRel32GOTLoadWeakImport,
-							kPCRel32GOT, kPCRel32GOTWeakImport,
+							kPCRel32GOT, kPCRel32GOTWeakImport, kBranchPCRel8,
 							kDtraceProbe, kDtraceProbeSite, kDtraceIsEnabledSite, kDtraceTypeReference  };
 };
 
-
-
-
-
+struct arm
+{
+	typedef Pointer32<LittleEndian>		P;
+	
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff,
+              kBranch24, kBranch24WeakImport, kThumbBranch22, kThumbBranch22WeakImport,
+							kDtraceProbe, kDtraceProbeSite, kDtraceIsEnabledSite, kDtraceTypeReference  };
+};
 
 #endif // __ARCHITECTURES__
 

@@ -29,12 +29,6 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include <mach-o/loader.h>
-#include <mach-o/fat.h>
-#include <mach-o/stab.h>
-#include <mach-o/reloc.h>
-#include <mach-o/ppc/reloc.h>
-#include <mach-o/x86_64/reloc.h>
 
 #include <vector>
 #include <set>
@@ -187,12 +181,29 @@ bool MachOChecker<x86_64>::validFile(const uint8_t* fileContent)
 	return false;
 }
 
+template <>
+bool MachOChecker<arm>::validFile(const uint8_t* fileContent)
+{	
+	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	if ( header->magic() != MH_MAGIC )
+		return false;
+	if ( header->cputype() != CPU_TYPE_ARM )
+		return false;
+	switch (header->filetype()) {
+		case MH_EXECUTE:
+		case MH_DYLIB:
+		case MH_BUNDLE:
+		case MH_DYLINKER:
+			return true;
+	}
+	return false;
+}
 
 template <> uint8_t MachOChecker<ppc>::loadCommandSizeMask()	{ return 0x03; }
 template <> uint8_t MachOChecker<ppc64>::loadCommandSizeMask()	{ return 0x07; }
 template <> uint8_t MachOChecker<x86>::loadCommandSizeMask()	{ return 0x03; }
 template <> uint8_t MachOChecker<x86_64>::loadCommandSizeMask() { return 0x07; }
-
+template <> uint8_t MachOChecker<arm>::loadCommandSizeMask()	{ return 0x03; }
 
 template <typename A>
 MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, const char* path)
@@ -239,6 +250,7 @@ template <typename A>
 void MachOChecker<A>::checkLoadCommands()
 {
 	// check that all load commands fit within the load command space file
+	const macho_encryption_info_command<P>* encryption_info = NULL;
 	const uint8_t* const endOfFile = (uint8_t*)fHeader + fLength;
 	const uint8_t* const endOfLoadCommands = (uint8_t*)fHeader + sizeof(macho_header<P>) + fHeader->sizeofcmds();
 	const uint32_t cmd_count = fHeader->ncmds();
@@ -268,9 +280,14 @@ void MachOChecker<A>::checkLoadCommands()
 			case LC_TWOLEVEL_HINTS:
 			case LC_PREBIND_CKSUM:
 			case LC_LOAD_WEAK_DYLIB:
+			case LC_LAZY_LOAD_DYLIB:
 			case LC_UUID:
 			case LC_REEXPORT_DYLIB:
 			case LC_SEGMENT_SPLIT_INFO:
+			case LC_CODE_SIGNATURE:
+				break;
+			case LC_ENCRYPTION_INFO:
+				encryption_info = (macho_encryption_info_command<P>*)cmd;
 				break;
 			case LC_SUB_UMBRELLA:
 			case LC_SUB_LIBRARY:
@@ -360,7 +377,7 @@ void MachOChecker<A>::checkLoadCommands()
 					throwf("section %s vm address not within segment", sect->sectname());
 				if ( (sect->addr()+sect->size()) > endAddr )
 					throwf("section %s vm address not within segment", sect->sectname());
-				if ( ((sect->flags() &SECTION_TYPE) != S_ZEROFILL) && (segCmd->filesize() != 0) ) {
+				if ( ((sect->flags() & SECTION_TYPE) != S_ZEROFILL) && (segCmd->filesize() != 0) ) {
 					if ( sect->offset() < startOffset )
 						throwf("section %s file offset not within segment", sect->sectname());
 					if ( (sect->offset()+sect->size()) > endOffset )
@@ -393,6 +410,25 @@ void MachOChecker<A>::checkLoadCommands()
 		if ( isStaticExecutable ) {
 			if ( fHeader->flags() != MH_NOUNDEFS )
 				throw "invalid bits in mach_header flags for static executable";
+		}
+	}
+
+	// verify encryption info
+	if ( encryption_info != NULL ) {
+		if ( fHeader->filetype() != MH_EXECUTE )
+			throw "LC_ENCRYPTION_INFO load command is only legal in main executables";
+		if ( encryption_info->cryptoff() <  (sizeof(macho_header<P>) + fHeader->sizeofcmds()) )
+			throw "LC_ENCRYPTION_INFO load command has cryptoff covers some load commands";
+		if ( (encryption_info->cryptoff() % 4096) != 0 )
+			throw "LC_ENCRYPTION_INFO load command has cryptoff which is not page aligned";
+		if ( (encryption_info->cryptsize() % 4096) != 0 )
+			throw "LC_ENCRYPTION_INFO load command has cryptsize which is not page sized";
+		for (typename std::vector<std::pair<pint_t, pint_t> >::iterator it = segmentFileOffsetRanges.begin(); 
+																it != segmentFileOffsetRanges.end(); ++it) {
+			if ( (it->first <= encryption_info->cryptoff()) && (encryption_info->cryptoff() < it->second) ) {
+				if ( (encryption_info->cryptoff() + encryption_info->cryptsize()) > it->second )
+					throw "LC_ENCRYPTION_INFO load command is not contained within one segment";
+			}
 		}
 	}
 
@@ -591,6 +627,15 @@ x86_64::P::uint_t MachOChecker<x86_64>::relocBase()
 	return fFirstWritableSegment->vmaddr();
 }
 
+template <>
+arm::P::uint_t MachOChecker<arm>::relocBase()
+{
+	if ( fHeader->flags() & MH_SPLIT_SEGS )
+		return fFirstWritableSegment->vmaddr();
+	else
+		return fFirstSegment->vmaddr();
+}
+
 
 template <typename A>
 bool MachOChecker<A>::addressInWritableSegment(pint_t address)
@@ -601,9 +646,19 @@ bool MachOChecker<A>::addressInWritableSegment(pint_t address)
 	for (uint32_t i = 0; i < cmd_count; ++i) {
 		if ( cmd->cmd() == macho_segment_command<P>::CMD ) {
 			const macho_segment_command<P>* segCmd = (const macho_segment_command<P>*)cmd;
-			if ( (segCmd->initprot() & VM_PROT_WRITE) != 0 ) {
-				if ( (address >= segCmd->vmaddr()) && (address < segCmd->vmaddr()+segCmd->vmsize()) )
+			if ( (address >= segCmd->vmaddr()) && (address < segCmd->vmaddr()+segCmd->vmsize()) ) {
+				// if segment is writable, we are fine
+				if ( (segCmd->initprot() & VM_PROT_WRITE) != 0 ) 
 					return true;
+				// could be a text reloc, make sure section bit is set
+				const macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+				const macho_section<P>* const sectionsEnd = &sectionsStart[segCmd->nsects()];
+				for(const macho_section<P>* sect = sectionsStart; sect < sectionsEnd; ++sect) {
+					if ( (sect->addr() <= address) && (address < (sect->addr()+sect->size())) ) {
+						// found section for this address, if has relocs we are fine
+						return ( (sect->flags() & (S_ATTR_EXT_RELOC|S_ATTR_LOC_RELOC)) != 0 );
+					}
+				}
 			}
 		}
 		cmd = (const macho_load_command<P>*)(((uint8_t*)cmd)+cmd->cmdsize());
@@ -678,6 +733,23 @@ void MachOChecker<x86_64>::checkExternalReloation(const macho_relocation_info<P>
 }
 
 template <>
+void MachOChecker<arm>::checkExternalReloation(const macho_relocation_info<P>* reloc)
+{
+	if ( reloc->r_length() != 2 ) 
+		throw "bad external relocation length";
+	if ( reloc->r_type() != ARM_RELOC_VANILLA ) 
+		throw "unknown external relocation type";
+	if ( reloc->r_pcrel() != 0 ) 
+		throw "bad external relocation pc_rel";
+	if ( reloc->r_extern() == 0 )
+		throw "local relocation found with external relocations";
+	if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+		throw "external relocation address not in writable segment";
+	// FIX: check r_symbol
+}
+
+
+template <>
 void MachOChecker<ppc>::checkLocalReloation(const macho_relocation_info<P>* reloc)
 {
 	if ( reloc->r_address() & R_SCATTERED ) {
@@ -687,9 +759,12 @@ void MachOChecker<ppc>::checkLocalReloation(const macho_relocation_info<P>* relo
 	
 	}
 	else {
+		// ignore pair relocs
+		if ( reloc->r_type() == PPC_RELOC_PAIR ) 
+			return;
 		// FIX
 		if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
-			throw "local relocation address not in writable segment";
+			throwf("local relocation address 0x%08X not in writable segment", reloc->r_address());
 	}
 }
 
@@ -730,7 +805,26 @@ void MachOChecker<x86_64>::checkLocalReloation(const macho_relocation_info<P>* r
 		throw "local relocation address not in writable segment";
 }
 
-
+template <>
+void MachOChecker<arm>::checkLocalReloation(const macho_relocation_info<P>* reloc)
+{
+	if ( reloc->r_address() & R_SCATTERED ) {
+		// scattered
+		const macho_scattered_relocation_info<P>* sreloc = (const macho_scattered_relocation_info<P>*)reloc;
+		if ( sreloc->r_length() != 2 ) 
+			throw "bad local scattered relocation length";
+		if ( sreloc->r_type() != ARM_RELOC_PB_LA_PTR ) 
+			throw "bad local scattered relocation type";
+	}
+	else {
+		if ( reloc->r_length() != 2 ) 
+			throw "bad local relocation length";
+		if ( reloc->r_extern() != 0 ) 
+			throw "external relocation found with local relocations";
+		if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
+			throw "local relocation address not in writable segment";
+	}
+}
 
 template <typename A>
 void MachOChecker<A>::checkRelocations()
@@ -805,6 +899,12 @@ static void check(const char* path)
 					else
 						throw "in universal file, x86_64 slice does not contain x86_64 mach-o";
 					break;
+				case CPU_TYPE_ARM:
+					if ( MachOChecker<arm>::validFile(p + offset) )
+						MachOChecker<arm>::make(p + offset, size, path);
+					else
+						throw "in universal file, arm slice does not contain arm mach-o";
+					break;
 				default:
 						throwf("in universal file, unknown architecture slice 0x%x\n", cputype);
 				}
@@ -821,6 +921,9 @@ static void check(const char* path)
 		}
 		else if ( MachOChecker<x86_64>::validFile(p) ) {
 			MachOChecker<x86_64>::make(p, length, path);
+		}
+		else if ( MachOChecker<arm>::validFile(p) ) {
+			MachOChecker<arm>::make(p, length, path);
 		}
 		else {
 			throw "not a known file type";

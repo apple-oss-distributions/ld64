@@ -6,7 +6,7 @@ SHELL = /bin/sh
 ARCH ?= $(shell arch)
 
 # set default to be all
-VALID_ARCHS ?= "ppc ppc64 i386 x86_64"
+VALID_ARCHS ?= "ppc ppc64 i386 x86_64 armv6"
 
 MYDIR=$(shell cd ../../bin;pwd)
 
@@ -15,8 +15,14 @@ ifdef BUILT_PRODUCTS_DIR
 	PATH := ${BUILT_PRODUCTS_DIR}:${MYDIR}:${PATH}
 	COMPILER_PATH := ${BUILT_PRODUCTS_DIR}:${MYDIR}:${COMPILER_PATH}
 else
-	PATH := ${MYDIR}:${PATH}:
-	COMPILER_PATH := ${MYDIR}:${COMPILER_PATH}:
+	ifneq "$(findstring /unit-tests/test-cases/, $(shell pwd))" ""
+		RELEASEDIR=$(shell cd ../../../build/Release;pwd)
+		PATH := ${RELEASEDIR}:${MYDIR}:${PATH}
+		COMPILER_PATH := ${RELEASEDIR}:${MYDIR}:${COMPILER_PATH}
+	else
+		PATH := ${MYDIR}:${PATH}:
+		COMPILER_PATH := ${MYDIR}:${COMPILER_PATH}:
+	endif
 endif
 export PATH
 export COMPILER_PATH
@@ -32,6 +38,23 @@ ASMFLAGS =
 
 CXX		  = g++-4.0 -arch ${ARCH}
 CXXFLAGS = -Wall
+
+ifeq ($(ARCH),armv6)
+  LDFLAGS := -syslibroot /Developer/SDKs/Purple
+  override FILEARCH = arm
+else
+  FILEARCH = $(ARCH)
+endif
+
+ifeq ($(ARCH),thumb)
+  LDFLAGS := -syslibroot /Developer/SDKs/Purple
+  CCFLAGS += -mthumb
+  CXXFLAGS += -mthumb
+  override ARCH = armv6
+  override FILEARCH = arm
+else
+  FILEARCH = $(ARCH)
+endif
 
 RM      = rm
 RMFLAGS = -rf

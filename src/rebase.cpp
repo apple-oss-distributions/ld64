@@ -32,17 +32,12 @@
 #include <fcntl.h>
 #include <errno.h>
 #include <unistd.h>
-#include <mach-o/loader.h>
-#include <mach-o/fat.h>
-#include <mach-o/reloc.h>
-#include <mach-o/ppc/reloc.h>
-#include <mach-o/x86_64/reloc.h>
 #include <vector>
 #include <set>
 
+
 #include "MachOFileAbstraction.hpp"
 #include "Architectures.hpp"
-
 
 static bool verbose = false;
 
@@ -164,6 +159,9 @@ MultiArchRebaser::MultiArchRebaser(const char* path, bool writable)
 					case CPU_TYPE_X86_64:
 						fRebasers.push_back(new Rebaser<x86_64>(&p[fileOffset]));
 						break;
+					case CPU_TYPE_ARM:
+						fRebasers.push_back(new Rebaser<arm>(&p[fileOffset]));
+						break;
 					default:
 						throw "unknown file format";
 				}
@@ -186,6 +184,9 @@ MultiArchRebaser::MultiArchRebaser(const char* path, bool writable)
 			}
 			else if ( (OSSwapLittleToHostInt32(mh->magic) == MH_MAGIC_64) && (OSSwapLittleToHostInt32(mh->cputype) == CPU_TYPE_X86_64)) {
 				fRebasers.push_back(new Rebaser<x86_64>(mh));
+			}
+			else if ( (OSSwapLittleToHostInt32(mh->magic) == MH_MAGIC) && (OSSwapLittleToHostInt32(mh->cputype) == CPU_TYPE_ARM)) {
+				fRebasers.push_back(new Rebaser<arm>(mh));
 			}
 			else {
 				throw "unknown file format";
@@ -234,7 +235,7 @@ template <> cpu_type_t Rebaser<ppc>::getArchitecture()    const { return CPU_TYP
 template <> cpu_type_t Rebaser<ppc64>::getArchitecture()  const { return CPU_TYPE_POWERPC64; }
 template <> cpu_type_t Rebaser<x86>::getArchitecture()    const { return CPU_TYPE_I386; }
 template <> cpu_type_t Rebaser<x86_64>::getArchitecture() const { return CPU_TYPE_X86_64; }
-
+template <> cpu_type_t Rebaser<arm>::getArchitecture() const { return CPU_TYPE_ARM; }
 
 template <typename A>
 uint64_t Rebaser<A>::getBaseAddress() const
@@ -527,6 +528,26 @@ void Rebaser<x86>::doLocalRelocation(const macho_relocation_info<P>* reloc)
 	}
 }
 
+template <>
+void Rebaser<arm>::doLocalRelocation(const macho_relocation_info<P>* reloc)
+{
+	if ( (reloc->r_address() & R_SCATTERED) == 0 ) {
+		if ( reloc->r_type() == ARM_RELOC_VANILLA ) {
+			pint_t* addr = mappedAddressForVMAddress(reloc->r_address() + fOrignalVMRelocBaseAddress);
+			P::setP(*addr, P::getP(*addr) + fSlide);
+		}
+	}
+	else {
+		macho_scattered_relocation_info<P>* sreloc = (macho_scattered_relocation_info<P>*)reloc;
+		if ( sreloc->r_type() == ARM_RELOC_PB_LA_PTR ) {
+			sreloc->set_r_value( sreloc->r_value() + fSlide );
+		}
+		else {
+			throw "cannot rebase final linked image with scattered relocations";
+		}
+	}
+}
+
 template <typename A>
 void Rebaser<A>::doLocalRelocation(const macho_relocation_info<P>* reloc)
 {
@@ -709,6 +730,8 @@ static const char* nameForArch(cpu_type_t arch)
 			return "i386";
 		case CPU_TYPE_X86_64:
 			return "x86_64";
+		case CPU_TYPE_ARM:
+			return "arm";
 	}
 	return "unknown";
 }
@@ -801,6 +824,14 @@ static uint64_t startAddress(cpu_type_t arch, std::vector<fileInfo>& files, uint
 		else if ( arch == CPU_TYPE_X86_64 ) {
 			return 0x200000000ULL;
 		}
+		else if ( arch == CPU_TYPE_ARM ) {
+			// place dylibs below dyld
+			uint64_t topAddr = 0x2FE00000;
+			uint64_t totalSize = totalVMSize(arch, files);
+			if ( totalSize > topAddr )
+				throwf("total size of images (0x%X) does not fit below 0x2FE00000", totalSize);
+			return topAddr - totalSize;
+		}
 		else
 			throw "unknown architecture";
 	}
@@ -844,6 +875,10 @@ int main(int argc, const char* argv[])
 						onlyArchs.insert(CPU_TYPE_I386);
 					else if ( strcmp(arch, "x86_64") == 0 )
 						onlyArchs.insert(CPU_TYPE_X86_64);
+					else if ( strcmp(arch, "arm") == 0 )
+						onlyArchs.insert(CPU_TYPE_ARM);
+					else if ( strcmp(arch, "armv6") == 0 )
+						onlyArchs.insert(CPU_TYPE_ARM);
 					else 
 						throwf("unknown architecture %s", arch);
 				}
@@ -866,6 +901,7 @@ int main(int argc, const char* argv[])
 			onlyArchs.insert(CPU_TYPE_POWERPC64);
 			onlyArchs.insert(CPU_TYPE_I386);
 			onlyArchs.insert(CPU_TYPE_X86_64);
+			onlyArchs.insert(CPU_TYPE_ARM);
 		}
 		
 		// scan files and collect sizes

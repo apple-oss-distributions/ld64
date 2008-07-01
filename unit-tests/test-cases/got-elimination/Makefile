@@ -29,6 +29,8 @@ include ${TESTROOT}/include/common.makefile
 
 all: all-${ARCH}
 
+all-armv6: all-true
+
 all-ppc: all-true
 
 all-ppc64: all-true

@@ -45,6 +45,7 @@
 //
 
 
+
 namespace ObjectFile {
 
 
@@ -59,14 +60,15 @@ struct LineInfo
 class ReaderOptions
 {
 public:
-						ReaderOptions() : fFullyLoadArchives(false), fLoadAllObjcObjectsFromArchives(false), fFlatNamespace(false), fLinkingMainExecutable(false), 
+						ReaderOptions() : fFullyLoadArchives(false), fLoadAllObjcObjectsFromArchives(false), fFlatNamespace(false),
+										fLinkingMainExecutable(false), fSlowx86Stubs(false),
 										fForFinalLinkedImage(false), fForStatic(false), fForDyld(false), fMakeTentativeDefinitionsReal(false), 
 										fWhyLoad(false), fRootSafe(false), fSetuidSafe(false),fDebugInfoStripping(kDebugInfoFull),
-										fLogObjectFiles(false), fLogAllFiles(false),
+										fImplicitlyLinkPublicDylibs(true), fLogObjectFiles(false), fLogAllFiles(false),
 										fTraceDylibs(false), fTraceIndirectDylibs(false), fTraceArchives(false), 
 										fTraceOutputFile(NULL), fVersionMin(kMinUnset) {}
 	enum DebugInfoStripping { kDebugInfoNone, kDebugInfoMinimal, kDebugInfoFull };
-	enum VersionMin { kMinUnset, k10_1, k10_2, k10_3, k10_4, k10_5 };
+	enum VersionMin { kMinUnset, k10_1, k10_2, k10_3, k10_4, k10_5, k10_6 };
 
 	struct AliasPair {
 		const char*			realName;
@@ -77,6 +79,7 @@ public:
 	bool					fLoadAllObjcObjectsFromArchives;
 	bool					fFlatNamespace;
 	bool					fLinkingMainExecutable;
+	bool					fSlowx86Stubs;
 	bool					fForFinalLinkedImage;
 	bool					fForStatic;
 	bool					fForDyld;
@@ -85,6 +88,7 @@ public:
 	bool					fRootSafe;
 	bool					fSetuidSafe;
 	DebugInfoStripping		fDebugInfoStripping;
+	bool					fImplicitlyLinkPublicDylibs;
 	bool					fLogObjectFiles;
 	bool					fLogAllFiles;
 	bool					fTraceDylibs;
@@ -110,7 +114,7 @@ public:
 		const char* string;
 	};
 	enum ObjcConstraint { kObjcNone,  kObjcRetainRelease,  kObjcRetainReleaseOrGC,  kObjcGC };
-	enum CpuConstraint  { kCpuAny,  kCpuG3,  kCpuG4,  kCpuG5  };
+	enum CpuConstraint  { kCpuAny = 0 };
 
 	class DylibHander
 	{
@@ -129,12 +133,17 @@ public:
 	virtual std::vector<class Atom*>*	getJustInTimeAtomsFor(const char* name) = 0;
 	virtual std::vector<Stab>*			getStabs() = 0;
 	virtual ObjcConstraint				getObjCConstraint()			{ return kObjcNone; }
-	virtual CpuConstraint				getCpuConstraint()			{ return kCpuAny; }
+	virtual uint32_t					updateCpuConstraint(uint32_t current) { return current; }
 	virtual bool						objcReplacementClasses()	{ return false; }
 
 	// For relocatable object files only
 	virtual bool						canScatterAtoms()			{ return true; }
-	virtual void						optimize(std::vector<ObjectFile::Atom*>&, std::vector<ObjectFile::Atom*>&, uint32_t)		{ }
+	virtual void						optimize(std::vector<ObjectFile::Atom*>&, std::vector<ObjectFile::Atom*>&, 
+													std::vector<const char*>&,  uint32_t, ObjectFile::Reader* writer, 
+													bool allGlobalsAReDeadStripRoots, int okind, 
+													bool verbose, bool saveTemps, const char* outputFilePath,
+													bool pie, bool allowTextRelocs) { }
+	virtual bool						hasLongBranchStubs()		{ return false; }
 
 	// For Dynamic Libraries only
 	virtual const char*					getInstallPath()			{ return NULL; }
@@ -148,7 +157,8 @@ public:
 	virtual bool						providedExportAtom()		{ return false; }
 	virtual const char*					parentUmbrella()			{ return NULL; }
 	virtual std::vector<const char*>*	getAllowableClients()  		{ return NULL; }
-
+	virtual bool						hasWeakExternals()			{ return false; }
+	virtual bool						isLazyLoadedDylib()			{ return false; }
 
 protected:
 										Reader() {}
@@ -252,6 +262,7 @@ public:
 	virtual SymbolTableInclusion			getSymbolTableInclusion() const = 0;
 	virtual	bool							dontDeadStrip() const = 0;
 	virtual bool							isZeroFill() const = 0;
+	virtual bool							isThumb() const = 0;
 	virtual uint64_t						getSize() const = 0;
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const = 0;
 	virtual bool							mustRemainInSection() const = 0;

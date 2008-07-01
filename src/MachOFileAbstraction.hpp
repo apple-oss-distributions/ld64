@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005-2008 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -27,25 +27,58 @@
 #include <mach-o/loader.h>
 #include <mach-o/nlist.h>
 #include <mach-o/reloc.h>
+#include <mach-o/fat.h>
+#include <mach-o/stab.h>
+#include <mach-o/reloc.h>
+#include <mach-o/ppc/reloc.h>
+#include <mach-o/x86_64/reloc.h>
 #include <mach/machine.h>
-
-// suport older versions of mach-o/loader.h
-#ifndef LC_UUID
-#define LC_UUID		0x1b
-struct uuid_command {
-    uint32_t	cmd;		/* LC_UUID */
-    uint32_t	cmdsize;	/* sizeof(struct uuid_command) */
-    uint8_t	uuid[16];	/* the 128-bit uuid */
-};
-#endif
-
-#ifndef S_16BYTE_LITERALS
-	#define S_16BYTE_LITERALS 0xE
-#endif
 
 #include "FileAbstraction.hpp"
 #include "Architectures.hpp"
 
+// stuff that will eventually go away once newer cctools headers are widespread
+#ifndef LC_LAZY_LOAD_DYLIB
+	#define LC_LAZY_LOAD_DYLIB  0x20
+#endif
+#ifndef S_LAZY_DYLIB_SYMBOL_POINTERS
+	#define S_LAZY_DYLIB_SYMBOL_POINTERS  0x10
+#endif
+#ifndef CPU_SUBTYPE_ARM_V5TEJ
+	#define CPU_SUBTYPE_ARM_V5TEJ		((cpu_subtype_t) 7)
+#endif
+#ifndef CPU_SUBTYPE_ARM_XSCALE
+	#define CPU_SUBTYPE_ARM_XSCALE		((cpu_subtype_t) 8)
+#endif
+#ifndef CPU_SUBTYPE_ARM_V7
+	#define CPU_SUBTYPE_ARM_V7			((cpu_subtype_t) 9)
+#endif
+#ifndef N_ARM_THUMB_DEF
+	#define N_ARM_THUMB_DEF	0x0008 
+#endif
+enum reloc_type_arm
+{
+    ARM_RELOC_VANILLA,	/* generic relocation as discribed above */
+    ARM_RELOC_PAIR,	/* the second relocation entry of a pair */
+    ARM_RELOC_SECTDIFF,	/* a PAIR follows with subtract symbol value */
+    ARM_RELOC_LOCAL_SECTDIFF, /* like ARM_RELOC_SECTDIFF, but the symbol
+				 referenced was local.  */
+    ARM_RELOC_PB_LA_PTR,/* prebound lazy pointer */
+    ARM_RELOC_BR24,	/* 24 bit branch displacement (to a word address) */
+    ARM_THUMB_RELOC_BR22, /* 22 bit branch displacement (to a half-word
+			     address) */
+};
+
+#ifndef LC_ENCRYPTION_INFO
+	#define LC_ENCRYPTION_INFO		0x21
+	struct encryption_info_command {
+		uint32_t	cmd;
+		uint32_t	cmdsize;
+		uint32_t	cryptoff;	/* file offset of encrypted range */
+		uint32_t	cryptsize;	/* file size of encrypted range */
+		uint32_t	cryptid;	/* which enryption system, 0 means not-encrypted yet */
+	};
+#endif
 
 
 //
@@ -724,7 +757,7 @@ public:
 	
 	typedef typename P::E		E;
 private:
-	linkedit_data_command	fields;
+	struct linkedit_data_command	fields;
 };
 
 
@@ -749,7 +782,7 @@ public:
 	
 	typedef typename P::E		E;
 private:
-	rpath_command	fields;
+	struct rpath_command	fields;
 };
 
 
@@ -859,6 +892,31 @@ private:
 
 
 
+//
+// mach-o encyrption info load command
+//
+template <typename P>
+class macho_encryption_info_command {
+public:
+	uint32_t		cmd() const						INLINE { return E::get32(fields.cmd); }
+	void			set_cmd(uint32_t value)			INLINE { E::set32(fields.cmd, value); }
+
+	uint32_t		cmdsize() const					INLINE { return E::get32(fields.cmdsize); }
+	void			set_cmdsize(uint32_t value)		INLINE { E::set32(fields.cmdsize, value); }
+
+	uint32_t		cryptoff() const				INLINE { return E::get32(fields.cryptoff); }
+	void			set_cryptoff(uint32_t value)	INLINE { E::set32(fields.cryptoff, value);  }
+	
+	uint32_t		cryptsize() const				INLINE { return E::get32(fields.cryptsize); }
+	void			set_cryptsize(uint32_t value)	INLINE { E::set32(fields.cryptsize, value);  }
+	
+	uint32_t		cryptid() const					INLINE { return E::get32(fields.cryptid); }
+	void			set_cryptid(uint32_t value)		INLINE { E::set32(fields.cryptid, value);  }
+	
+	typedef typename P::E		E;
+private:
+	encryption_info_command	fields;
+};
 
 
 

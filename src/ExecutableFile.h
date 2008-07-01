@@ -55,9 +55,11 @@ namespace ExecutableFile {
 															  std::vector<class ObjectFile::Reader::Stab>& stabs,
 															  class ObjectFile::Atom* entryPointAtom,
 															  class ObjectFile::Atom* dyldHelperAtom,
+															  class ObjectFile::Atom* dyldLazyDylibHelperAtom,
 															  bool createUUID, bool canScatter,
 															  ObjectFile::Reader::CpuConstraint cpuConstraint,
-															  bool biggerThanTwoGigs) = 0;
+															  bool biggerThanTwoGigs,
+															  bool overridesDylibWeakDefines) = 0;
 
 	protected:
 									Writer(std::vector<DyLibUsed>&) {};

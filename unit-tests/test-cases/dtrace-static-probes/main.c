@@ -11,6 +11,7 @@ typedef int weirdType2;
 int deadwood()
 {
 	BAR_COUNT1(2);
+	return 0;
 }
 
 

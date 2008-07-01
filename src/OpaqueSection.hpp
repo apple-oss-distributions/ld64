@@ -113,6 +113,7 @@ public:
 	virtual SymbolTableInclusion				getSymbolTableInclusion() const { return ObjectFile::Atom::kSymbolTableNotIn; }
 	virtual	bool								dontDeadStrip() const		{ return true; }
 	virtual bool								isZeroFill() const			{ return false; }
+	virtual bool								isThumb() const				{ return false; }
 	virtual uint64_t							getSize() const				{ return fFileLength; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual bool								mustRemainInSection() const { return false; }

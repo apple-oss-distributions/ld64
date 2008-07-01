@@ -20,6 +20,13 @@
  *
  * @APPLE_LICENSE_HEADER_END@
  */
+ 
+// start temp HACK for cross builds
+extern "C" double log2 ( double );
+#define __MATH__
+// end temp HACK for cross builds
+
+
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -33,7 +40,6 @@
 #include <mach/vm_statistics.h>
 #include <mach/mach_init.h>
 #include <mach/mach_host.h>
-#include <mach-o/fat.h>
 #include <dlfcn.h>
 
 #include <string>
@@ -47,19 +53,19 @@
 #include <dlfcn.h>
 #include <AvailabilityMacros.h>
 
+#include "configure.h"
 #include "Options.h"
 
 #include "ObjectFile.h"
 
 #include "MachOReaderRelocatable.hpp"
-#include "MachOReaderArchive.hpp"
+#include "ArchiveReader.hpp"
 #include "MachOReaderDylib.hpp"
 #include "MachOWriterExecutable.hpp"
 
-#define LLVM_SUPPORT 0
  
-#if LLVM_SUPPORT
-#include "LLVMReader.hpp"
+#if LTO_SUPPORT
+#include "LTOReader.hpp"
 #endif
 
 
@@ -236,7 +242,8 @@ private:
 	void				addAtoms(std::vector<class ObjectFile::Atom*>& atoms);
 	void				buildAtomList();
 	void				processDylibs();
-	void				updateContraints(ObjectFile::Reader* reader);
+	void				markDead(ObjectFile::Atom* atom);
+	void				updateConstraints(ObjectFile::Reader* reader);
 	void				loadAndResolve();
 	void				processDTrace();
 	void				checkObjC();
@@ -256,8 +263,9 @@ private:
 	static const char*	truncateStabString(const char* str);
 	void				collectDebugInfo();
 	void				writeOutput();
-	ObjectFile::Atom*	entryPoint();
+	ObjectFile::Atom*	entryPoint(bool orInit);
 	ObjectFile::Atom*	dyldHelper();
+	ObjectFile::Atom*	dyldLazyLibraryHelper();
 	const char*			assureFullPath(const char* path);
 	void				markLive(ObjectFile::Atom& atom, Linker::WhyLiveBackChain* previous);
 	void				collectStabs(ObjectFile::Reader* reader, std::map<const class ObjectFile::Atom*, uint32_t>& atomOrdinals);
@@ -273,7 +281,7 @@ private:
 	
 	void									resolve(ObjectFile::Reference* reference);
 	void									resolveFrom(ObjectFile::Reference* reference);
-	std::vector<class ObjectFile::Atom*>*	addJustInTimeAtoms(const char* name);
+	std::vector<class ObjectFile::Atom*>*	addJustInTimeAtoms(const char* name, bool dylibsOnly=false);
 	void									addJustInTimeAtomsAndMarkLive(const char* name);
 
 	ObjectFile::Reader*	addDylib(ObjectFile::Reader* reader, const Options::FileInfo& info, uint64_t mappedLen);
@@ -286,17 +294,26 @@ private:
 	class SymbolTable
 	{
 	public:
+		typedef __gnu_cxx::hash_map<const char*, ObjectFile::Atom*, __gnu_cxx::hash<const char*>, CStringEquals> Mapper;
+
 							SymbolTable(Linker&);
 		void				require(const char* name);
 		bool				add(ObjectFile::Atom& atom);
 		ObjectFile::Atom*	find(const char* name);
 		unsigned int		getRequireCount() { return fRequireCount; }
 		void				getNeededNames(bool andWeakDefintions, std::vector<const char*>& undefines);
-		typedef __gnu_cxx::hash_map<const char*, ObjectFile::Atom*, __gnu_cxx::hash<const char*>, CStringEquals> Mapper;
+		bool				hasExternalTentativeDefinitions() { return fHasExternalTentativeDefinitions; }
+		bool				hasExternalWeakDefinitions() { return fHasExternalWeakDefinitions; }
+		void				setHasExternalWeakDefinitions() { fHasExternalWeakDefinitions = true; }
+		Mapper::iterator	begin()	{ return fTable.begin(); }
+		Mapper::iterator	end()	{ return fTable.end(); }
+
 	private:
 		Linker&				fOwner;
 		Mapper				fTable;
 		unsigned int		fRequireCount;
+		bool				fHasExternalTentativeDefinitions;
+		bool				fHasExternalWeakDefinitions;
 	};
 
 	class AtomSorter
@@ -387,7 +404,7 @@ private:
 
 Linker::Linker(int argc, const char* argv[])
 	: fOptions(argc, argv), fGlobalSymbolTable(*this), fNextInputOrdinal(1), fOutputFile(NULL), fBundleLoaderReader(NULL), 
-	  fCreateUUID(false), fCanScatter(true),
+	  fCreateUUID(fOptions.outputKind() != Options::kObjectFile), fCanScatter(true),
 	  fArchitecture(0), fArchitectureInferred(false), fDirectLibrariesComplete(false), fBiggerThanTwoGigOutput(false),
 	  fOutputFileSize(0), fTotalZeroFillSize(0), fTotalSize(0), fTotalObjectSize(0),
 	  fTotalArchiveSize(0),  fTotalObjectLoaded(0), fTotalArchivesLoaded(0), fTotalDylibsLoaded(0),
@@ -416,6 +433,9 @@ Linker::Linker(int argc, const char* argv[])
 			break;
 		case CPU_TYPE_X86_64:
 			fArchitectureName = "x86_64";
+			break;
+		case CPU_TYPE_ARM:
+			fArchitectureName = "arm";
 			break;
 		default:
 			fArchitectureName = "unknown architecture";
@@ -451,27 +471,31 @@ cpu_type_t Linker::inferArchitecture()
 			::close(fd);
 			if ( amount >= (ssize_t)sizeof(buffer) ) {
 				if ( mach_o::relocatable::Reader<ppc>::validFile(buffer) ) {
-					//fprintf(stderr, "ld: warning -arch not used, infering -arch ppc based on %s\n", it->path);
+					//warning("-arch not used, infering -arch ppc based on %s", it->path);
 					return CPU_TYPE_POWERPC;
 				}
 				else if ( mach_o::relocatable::Reader<ppc64>::validFile(buffer) ) {
-					//fprintf(stderr, "ld: warning -arch not used, infering -arch ppc64 based on %s\n", it->path);
+					//warning("-arch not used, infering -arch ppc64 based on %s", it->path);
 					return CPU_TYPE_POWERPC64;
 				}
 				else if ( mach_o::relocatable::Reader<x86>::validFile(buffer) ) {
-					//fprintf(stderr, "ld: warning -arch not used, infering -arch i386 based on %s\n", it->path);
+					//warning("-arch not used, infering -arch i386 based on %s", it->path);
 					return CPU_TYPE_I386;
 				}
 				else if ( mach_o::relocatable::Reader<x86_64>::validFile(buffer) ) {
-					//fprintf(stderr, "ld: warning -arch not used, infering -arch x86_64 based on %s\n", it->path);
+					//warning("-arch not used, infering -arch x86_64 based on %s", it->path);
 					return CPU_TYPE_X86_64;
+				}
+				else if ( mach_o::relocatable::Reader<arm>::validFile(buffer) ) {
+					//warning("-arch not used, infering -arch arm based on %s", it->path);
+					return CPU_TYPE_ARM;
 				}
 			}
 		}
 	}
 
 	// no thin .o files found, so default to same architecture this was built as
-	fprintf(stderr, "ld: warning -arch not specified\n");
+	warning("-arch not specified");
 #if __ppc__
 	return CPU_TYPE_POWERPC;
 #elif __i386__
@@ -480,6 +504,8 @@ cpu_type_t Linker::inferArchitecture()
 	return CPU_TYPE_POWERPC64;
 #elif __x86_64__
 	return CPU_TYPE_X86_64;
+#elif __arm__
+	return CPU_TYPE_ARM;
 #else
 	#error unknown default architecture
 #endif
@@ -535,34 +561,48 @@ void Linker::loadAndResolve()
 
 void Linker::optimize()
 {
+	// give each reader a chance to do any optimizations
 	std::vector<class ObjectFile::Atom*> newAtoms;
-
-	const int readerCount = fInputFiles.size();
-	for (int i=0; i < readerCount; ++i) {
-		fInputFiles[i]->optimize(fAllAtoms, newAtoms, fNextInputOrdinal);
+	std::vector<const char *> additionalUndefines;
+	for (std::vector<class ObjectFile::Reader*>::iterator it=fInputFiles.begin(); it != fInputFiles.end(); it++) {
+		(*it)->optimize(fAllAtoms, newAtoms, additionalUndefines, fNextInputOrdinal, fOutputFile, 
+			 fOptions.allGlobalsAreDeadStripRoots(), (int)fOptions.outputKind(), fOptions.verbose(),
+			fOptions.saveTempFiles(), fOptions.getOutputFilePath(), fOptions.positionIndependentExecutable(),
+			fOptions.allowTextRelocs());
 	}
-	// note: When writer start generating stubs and non-lazy-pointers for all architecture, do not insert
-	// newAtoms into fGlobalSymbolTable. Instead directly insert them in fAllAtoms and set their order appropriately.
+	
+	// add all newly created atoms to fAllAtoms and update symbol table
 	this->addAtoms(newAtoms);
 
-	// Some of the optimized atoms may not have identified section properly, if they
-	// were created before optimizer produces corrosponding real atom. Here, input
-	// file readers are not able to patch it themselves because Section::find() is
-	// linker specific.
-	for(std::vector<class ObjectFile::Atom*>::iterator itr = fAllAtoms.begin();
-		itr != fAllAtoms.end(); ++itr) {
-
+	// Make sure all atoms have a section.  Atoms that were not originally in a mach-o file could
+	// not have their section set until now.
+	for(std::vector<class ObjectFile::Atom*>::iterator itr = fAllAtoms.begin(); itr != fAllAtoms.end(); ++itr) {
 		ObjectFile::Atom *atom = *itr;
-		if (atom->getSectionName() && !atom->getSection())
+		if ( atom->getSection() == NULL )
 			atom->setSection(Section::find(atom->getSectionName(), atom->getSegment().getName(), atom->isZeroFill()));
+	}
+
+	// resolve new undefines
+	for(std::vector<const char*>::iterator riter = additionalUndefines.begin(); riter != additionalUndefines.end(); ++riter) {
+		const char *targetName = *riter;
+		//fprintf(stderr, "LTO additional undefine: %s\n", targetName);
+		ObjectFile::Atom* target = fGlobalSymbolTable.find(targetName);
+		if ( target == NULL) {
+			// mark that this symbol is needed
+			fGlobalSymbolTable.require(targetName);
+			// try to find it in some library
+			this->addJustInTimeAtoms(targetName);
+		}
 	}
 
 	if ( fOptions.deadStrip() != Options::kDeadStripOff ) {
 		fLiveAtoms.clear();
-        deadStripResolve();
-    }
-    else
-        resolveReferences();
+		this->deadStripResolve();
+	}
+	else {
+		this->checkUndefines();
+		this->resolveReferences();
+	}
 }
 
 void Linker::link()
@@ -696,11 +736,20 @@ inline void Linker::addAtom(ObjectFile::Atom& atom)
 	ObjectFile::Atom::Scope scope = atom.getScope();
 	const char* name = atom.getName();
 	if ( (scope != ObjectFile::Atom::scopeTranslationUnit) && (name != NULL) ) {
-		// update scope based on export list (possible that globals are downgraded to private_extern)
-		if ( (scope == ObjectFile::Atom::scopeGlobal) && fOptions.hasExportRestrictList() ) {
-			bool doExport = fOptions.shouldExport(name);
-			if ( !doExport ) {
-				atom.setScope(ObjectFile::Atom::scopeLinkageUnit);
+		// update scope based on export list 
+		if ( fOptions.hasExportRestrictList() ) {
+			if ( scope == ObjectFile::Atom::scopeGlobal ) {
+				// check for globals that are downgraded to hidden
+				bool doExport = fOptions.shouldExport(name);
+				if ( !doExport ) {
+					atom.setScope(ObjectFile::Atom::scopeLinkageUnit);
+				}
+			}
+			else if ( scope == ObjectFile::Atom::scopeLinkageUnit ) {
+				// check for hiddens that were requested to be exported
+				if (  fOptions.hasExportMaskList() && fOptions.shouldExport(name) ) {
+					warning("cannot export hidden symbol %s from %s", name, atom.getFile()->getPath());
+				}
 			}
 		}
 		// add to symbol table
@@ -712,61 +761,66 @@ inline void Linker::addAtom(ObjectFile::Atom& atom)
 		atom.setSection(Section::find(atom.getSectionName(), atom.getSegment().getName(), atom.isZeroFill()));
 }
 
-void Linker::updateContraints(ObjectFile::Reader* reader)
+
+void Linker::markDead(ObjectFile::Atom* atom)
+{
+	fDeadAtoms.insert(atom);
+	//
+	// The kGroupSubordinate reference kind is used to model group comdat.  
+	// The "signature" atom in the group has a kGroupSubordinate reference to
+	// all other members of the group.  So, if the signature atom is 
+	// coalesced away, all other atoms in the group should also be removed.  
+	//
+	std::vector<class ObjectFile::Reference*>& references = atom->getReferences();
+	for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
+		ObjectFile::Reference* ref = *rit;
+		if ( ref->getKind() == 2 /*kGroupSubordinate*/ ) {	// FIX FIX
+			ObjectFile::Atom* targetAtom = &(ref->getTarget());
+			if ( targetAtom == NULL ) {
+				warning("%s has a group reference to %s but is not bound", atom->getDisplayName(), ref->getTargetName());
+			}
+			else {
+				if ( targetAtom->getScope() != ObjectFile::Atom::scopeTranslationUnit ) {
+					// ok for .eh symbols to be not static in -r mode
+					if ( (fOptions.outputKind() != Options::kObjectFile) || (strcmp(targetAtom->getSectionName(), "__eh_frame") != 0) )
+						warning("%s is in a comdat group but its scope is not static", targetAtom->getDisplayName());
+				}
+				this->markDead(targetAtom);
+			}
+		}
+	}
+}
+
+void Linker::updateConstraints(ObjectFile::Reader* reader)
 {
 	// check objc objects were compiled compatibly
 	ObjectFile::Reader::ObjcConstraint objcAddition = reader->getObjCConstraint();
 	if ( reader->getInstallPath() == NULL ) {
 		// adding a .o file
-		switch ( fCurrentObjCConstraint ) {
+		switch ( objcAddition ) {
 			case ObjectFile::Reader::kObjcNone:
-				fCurrentObjCConstraint = objcAddition;
 				break;
 			case ObjectFile::Reader::kObjcRetainRelease:
+				if ( fCurrentObjCConstraint == ObjectFile::Reader::kObjcGC )
+					throwf("%s built with incompatible Garbage Collection settings to link with previous .o files", reader->getPath());
+				fCurrentObjCConstraint = ObjectFile::Reader::kObjcRetainRelease;
+				break;
 			case ObjectFile::Reader::kObjcRetainReleaseOrGC:
+				if ( fCurrentObjCConstraint == ObjectFile::Reader::kObjcNone )
+					fCurrentObjCConstraint = ObjectFile::Reader::kObjcRetainReleaseOrGC;
+				break;
 			case ObjectFile::Reader::kObjcGC:
-				if ( (fCurrentObjCConstraint != objcAddition) && (objcAddition != ObjectFile::Reader::kObjcNone) ) 
-					throwf("%s built with different Garbage Collection settings", reader->getPath());
+				if ( fCurrentObjCConstraint == ObjectFile::Reader::kObjcRetainRelease )
+					throwf("%s built with incompatible Garbage Collection settings to link with previous .o files", reader->getPath());
+				fCurrentObjCConstraint = ObjectFile::Reader::kObjcGC;
 				break;
 		}
 	}
 	if ( reader->objcReplacementClasses() )
 		fObjcReplacmentClasses = true;
 
-	// check cpu sub-types
-	ObjectFile::Reader::CpuConstraint  cpuAddition = reader->getCpuConstraint();
-	switch ( fCurrentCpuConstraint ) {
-		case ObjectFile::Reader::kCpuAny:
-			fCurrentCpuConstraint = cpuAddition;
-			break;
-		case ObjectFile::Reader::kCpuG3:
-			switch ( cpuAddition ) {
-				case ObjectFile::Reader::kCpuAny:
-				case ObjectFile::Reader::kCpuG3:
-					break;
-				case ObjectFile::Reader::kCpuG4:
-				case ObjectFile::Reader::kCpuG5:
-					// previous file for G3 this one is more contrained, use it
-					fCurrentCpuConstraint = cpuAddition;
-					break;
-			}
-			break;
-		case ObjectFile::Reader::kCpuG4:
-			switch ( cpuAddition ) {
-				case ObjectFile::Reader::kCpuAny:
-				case ObjectFile::Reader::kCpuG3:
-				case ObjectFile::Reader::kCpuG4:
-					break;
-				case ObjectFile::Reader::kCpuG5:
-					// previous file for G5 this one is more contrained, use it
-					fCurrentCpuConstraint = cpuAddition;
-					break;
-			}
-			break;
-		case ObjectFile::Reader::kCpuG5:
-			// G5 can run everything
-			break;
-	}
+	// check cpu sub-types for stricter sub-type
+	fCurrentCpuConstraint = (ObjectFile::Reader::CpuConstraint)reader->updateCpuConstraint(fCurrentCpuConstraint);
 }
 
 inline void Linker::addAtoms(std::vector<class ObjectFile::Atom*>& atoms)
@@ -783,7 +837,7 @@ inline void Linker::addAtoms(std::vector<class ObjectFile::Atom*>& atoms)
 			if ( std::find(fReadersThatHaveSuppliedAtoms.begin(), fReadersThatHaveSuppliedAtoms.end(), reader)
 					== fReadersThatHaveSuppliedAtoms.end() ) {
 				fReadersThatHaveSuppliedAtoms.push_back(reader);
-				updateContraints(reader);				
+				updateConstraints(reader);				
 			}	
 		}
 		this->addAtom(**it);
@@ -957,11 +1011,53 @@ void Linker::checkUndefines()
 		if ( doError ) 
 			throw "symbol(s) not found";
 	}
+	
+	// for each tentative definition in symbol table look for dylib that exports same symbol name
+	if ( fGlobalSymbolTable.hasExternalTentativeDefinitions() ) {
+		for (SymbolTable::Mapper::iterator it=fGlobalSymbolTable.begin(); it != fGlobalSymbolTable.end(); ++it) {
+			ObjectFile::Atom* atom = it->second;
+			if ( (atom != NULL) && (atom->getDefinitionKind()==ObjectFile::Atom::kTentativeDefinition) 
+				&& (atom->getScope() == ObjectFile::Atom::scopeGlobal) ) {
+				// look for dylibs that export same name as used by global tentative definition
+				addJustInTimeAtoms(atom->getName(), true);
+			}
+		}
+	}
+	
+	// if we have no weak symbols, see if we override some weak symbol in some dylib 
+	if ( !fGlobalSymbolTable.hasExternalWeakDefinitions() ) {
+		bool done = false;
+		for (SymbolTable::Mapper::iterator it=fGlobalSymbolTable.begin(); !done && (it != fGlobalSymbolTable.end()); ++it) {
+			ObjectFile::Atom* atom = it->second;
+			if ( (atom != NULL) && (atom->getDefinitionKind()==ObjectFile::Atom::kRegularDefinition) 
+				&& (atom->getScope() == ObjectFile::Atom::scopeGlobal) ) {
+				const char* name = atom->getName();
+				//fprintf(stderr, "looking for dylibs with a weak %s\n", name);
+				// look for dylibs with weak exports of the same name 
+				for (InstallNameToReader::iterator it=fDylibMap.begin(); it != fDylibMap.end(); it++) {
+					ObjectFile::Reader* reader = it->second;
+					if ( reader->hasWeakExternals() ) {
+						std::vector<class ObjectFile::Atom*>* atoms = reader->getJustInTimeAtomsFor(name);
+						if ( atoms != NULL ) {
+							//fprintf(stderr, "addJustInTimeAtoms(%s) => found in file %s\n", name, reader->getPath() );
+							// if this is a weak definition in a dylib
+							if ( (atoms->at(0)->getDefinitionKind() == ObjectFile::Atom::kExternalWeakDefinition) ) {
+								fGlobalSymbolTable.setHasExternalWeakDefinitions();
+								done = true;
+								break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	
 }
 
 
 
-std::vector<class ObjectFile::Atom*>* Linker::addJustInTimeAtoms(const char* name)
+std::vector<class ObjectFile::Atom*>* Linker::addJustInTimeAtoms(const char* name, bool dylibsOnly)
 {
 	// when creating final linked image, writer gets first chance
 	if ( fOptions.outputKind() != Options::kObjectFile ) {
@@ -980,20 +1076,23 @@ std::vector<class ObjectFile::Atom*>* Linker::addJustInTimeAtoms(const char* nam
 			// if this reader is a static archive that has the symbol we need, pull in all atoms in that module
 			// if this reader is a dylib that exports the symbol we need, have it synthesize an atom for us.
 			//fprintf(stderr, "addJustInTimeAtoms(%s), looking in reader %s\n", name, reader->getPath() );
-			std::vector<class ObjectFile::Atom*>* atoms = reader->getJustInTimeAtomsFor(name);
-			if ( atoms != NULL ) {
-				this->addAtoms(*atoms);
-				//fprintf(stderr, "addJustInTimeAtoms(%s) => found in file %s\n", name, reader->getPath() );
-				if ( fOptions.readerOptions().fTraceArchives ) {
-					logArchive(reader);
-				}
-				// if this is a weak definition in a dylib
-				if ( (atoms->size() == 1) && (reader->getInstallPath() != NULL) && (atoms->at(0)->getDefinitionKind() == ObjectFile::Atom::kExternalWeakDefinition) ) {
-					// keep looking for a non-weak definition
-				}
-				else {
-					// found a definition, no need to search anymore
-					return atoms;  
+			bool isDylibReader = (reader->getInstallPath() != NULL);
+			if ( !dylibsOnly || isDylibReader ) {
+				std::vector<class ObjectFile::Atom*>* atoms = reader->getJustInTimeAtomsFor(name);
+				if ( atoms != NULL ) {
+					this->addAtoms(*atoms);
+					//fprintf(stderr, "addJustInTimeAtoms(%s) => found in file %s\n", name, reader->getPath() );
+					if ( !isDylibReader && fOptions.readerOptions().fTraceArchives ) {
+						logArchive(reader);
+					}
+					// if this is a weak definition in a dylib
+					if ( isDylibReader && (atoms->size() == 1) && (atoms->at(0)->getDefinitionKind() == ObjectFile::Atom::kExternalWeakDefinition) ) {
+						// keep looking for a non-weak definition
+					}
+					else {
+						// found a definition, no need to search anymore
+						return atoms;  
+					}
 				}
 			}
 		}
@@ -1035,10 +1134,13 @@ std::vector<class ObjectFile::Atom*>* Linker::addJustInTimeAtoms(const char* nam
 		}
 	}
 
-	// when creating .o file, writer goes last (this is so any static archives will be searched above)
+	// writer creates a proxy in two cases:
+	// 1) ld -r is being used to create a .o file 
+	// 2) -undefined dynamic_lookup is being used
+	// 3) -U _foo is being used
 	if (	(fOptions.outputKind() == Options::kObjectFile) 
-		||  (fOptions.undefinedTreatment() != Options::kUndefinedError)
-		||	fOptions.someAllowedUndefines() ) {
+		||  ((fOptions.undefinedTreatment() != Options::kUndefinedError) && !dylibsOnly)
+		||	(fOptions.someAllowedUndefines() && !dylibsOnly) ) {
 		ObjectFile::Atom* atom = fOutputFile->getUndefinedProxyAtom(name);
 		if ( atom != NULL ) {
 			this->addAtom(*atom);
@@ -1250,7 +1352,7 @@ void Linker::addLiveRoot(const char* name)
 void Linker::deadStripResolve()
 {
 	// add main() to live roots
-	ObjectFile::Atom* entryPoint = this->entryPoint();
+	ObjectFile::Atom* entryPoint = this->entryPoint(false);
 	if ( entryPoint != NULL )
 		fLiveRootAtoms.insert(entryPoint);
 
@@ -1259,10 +1361,29 @@ void Linker::deadStripResolve()
 	if ( dyldHelper != NULL )
 		fLiveRootAtoms.insert(dyldHelper);
 
+	// if using lazy dylib loading, add dyld_lazy_dylib_stub_binding_helper() to live roots
+	if ( fOptions.usingLazyDylibLinking() ) {
+		ObjectFile::Atom* dyldLazyDylibHelper = this->dyldLazyLibraryHelper();
+		if ( dyldLazyDylibHelper != NULL )
+			fLiveRootAtoms.insert(dyldLazyDylibHelper);
+	}
+	
 	// add -exported_symbols_list, -init, and -u entries to live roots
 	std::vector<const char*>& initialUndefines = fOptions.initialUndefines();
 	for (std::vector<const char*>::iterator it=initialUndefines.begin(); it != initialUndefines.end(); it++)
 		addLiveRoot(*it);
+
+	// if -exported_symbols_list that has wildcards, we need to find all matches and make them the roots 
+	// <rdar://problem/5524973>
+	if ( fOptions.hasWildCardExportRestrictList() ) {
+		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); it++) {
+			ObjectFile::Atom* atom = *it;
+			if ( (atom->getScope() == ObjectFile::Atom::scopeGlobal) 
+				&& (fDeadAtoms.count(atom) == 0) 
+				&& fOptions.shouldExport(atom->getName()) )
+					fLiveRootAtoms.insert(atom);
+		}
+	}
 
 	// in some cases, every global scope atom in initial .o files is a root
 	if ( fOptions.allGlobalsAreDeadStripRoots() ) {
@@ -1297,7 +1418,7 @@ void Linker::deadStripResolve()
 					// by just adding this atom to fLiveAtoms set, we are assuming it has no
 					// references, which is true for commons.
 					if ( target->getDefinitionKind() != ObjectFile::Atom::kTentativeDefinition )
-						fprintf(stderr, "warning: ld64 internal error %s is not a tentative definition\n", target->getDisplayName());
+						warning("internal error %s is not a tentative definition", target->getDisplayName());
 				}
 			}
 			if ( reference->getFromTargetBinding() == ObjectFile::Reference::kUnboundByName ) {
@@ -1308,7 +1429,7 @@ void Linker::deadStripResolve()
 					// by just adding this atom to fLiveAtoms set, we are assuming it has no
 					// references, which is true for commons.
 					if ( target->getDefinitionKind() != ObjectFile::Atom::kTentativeDefinition )
-						fprintf(stderr, "warning: ld64 internal error %s is not a tentative definition\n", target->getDisplayName());
+						warning("internal error %s is not a tentative definition", target->getDisplayName());
 				}
 			}
 		}
@@ -1379,6 +1500,8 @@ static uint8_t pointerKind(cpu_type_t arch)
 			return x86::kPointer;
 		case CPU_TYPE_X86_64:
 			return x86_64::kPointer;
+		case CPU_TYPE_ARM:
+			return arm::kPointer;
 	}
 	throw "uknown architecture";
 }
@@ -1394,6 +1517,8 @@ static uint8_t pcRelKind(cpu_type_t arch)
 			return x86::kPointerDiff;
 		case CPU_TYPE_X86_64:
 			return x86_64::kPointerDiff32;
+		case CPU_TYPE_ARM:
+			return arm::kPointerDiff;
 	}
 	throw "uknown architecture";
 }
@@ -1413,31 +1538,37 @@ void Linker::processDTrace()
 		ProviderToProbes providerToProbes;
 		std::vector<DTraceProbeInfo> emptyList;
 		for(std::vector<DTraceProbeInfo>::iterator it = fDtraceProbeSites.begin(); it != fDtraceProbeSites.end(); ++it) {
-			const char* providerStart = &it->probeName[16];
-			const char* providerEnd = strchr(providerStart, '$');
-			if ( providerEnd != NULL ) {
-				char providerName[providerEnd-providerStart+1];
-				strlcpy(providerName, providerStart, providerEnd-providerStart+1);
-				ProviderToProbes::iterator pos = providerToProbes.find(providerName);
-				if ( pos == providerToProbes.end() ) {
-					const char* dup = strdup(providerName);
-					providerToProbes[dup] = emptyList;
+			// ignore probes in functions that were coalesed away rdar://problem/5628149
+			if ( fDeadAtoms.count((ObjectFile::Atom*)(it->atom)) == 0 ) {
+				const char* providerStart = &it->probeName[16];
+				const char* providerEnd = strchr(providerStart, '$');
+				if ( providerEnd != NULL ) {
+					char providerName[providerEnd-providerStart+1];
+					strlcpy(providerName, providerStart, providerEnd-providerStart+1);
+					ProviderToProbes::iterator pos = providerToProbes.find(providerName);
+					if ( pos == providerToProbes.end() ) {
+						const char* dup = strdup(providerName);
+						providerToProbes[dup] = emptyList;
+					}
+					providerToProbes[providerName].push_back(*it);
 				}
-				providerToProbes[providerName].push_back(*it);
 			}
 		}
 		for(std::vector<DTraceProbeInfo>::iterator it = fDtraceIsEnabledSites.begin(); it != fDtraceIsEnabledSites.end(); ++it) {
-			const char* providerStart = &it->probeName[20];
-			const char* providerEnd = strchr(providerStart, '$');
-			if ( providerEnd != NULL ) {
-				char providerName[providerEnd-providerStart+1];
-				strlcpy(providerName, providerStart, providerEnd-providerStart+1);
-				ProviderToProbes::iterator pos = providerToProbes.find(providerName);
-				if ( pos == providerToProbes.end() ) {
-					const char* dup = strdup(providerName);
-					providerToProbes[dup] = emptyList;
+			// ignore probes in functions that were coalesed away rdar://problem/5628149
+			if ( fDeadAtoms.count((ObjectFile::Atom*)(it->atom)) == 0 ) {
+				const char* providerStart = &it->probeName[20];
+				const char* providerEnd = strchr(providerStart, '$');
+				if ( providerEnd != NULL ) {
+					char providerName[providerEnd-providerStart+1];
+					strlcpy(providerName, providerStart, providerEnd-providerStart+1);
+					ProviderToProbes::iterator pos = providerToProbes.find(providerName);
+					if ( pos == providerToProbes.end() ) {
+						const char* dup = strdup(providerName);
+						providerToProbes[dup] = emptyList;
+					}
+					providerToProbes[providerName].push_back(*it);
 				}
-				providerToProbes[providerName].push_back(*it);
 			}
 		}
 		
@@ -1451,10 +1582,10 @@ void Linker::processDTrace()
 			// open library and find dtrace_create_dof()
 			void* handle = dlopen("/usr/lib/libdtrace.dylib", RTLD_LAZY);
 			if ( handle == NULL )
-				throwf("couldn't dlopen() /usr/lib/libdtrace.dylib: %s\n", dlerror());
+				throwf("couldn't dlopen() /usr/lib/libdtrace.dylib: %s", dlerror());
 			createdof_func_t pCreateDOF = (createdof_func_t)dlsym(handle, "dtrace_ld_create_dof");
 			if ( pCreateDOF == NULL )
-				throwf("couldn't find \"dtrace_ld_create_dof\" in /usr/lib/libdtrace.dylib: %s\n", dlerror());
+				throwf("couldn't find \"dtrace_ld_create_dof\" in /usr/lib/libdtrace.dylib: %s", dlerror());
 			// build list of typedefs/stability infos for this provider
 			CStringSet types;
 			for(std::vector<DTraceProbeInfo>::const_iterator it = probes.begin(); it != probes.end(); ++it) {
@@ -1494,6 +1625,9 @@ void Linker::processDTrace()
 				offsetsInDOF[index] = 0;
 				++index;
 			}
+			//fprintf(stderr, "calling libtrace to create DOF\n");
+			//for(uint32_t i=0; i < probeCount; ++i) 
+			//	fprintf(stderr, "  [%u]\t %s\t%s\n", i, probeNames[i], funtionNames[i]);
 			// call dtrace library to create DOF section
 			size_t dofSectionSize;
 			uint8_t* p = (*pCreateDOF)(fArchitecture, typeCount, typeNames, probeCount, probeNames, funtionNames, offsetsInDOF, &dofSectionSize);
@@ -1562,7 +1696,7 @@ void Linker::processDTrace()
 			for (uint32_t i=0; i < probeCount; ++i) {
 				uint64_t offset = offsetsInDOF[i];
 				if ( offset > dofSectionSize )
-					throwf("offsetsInDOF[i]=%0llX > dofSectionSize=%0lX\n", i, offset, dofSectionSize);
+					throwf("offsetsInDOF[i]=%0llX > dofSectionSize=%0lX", i, offset, dofSectionSize);
 				reader->addSectionReference(pointerKind(fArchitecture), offset, fDtraceProbes[i].atom, fDtraceProbes[i].offset);
 			}
 			this->addAtoms(reader->getAtoms());
@@ -1677,8 +1811,8 @@ ObjectFile::Atom* Linker::findAtom(const Options::OrderedSymbol& orderedSymbol)
 					if ( (name != NULL) && (strcmp(name, orderedSymbol.symbolName) == 0) ) {
 						if ( matchesObjectFile(atom, orderedSymbol.objectFileName) ) {
 							if ( fOptions.printOrderFileStatistics() )
-								fprintf(stderr, "ld: warning %s specified in order_file but it exists in multiple .o files. "
-										"Prefix symbol with .o filename in order_file to disambiguate\n", orderedSymbol.symbolName);
+								warning("%s specified in order_file but it exists in multiple .o files. "
+										"Prefix symbol with .o filename in order_file to disambiguate", orderedSymbol.symbolName);
 							return atom;
 						}
 					}
@@ -1708,8 +1842,8 @@ ObjectFile::Atom* Linker::findAtom(const Options::OrderedSymbol& orderedSymbol)
 						if ( strcmp(canonicalAtomName, canonicalName) == 0 ) {
 							if ( matchesObjectFile(atom, orderedSymbol.objectFileName) ) {
 								if ( fOptions.printOrderFileStatistics() )
-									fprintf(stderr, "ld: warning %s specified in order_file but it exists in multiple .o files. "
-										"Prefix symbol with .o filename in order_file to disambiguate\n", orderedSymbol.symbolName);
+									warning("%s specified in order_file but it exists in multiple .o files. "
+										"Prefix symbol with .o filename in order_file to disambiguate", orderedSymbol.symbolName);
 								return atom;
 							}
 						}
@@ -1799,7 +1933,7 @@ void Linker::sortAtoms()
 						// gerneral case of inserting into an existing cluster
 						if ( followOnNexts[atom] != NULL ) {
 							// an atom with two follow-ons is illegal
-							fprintf(stderr, "ld: warning can't order %s because both %s and %s must follow it\n",
+							warning("can't order %s because both %s and %s must follow it",
 										atom->getDisplayName(), targetAtom->getDisplayName(), followOnNexts[atom]->getDisplayName());
 						}
 						else {
@@ -1811,7 +1945,7 @@ void Linker::sortAtoms()
 							bool otherIsAlias = (originalPrevious->getSize() == 0);
 							bool thisIsAlias = (atom->getSize() == 0);
 							if ( !otherIsAlias && !thisIsAlias ) {
-								fprintf(stderr, "ld: warning can't order %s because both %s and %s must preceed it\n",
+								warning("can't order %s because both %s and %s must preceed it",
 											targetAtom->getDisplayName(), originalPrevious->getDisplayName(), atom->getDisplayName());
 							}
 							else if ( otherIsAlias ) {
@@ -1891,7 +2025,7 @@ void Linker::sortAtoms()
 			 ++index;
 		}
 		if ( fOptions.printOrderFileStatistics() && (fOptions.orderedSymbols().size() != matchCount) ) {
-			fprintf(stderr, "ld: warning only %u out of %lu order_file symbols were applicable\n", matchCount, fOptions.orderedSymbols().size() );
+			warning("only %u out of %lu order_file symbols were applicable", matchCount, fOptions.orderedSymbols().size() );
 		}
 	}
 
@@ -1915,11 +2049,11 @@ void Linker::tweakLayout()
 		if ( (fTotalSize-fTotalZeroFillSize) > 0x7F000000 )
 			throwf("total output size exceeds 2GB (%lldMB)", (fTotalSize-fTotalZeroFillSize)/(1024*1024));		
 
-		// move very large (>1MB) zero fill atoms to a new section at very end
+		// move very large (>1MB) zero fill atoms to a new section at very end of __DATA segment
 		Section* hugeZeroFills = Section::find("__huge", "__DATA", true);
 		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); it++) {
 			ObjectFile::Atom* atom = *it;
-			if ( atom->isZeroFill() && (atom->getSize() > 1024*1024) && atom->getSegment().isContentReadable() )
+			if ( atom->isZeroFill() && (atom->getSize() > 1024*1024) && (strcmp(atom->getSegment().getName(), "__DATA") == 0) )
 				atom->setSection(hugeZeroFills);
 		}
 	}
@@ -2000,12 +2134,12 @@ void Linker::writeDotOutput()
 			fclose(out);
 		}
 		else {
-			fprintf(stderr, "ld: warning could not write dot output file: %s\n", dotOutFilePath);
+			warning("could not write dot output file: %s", dotOutFilePath);
 		}
 	}
 }
 
-ObjectFile::Atom* Linker::entryPoint()
+ObjectFile::Atom* Linker::entryPoint(bool orInit)
 {
 	// if main executable, find entry point atom
 	ObjectFile::Atom* entryPoint = NULL;
@@ -2019,7 +2153,7 @@ ObjectFile::Atom* Linker::entryPoint()
 			}
 			break;
 		case Options::kDynamicLibrary:
-			if ( fOptions.initFunctionName() != NULL ) {
+			if ( orInit && (fOptions.initFunctionName() != NULL) ) {
 				entryPoint = fGlobalSymbolTable.find(fOptions.initFunctionName());
 				if ( entryPoint == NULL ) {
 					throwf("could not find -init function: \"%s\"", fOptions.initFunctionName());
@@ -2037,6 +2171,11 @@ ObjectFile::Atom* Linker::entryPoint()
 ObjectFile::Atom* Linker::dyldHelper()
 {
 	return fGlobalSymbolTable.find("dyld_stub_binding_helper");
+}
+
+ObjectFile::Atom* Linker::dyldLazyLibraryHelper()
+{
+	return fGlobalSymbolTable.find("dyld_lazy_dylib_stub_binding_helper");
 }
 
 const char* Linker::assureFullPath(const char* path)
@@ -2141,7 +2280,7 @@ static PathToSums sKnownBINCLs;
 
 void Linker::collectStabs(ObjectFile::Reader* reader, std::map<const class ObjectFile::Atom*, uint32_t>& atomOrdinals)
 {
-	bool log = false;
+	const bool log = false;
 	bool minimal = ( fOptions.readerOptions().fDebugInfoStripping == ObjectFile::ReaderOptions::kDebugInfoMinimal );
 	std::vector<class ObjectFile::Reader::Stab>* readerStabs = reader->getStabs();
 	if ( readerStabs == NULL )
@@ -2178,7 +2317,7 @@ void Linker::collectStabs(ObjectFile::Reader* reader, std::map<const class Objec
 				break;
 			case N_EINCL:
 				if ( curRangeIndex == -1 ) {
-					fprintf(stderr, "ld: warning EINCL missing BINCL in %s\n", reader->getPath());
+					warning("EINCL missing BINCL in %s", reader->getPath());
 				}
 				else {
 					ranges[curRangeIndex].end = it+1;
@@ -2212,7 +2351,7 @@ void Linker::collectStabs(ObjectFile::Reader* reader, std::map<const class Objec
 				if ( curRangeIndex != -1 ) {
 					ranges[curRangeIndex].cannotEXCL = true;
 					if ( fOptions.warnStabs() )
-						fprintf(stderr, "ld: cannot do BINCL/EINCL optimzation because of stabs kinds in %s for %s\n", ranges[curRangeIndex].begin->string, reader->getPath());
+						warning("cannot do BINCL/EINCL optimzation because of stabs kinds in %s for %s\n", ranges[curRangeIndex].begin->string, reader->getPath());
 				}
 				break;
 			case N_SO:
@@ -2250,24 +2389,26 @@ void Linker::collectStabs(ObjectFile::Reader* reader, std::map<const class Objec
 	}
 	if ( log ) fprintf(stderr, "processesed %d stabs for %s\n", count, reader->getPath());
 	if ( curRangeIndex != -1 )
-		fprintf(stderr, "ld: warning BINCL (%s) missing EINCL in %s\n", ranges[curRangeIndex].begin->string, reader->getPath());
+		warning("BINCL (%s) missing EINCL in %s", ranges[curRangeIndex].begin->string, reader->getPath());
 
 	// if no BINCLs
 	if ( ranges.size() == 0 ) {
-		int soIndex = 0;
+		unsigned int soIndex = 0;
 		for(std::vector<ObjectFile::Reader::Stab>::iterator it=readerStabs->begin(); it != readerStabs->end(); ++it) {
 			// copy minimal or all stabs
 			ObjectFile::Reader::Stab stab = *it;
 			if ( !minimal || minimizeStab(stab) ) {
 				if ( stab.type == N_SO ) {
-					if ( (stab.string != NULL) && (strlen(stab.string) > 0) ) {
-						// starting SO is associated with first atom
-						stab.atom = soRanges[soIndex].first;
-					}
-					else {
-						// ending SO is associated with last atom
-						stab.atom = soRanges[soIndex].second;
-						++soIndex;
+					if ( soIndex < soRanges.size() ) {
+						if ( (stab.string != NULL) && (strlen(stab.string) > 0) ) {
+							// starting SO is associated with first atom
+							stab.atom = soRanges[soIndex].first;
+						}
+						else {
+							// ending SO is associated with last atom
+							stab.atom = soRanges[soIndex].second;
+							++soIndex;
+						}
 					}
 				}
 				fStabs.push_back(stab);
@@ -2535,33 +2676,37 @@ void Linker::synthesizeDebugNotes(std::vector<class ObjectFile::Atom*>& allAtoms
 				endSym.string		= "";
 				fStabs.push_back(endSym);
 			}
+			else if ( atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn ) {
+				// no stabs for atoms that would not be in the symbol table
+			}
+			else if ( atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableInAsAbsolute ) {
+				// no stabs for absolute symbols
+			}
+			else if ( (strcmp(atom->getSectionName(), "__eh_frame") == 0) ) {
+				// no stabs for .eh atoms
+			}
 			else {
 				ObjectFile::Reader::Stab globalsStab;
+				const char* name = atom->getName();
 				if ( atom->getScope() == ObjectFile::Atom::scopeTranslationUnit ) {
 					// Synthesize STSYM stab for statics
-					const char* name = atom->getName();
-					if ( name[0] == '_' ) {
-						globalsStab.atom		= atom;
-						globalsStab.type		= N_STSYM;
-						globalsStab.other		= 1;
-						globalsStab.desc		= 0;
-						globalsStab.value		= 0;
-						globalsStab.string		= name;
-						fStabs.push_back(globalsStab);
-					}
+					globalsStab.atom		= atom;
+					globalsStab.type		= N_STSYM;
+					globalsStab.other		= 1;
+					globalsStab.desc		= 0;
+					globalsStab.value		= 0;
+					globalsStab.string		= name;
+					fStabs.push_back(globalsStab);
 				}
 				else {
-					// Synthesize GSYM stab for other globals (but not .eh exception frame symbols)
-					const char* name = atom->getName();
-					if ( (name[0] == '_') && (strcmp(atom->getSectionName(), "__eh_frame") != 0) ) {
-						globalsStab.atom		= atom;
-						globalsStab.type		= N_GSYM;
-						globalsStab.other		= 1;
-						globalsStab.desc		= 0;
-						globalsStab.value		= 0;
-						globalsStab.string		= name;
-						fStabs.push_back(globalsStab);
-					}
+					// Synthesize GSYM stab for other globals
+					globalsStab.atom		= atom;
+					globalsStab.type		= N_GSYM;
+					globalsStab.other		= 1;
+					globalsStab.desc		= 0;
+					globalsStab.value		= 0;
+					globalsStab.string		= name;
+					fStabs.push_back(globalsStab);
 				}
 			}
 		}
@@ -2687,12 +2832,14 @@ void Linker::writeOutput()
 {
 	if ( fOptions.forceCpuSubtypeAll() )
 		fCurrentCpuConstraint = ObjectFile::Reader::kCpuAny;
-		
+
 	fStartWriteTime = mach_absolute_time();
 	// tell writer about each segment's atoms
-	fOutputFileSize = fOutputFile->write(fAllAtoms, fStabs, this->entryPoint(), this->dyldHelper(),
+	fOutputFileSize = fOutputFile->write(fAllAtoms, fStabs, this->entryPoint(true), 
+											this->dyldHelper(), this->dyldLazyLibraryHelper(),
 											fCreateUUID, fCanScatter, 
-											fCurrentCpuConstraint, fBiggerThanTwoGigOutput);
+											fCurrentCpuConstraint, fBiggerThanTwoGigOutput, 
+											fGlobalSymbolTable.hasExternalWeakDefinitions());
 }
 
 ObjectFile::Reader* Linker::createReader(const Options::FileInfo& info)
@@ -2710,27 +2857,47 @@ ObjectFile::Reader* Linker::createReader(const Options::FileInfo& info)
 		throwf("can't map file, errno=%d", errno);
 
 	// if fat file, skip to architecture we want
+	// Note: fat header is always big-endian
 	const fat_header* fh = (fat_header*)p;
 	if ( fh->magic == OSSwapBigToHostInt32(FAT_MAGIC) ) {
-		// Fat header is always big-endian
 		const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
-		for (unsigned long i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
-			if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)fArchitecture ) {
-				uint32_t fileOffset = OSSwapBigToHostInt32(archs[i].offset);
-				len = OSSwapBigToHostInt32(archs[i].size);
-				// if requested architecture is page aligned within fat file, then remap just that portion of file
-				if ( (fileOffset & 0x00000FFF) == 0 ) {
-					// unmap whole file
-					munmap((caddr_t)p, info.fileLen);
-					// re-map just part we need
-					p = (uint8_t*)::mmap(NULL, len, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, fileOffset);
-					if ( p == (uint8_t*)(-1) )
-						throwf("can't re-map file, errno=%d", errno);
+		uint32_t sliceToUse;
+		bool sliceFound = false;
+		if ( fOptions.preferSubArchitecture() ) {
+			// first try to find a slice that match cpu-type and cpu-sub-type
+			for (uint32_t i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
+				if ( (OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)fArchitecture)
+				  && (OSSwapBigToHostInt32(archs[i].cpusubtype) == (uint32_t)fOptions.subArchitecture()) ) {
+					sliceToUse = i;
+					sliceFound = true;
+					break;
 				}
-				else {
-					p = &p[fileOffset];
+			}
+		}
+		if ( !sliceFound ) {
+			// look for any slice that matches just cpu-type
+			for (uint32_t i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
+				if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)fArchitecture ) {
+					sliceToUse = i;
+					sliceFound = true;
+					break;
 				}
-				break;
+			}
+		}
+		if ( sliceFound ) {
+			uint32_t fileOffset = OSSwapBigToHostInt32(archs[sliceToUse].offset);
+			len = OSSwapBigToHostInt32(archs[sliceToUse].size);
+			// if requested architecture is page aligned within fat file, then remap just that portion of file
+			if ( (fileOffset & 0x00000FFF) == 0 ) {
+				// unmap whole file
+				munmap((caddr_t)p, info.fileLen);
+				// re-map just part we need
+				p = (uint8_t*)::mmap(NULL, len, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, fileOffset);
+				if ( p == (uint8_t*)(-1) )
+					throwf("can't re-map file, errno=%d", errno);
+			}
+			else {
+				p = &p[fileOffset];
 			}
 		}
 	}
@@ -2741,39 +2908,50 @@ ObjectFile::Reader* Linker::createReader(const Options::FileInfo& info)
 			if ( mach_o::relocatable::Reader<ppc>::validFile(p) )
 				return this->addObject(new mach_o::relocatable::Reader<ppc>::Reader(p, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
 			else if ( mach_o::dylib::Reader<ppc>::validFile(p, info.options.fBundleLoader) )
-				return this->addDylib(new mach_o::dylib::Reader<ppc>::Reader(p, len, info.path, info.options.fBundleLoader, fOptions.readerOptions(), fNextInputOrdinal), info, len);
-			else if ( mach_o::archive::Reader<ppc>::validFile(p, len) )
-				return this->addArchive(new mach_o::archive::Reader<ppc>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+				return this->addDylib(new mach_o::dylib::Reader<ppc>::Reader(p, len, info.path, info.options, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+			else if ( archive::Reader<ppc>::validFile(p, len) )
+				return this->addArchive(new archive::Reader<ppc>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
 			break;
 		case CPU_TYPE_POWERPC64:
 			if ( mach_o::relocatable::Reader<ppc64>::validFile(p) )
 				return this->addObject(new mach_o::relocatable::Reader<ppc64>::Reader(p, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
 			else if ( mach_o::dylib::Reader<ppc64>::validFile(p, info.options.fBundleLoader) )
-				return this->addDylib(new mach_o::dylib::Reader<ppc64>::Reader(p, len, info.path, info.options.fBundleLoader, fOptions.readerOptions(), fNextInputOrdinal), info, len);
-			else if ( mach_o::archive::Reader<ppc64>::validFile(p, len) )
-				return this->addArchive(new mach_o::archive::Reader<ppc64>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+				return this->addDylib(new mach_o::dylib::Reader<ppc64>::Reader(p, len, info.path, info.options, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+			else if ( archive::Reader<ppc64>::validFile(p, len) )
+				return this->addArchive(new archive::Reader<ppc64>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
 			break;
 		case CPU_TYPE_I386:
 			if ( mach_o::relocatable::Reader<x86>::validFile(p) )
 				return this->addObject(new mach_o::relocatable::Reader<x86>::Reader(p, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
 			else if ( mach_o::dylib::Reader<x86>::validFile(p, info.options.fBundleLoader) )
-				return this->addDylib(new mach_o::dylib::Reader<x86>::Reader(p, len, info.path, info.options.fBundleLoader, fOptions.readerOptions(), fNextInputOrdinal), info, len);
-			else if ( mach_o::archive::Reader<x86>::validFile(p, len) )
-				return this->addArchive(new mach_o::archive::Reader<x86>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+				return this->addDylib(new mach_o::dylib::Reader<x86>::Reader(p, len, info.path, info.options, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+			else if ( archive::Reader<x86>::validFile(p, len) )
+				return this->addArchive(new archive::Reader<x86>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
 			break;
 		case CPU_TYPE_X86_64:
 			if ( mach_o::relocatable::Reader<x86_64>::validFile(p) )
 				return this->addObject(new mach_o::relocatable::Reader<x86_64>::Reader(p, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
 			else if ( mach_o::dylib::Reader<x86_64>::validFile(p, info.options.fBundleLoader) )
-				return this->addDylib(new mach_o::dylib::Reader<x86_64>::Reader(p, len, info.path, info.options.fBundleLoader, fOptions.readerOptions(), fNextInputOrdinal), info, len);
-			else if ( mach_o::archive::Reader<x86_64>::validFile(p, len) )
-				return this->addArchive(new mach_o::archive::Reader<x86_64>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+				return this->addDylib(new mach_o::dylib::Reader<x86_64>::Reader(p, len, info.path, info.options, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+			else if ( archive::Reader<x86_64>::validFile(p, len) )
+				return this->addArchive(new archive::Reader<x86_64>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+		case CPU_TYPE_ARM:
+			if ( mach_o::relocatable::Reader<arm>::validFile(p) )
+				return this->addObject(new mach_o::relocatable::Reader<arm>::Reader(p, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+			else if ( mach_o::dylib::Reader<arm>::validFile(p, info.options.fBundleLoader) )
+				return this->addDylib(new mach_o::dylib::Reader<arm>::Reader(p, len, info.path, info.options, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+			else if ( archive::Reader<arm>::validFile(p, len) )
+				return this->addArchive(new archive::Reader<arm>::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fNextInputOrdinal), info, len);
+			break;
 			break;
 	}
 
-#if LLVM_SUPPORT
-	if ( LLVMReader::validFile(p, info.path, fArchitecture, fOptions) ) {
-		return this->addObject(LLVMReader::make(p, info.path, info.modTime, fOptions), info, len);
+#if LTO_SUPPORT
+	if ( lto::Reader::validFile(p, len, fArchitecture) ) {
+		return this->addObject(new lto::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fArchitecture), info, len);
+	}
+	else if ( !lto::Reader::loaded() && (p[0] == 'B') && (p[1] == 'C')  ) {
+		throw "could not process object file.  Looks like an llvm bitcode object file, but libLTO.dylib could not be loaded";
 	}
 #endif
 	// error handling
@@ -2820,7 +2998,7 @@ ObjectFile::Reader* Linker::findDylib(const char* installPath, const char* fromP
 					return reader;
 				}
 				catch (const char* msg) {
-					fprintf(stderr, "ld: warning ignoring -dylib_file option, %s\n", msg);
+					warning("ignoring -dylib_file option, %s", msg);
 				}
 			}
 		}
@@ -2922,7 +3100,7 @@ void Linker::createReaders()
 						// ignore, because this is about an architecture not in use
 					}
 					else {
-						fprintf(stderr, "ld: warning in %s, %s\n", entry.path, msg);
+						warning("in %s, %s", entry.path, msg);
 					}
 				}
 				else {
@@ -3061,7 +3239,7 @@ ObjectFile::Reader* Linker::addDylib(ObjectFile::Reader* reader, const Options::
 			if ( pos2 == fDylibMap.end() ) 
 				fDylibMap[strdup(reader->getPath())] = reader;
 			else
-				fprintf(stderr, "ld: warning, duplicate dylib %s\n", reader->getPath());
+				warning("duplicate dylib %s", reader->getPath());
 		}
 	}
 	else if ( info.options.fBundleLoader )
@@ -3091,7 +3269,7 @@ void Linker::logTraceInfo (const char* format, ...)
 		if(trace_file_path != NULL) {
 			trace_file = open(trace_file_path, O_WRONLY | O_APPEND | O_CREAT, 0666);
 			if(trace_file == -1)
-				throwf("Could not open or create trace file: %s\n", trace_file_path);
+				throwf("Could not open or create trace file: %s", trace_file_path);
 		}
 		else {
 			trace_file = fileno(stderr);
@@ -3185,6 +3363,9 @@ void Linker::createWriter()
 		case CPU_TYPE_X86_64:
 			this->setOutputFile(new mach_o::executable::Writer<x86_64>(path, fOptions, dynamicLibraries));
 			break;
+		case CPU_TYPE_ARM:
+			this->setOutputFile(new mach_o::executable::Writer<arm>(path, fOptions, dynamicLibraries));
+			break;
 		default:
 			throw "unknown architecture";
 	}
@@ -3192,7 +3373,7 @@ void Linker::createWriter()
 
 
 Linker::SymbolTable::SymbolTable(Linker& owner)
- : fOwner(owner), fRequireCount(0)
+ : fOwner(owner), fRequireCount(0), fHasExternalTentativeDefinitions(false), fHasExternalWeakDefinitions(false)
 {
 }
 
@@ -3249,7 +3430,20 @@ enum AllDefinitionCombinations {
 bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 {
 	bool useNew = true;
+	bool checkVisibilityMismatch = false;
 	const char* name = newAtom.getName();
+	if ( newAtom.getScope() == ObjectFile::Atom::scopeGlobal ) {
+		switch ( newAtom.getDefinitionKind() ) {
+			case ObjectFile::Atom::kTentativeDefinition:
+				fHasExternalTentativeDefinitions = true;
+				break;
+			case ObjectFile::Atom::kWeakDefinition:
+				fHasExternalWeakDefinitions = true;
+				break;
+			default:
+				break;
+		}
+	}
 	//fprintf(stderr, "map.add(%s => %p from %s)\n", name, &newAtom, newAtom.getFile()->getPath());
 	Mapper::iterator pos = fTable.find(name);
 	ObjectFile::Atom* existingAtom = NULL;
@@ -3259,7 +3453,7 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 		// already have atom with same name in symbol table
 		switch ( (AllDefinitionCombinations)((existingAtom->getDefinitionKind() << 3) | newAtom.getDefinitionKind()) ) {
 			case kRegAndReg:
-				throwf("duplicate symbol %s in %s and %s\n", name, newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
+				throwf("duplicate symbol %s in %s and %s", name, newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
 			case kRegAndWeak:
 				// ignore new weak atom, because we already have a non-weak one
 				useNew = false;
@@ -3267,9 +3461,10 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 			case kRegAndTent:
 				// ignore new tentative atom, because we already have a regular one
 				useNew = false;
+				checkVisibilityMismatch = true;
 				if ( newAtom.getSize() > existingAtom->getSize() ) {
-					fprintf(stderr, "ld: warning for symbol %s tentative definition of size %llu from %s is "
-									"is smaller than the real definition of size %llu from %s\n",
+					warning("for symbol %s tentative definition of size %llu from %s is "
+									"is smaller than the real definition of size %llu from %s",
 									newAtom.getDisplayName(), newAtom.getSize(), newAtom.getFile()->getPath(),
 									existingAtom->getSize(), existingAtom->getFile()->getPath());
 				}
@@ -3283,7 +3478,7 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				useNew = false;
 				break;
 			case kRegAndAbsolute:
-				throwf("duplicate symbol %s in %s and %s\n", name, newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
+				throwf("duplicate symbol %s in %s and %s", name, newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
 				break;
 			case kWeakAndReg:
 				// replace existing weak atom with regular one
@@ -3292,6 +3487,7 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				// have another weak atom, use whichever has largest alignment requirement
 				// because codegen of some client may require alignment
 				useNew = ( newAtom.getAlignment().trailingZeros() > existingAtom->getAlignment().trailingZeros() );
+				checkVisibilityMismatch = true;
 				break;
 			case kWeakAndTent:
 				// replace existing weak atom with tentative one ???
@@ -3309,9 +3505,10 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				break;
 			case kTentAndReg:
 				// replace existing tentative atom with regular one
+				checkVisibilityMismatch = true;
 				if ( newAtom.getSize() < existingAtom->getSize() ) {
-					fprintf(stderr, "ld: warning for symbol %s tentative definition of size %llu from %s is "
-									"being replaced by a real definition of size %llu from %s\n",
+					warning("for symbol %s tentative definition of size %llu from %s is "
+									"being replaced by a real definition of size %llu from %s",
 									newAtom.getDisplayName(), existingAtom->getSize(), existingAtom->getFile()->getPath(),
 									newAtom.getSize(), newAtom.getFile()->getPath());
 				}
@@ -3321,12 +3518,13 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				break;
 			case kTentAndTent:
 				// use largest
+				checkVisibilityMismatch = true;
 				if ( newAtom.getSize() < existingAtom->getSize() ) {
 					useNew = false;
 				} 
 				else {
 					if ( newAtom.getAlignment().trailingZeros() < existingAtom->getAlignment().trailingZeros() )
-						fprintf(stderr, "ld: warning alignment lost in merging tentative definition %s\n", newAtom.getDisplayName());
+						warning("alignment lost in merging tentative definition %s", newAtom.getDisplayName());
 				}
 				break;
 			case kTentAndExtern:
@@ -3335,13 +3533,13 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				switch ( fOwner.fOptions.commonsMode() ) {
 					case Options::kCommonsIgnoreDylibs:
 						if ( fOwner.fOptions.warnCommons() )
-							fprintf(stderr, "ld: using common symbol %s from %s and ignoring defintion from dylib %s\n",
+							warning("using common symbol %s from %s and ignoring defintion from dylib %s",
 									existingAtom->getName(), existingAtom->getFile()->getPath(), newAtom.getFile()->getPath());
 						useNew = false;
 						break;
 					case Options::kCommonsOverriddenByDylibs:
 						if ( fOwner.fOptions.warnCommons() )
-							fprintf(stderr, "ld: replacing common symbol %s from %s with true definition from dylib %s\n",
+							warning("replacing common symbol %s from %s with true definition from dylib %s",
 									existingAtom->getName(), existingAtom->getFile()->getPath(), newAtom.getFile()->getPath());
 						break;
 					case Options::kCommonsConflictsDylibsError:
@@ -3363,12 +3561,12 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				switch ( fOwner.fOptions.commonsMode() ) {
 					case Options::kCommonsIgnoreDylibs:
 						if ( fOwner.fOptions.warnCommons() )
-							fprintf(stderr, "ld: using common symbol %s from %s and ignoring defintion from dylib %s\n",
+							warning("using common symbol %s from %s and ignoring defintion from dylib %s",
 									newAtom.getName(), newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
 						break;
 					case Options::kCommonsOverriddenByDylibs:
 						if ( fOwner.fOptions.warnCommons() )
-							fprintf(stderr, "ld: replacing defintion of %s from dylib %s with common symbol from %s\n",
+							warning("replacing defintion of %s from dylib %s with common symbol from %s",
 									newAtom.getName(), existingAtom->getFile()->getPath(), newAtom.getFile()->getPath());
 						useNew = false;
 						break;
@@ -3397,12 +3595,12 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				switch ( fOwner.fOptions.commonsMode() ) {
 					case Options::kCommonsIgnoreDylibs:
 						if ( fOwner.fOptions.warnCommons() )
-							fprintf(stderr, "ld: using common symbol %s from %s and ignoring defintion from dylib %s\n",
+							warning("using common symbol %s from %s and ignoring defintion from dylib %s",
 									newAtom.getName(), newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
 						break;
 					case Options::kCommonsOverriddenByDylibs:
 						if ( fOwner.fOptions.warnCommons() )
-							fprintf(stderr, "ld: replacing defintion of %s from dylib %s with common symbol from %s\n",
+							warning("replacing defintion of %s from dylib %s with common symbol from %s",
 									newAtom.getName(), existingAtom->getFile()->getPath(), newAtom.getFile()->getPath());
 						useNew = false;
 						break;
@@ -3422,7 +3620,7 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				// replace existing weak external with absolute
 				break;
 			case kAbsoluteAndReg:
-				throwf("duplicate symbol %s in %s and %s\n", name, newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
+				throwf("duplicate symbol %s in %s and %s", name, newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
 			case kAbsoluteAndWeak:
 				// ignore new weak atom, because we already have a non-weak one
 				useNew = false;
@@ -3440,21 +3638,21 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 				useNew = false;
 				break;
 			case kAbsoluteAndAbsolute:
-				throwf("duplicate symbol %s in %s and %s\n", name, newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
+				throwf("duplicate symbol %s in %s and %s", name, newAtom.getFile()->getPath(), existingAtom->getFile()->getPath());
 				break;
 		}
 	}
-	if ( (existingAtom != NULL) && (newAtom.getScope() != existingAtom->getScope()) ) {
-		fprintf(stderr, "ld: warning %s has different visibility (%d) in %s and (%d) in %s\n", 
-			newAtom.getDisplayName(), newAtom.getScope(), newAtom.getFile()->getPath(), existingAtom->getScope(), existingAtom->getFile()->getPath());
+	if ( (existingAtom != NULL) && checkVisibilityMismatch && (newAtom.getScope() != existingAtom->getScope()) ) {
+		warning("%s has different visibility (%s) in %s and (%s) in %s", 
+			newAtom.getDisplayName(), (newAtom.getScope() == 1 ? "hidden" : "default"), newAtom.getFile()->getPath(), (existingAtom->getScope()  == 1 ? "hidden" : "default"), existingAtom->getFile()->getPath());
 	}
 	if ( useNew ) {
 		fTable[name] = &newAtom;
 		if ( existingAtom != NULL )
-			fOwner.fDeadAtoms.insert(existingAtom);
+			fOwner.markDead(existingAtom);
 	}
 	else {
-		fOwner.fDeadAtoms.insert(&newAtom);
+		fOwner.markDead(&newAtom);
 	}
 	return useNew;
 }
@@ -3479,7 +3677,6 @@ void Linker::SymbolTable::getNeededNames(bool andWeakDefintions, std::vector<con
 		}
 	}
 }
-
 
 
 
@@ -3520,7 +3717,7 @@ bool Linker::AtomSorter::operator()(const ObjectFile::Atom* left, const ObjectFi
 			}
 		}
 	}
-	
+
 	// the __common section can have real or tentative definitions
 	// we want the real ones to sort before tentative ones
 	bool leftIsTent  =  (left->getDefinitionKind() == ObjectFile::Atom::kTentativeDefinition);

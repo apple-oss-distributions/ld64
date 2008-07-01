@@ -70,6 +70,8 @@ Both dynamic and static libraries are searched as they appear on the command lin
 maintains a list of directories to search for a library or framework to use.  The default
 library search path is /usr/lib then /usr/local/lib.  The -L option will add a new library search
 path.  The default framework search path is /Library/Frameworks then /System/Library/Frameworks.
+(Note: previously, /Network/Library/Frameworks was at the end of the default path.  If you need
+that functionality, you need to explicitly add -F/Network/Library/Frameworks). 
 The -F option will a new framework search path.  The -Z option will remove
 the standard search paths.  The -syslibroot option will prepend a prefix to all search
 paths.
@@ -139,6 +141,14 @@ clients linking to the library being created.  This was previously done with a s
 This is the same as listing a file name path to a library on the link line and it specifies that the 
 all symbols in library path should be available to clients linking to the library being created.
 This was previously done with a separate -sub_library option.
+.It Fl lazy-l Ns Ar x
+This is the same as the -lx but it is only for shared libraries and the linker
+will construct glue code so that the shared library is not loaded until 
+the first function in it is called.
+.It Fl lazy_library Ar path_to_library
+This is the same as listing a file name path to a shared library on the link line
+except that the linker will construct glue code so that the shared library is not 
+loaded until the first function in it is called.
 .It Fl L Ns dir
 Add 
 .Ar dir 
@@ -159,7 +169,7 @@ next path in the library search path is searched.
 .It Fl framework Ar name[,suffix]
 This option tells the linker to search for `name.framework/name' the framework search path.
 If the optional suffix is specified the framework is first searched for the name with the suffix and then without
-(e.g. look for `name.framework/name_suffix' first).
+(e.g. look for `name.framework/name_suffix' first, if not there try `name.framework/name').
 .It Fl weak_framework Ar name[,suffix]
 This is the same as the -framework name[,suffix] but forces the framework and all 
 references to it to be marked as weak imports. 
@@ -167,6 +177,11 @@ references to it to be marked as weak imports.
 This is the same as the -framework name[,suffix] but also specifies that the 
 all symbols in that framework should be available to clients linking to the library being created.
 This was previously done with a separate -sub_umbrella option.
+.It Fl lazy_framework Ar name[,suffix]
+This is the same as the -framework name[,suffix] except that the linker will 
+construct glue code so that the framework is not 
+loaded until the first function in it is called.  You cannot directly access
+data or Objective-C classes in a frameworked linked this way.
 .It Fl F Ns dir
 Add 
 .Ar dir
@@ -237,6 +252,14 @@ dylibs and bundles that a program loads, launch time can be improved because dyl
 It is often easier to not use this option, but instead use the rebase(1) tool, and give it a list of dylibs.  
 It will then choose non-overlapping addresses for the list and rebase them all.
 This option is also called -seg1addr for compatibility.
+.It Fl no_implicit_dylibs
+When creating a two-level namespace final linked image, normally the linker will hoist up public dylibs 
+that are implicitly linked to make the two-level namespace
+encoding more efficient for dyld.  For example, Cocoa re-exports AppKit and AppKit re-exports Foundation. 
+If you link with -framework Cocoa and use a symbol from Foundation, the linker will implicitly add a load
+command to load Foundation and encode the symbol as coming from Foundation.  If you use this option, 
+the linker will not add a load command for Foundation and encode the symbol as coming from Cocoa.  Then
+at runtime dyld will have to search Cocoa and AppKit before finding the symbol in Foundation.
 .El
 .Ss Options when creating a dynamic library (dylib)
 .Bl -tag
@@ -383,6 +406,13 @@ Add
 .Ar path
 to the runpath search path list for image being created.  At runtime, dyld uses the runpath when searching
 for dylibs whose load path begins with @rpath/.
+.It Fl commons Ar treatment
+Specifies how commons (aka tentative definitions) are resolved with respect to dylibs.  Options are: 
+ignore_dylibs, use_dylibs, error.  The default is ignore_dylibs which means the linker will turn a tentative
+definition in an object file into a real definition and not even check dylibs for conflicts.  The dylibs
+option means the linker should check linked dylibs for definitions and use them to replace tentative definitions 
+from object files.  The error option means the linker should issu an error whenever a tentative definition in an
+object file conflicts with an external symbol in a linked dylib.  See also -warn_commons.
 .El
 .Ss Options for introspecting the linker
 .Bl -tag
@@ -411,7 +441,11 @@ Writes a map file to the specified path which details all symbols and their addr
 Do not put debug information (STABS or DWARF) in the output file.
 .It Fl x
 Do not put non-global symbols in the output file's symbol table. Non-global symbols are useful when debugging and
-getting symbol names in back traces, but are not used at runtime.
+getting symbol names in back traces, but are not used at runtime. If -x is used with -r
+non-global symbol names are not removed, but instead replaced with a unique, duumy name
+that will be automatically removed when linked into a final linked image.  This
+allows dead code stripping, which uses symbols to break up code and data, to
+work properly and provides the security of having source symbol names removed.
 .It Fl non_global_symbols_strip_list Ar filename
 The specified 
 .Ar filename 
@@ -527,6 +561,25 @@ Add section based relocation records to a final linked image.  These relocations
 .It Fl warn_stabs
 Print a warning when the linker cannot do a BINCL/EINCL optimzation because the compiler put a bad stab symbol inside
 a BINCL/EINCL range.
+.It Fl warn_commons
+Print a warning whenever the a tentative definition in an object file is found and a external symbol by the same name
+is also found in a linked dylib.  This often means that the extern keyword is missing from a variable declaration
+in a header file.
+.It Fl read_only_stubs
+[i386 only] Makes the __IMPORT segment of a final linked images read-only.  This option makes a program slightly more
+secure in that the JMP instructions in the i386 fast stubs cannot be easily overwritten by malicious code.  The downside
+is the dyld must use mprotect() to temporily make the segment writable while it is binding the stubs. 
+.It Fl slow_stubs
+[i386 only]  Instead of using single JMP instruction stubs, the linker creates code in the __TEXT segment which 
+calls through a lazy pointer in the __DATA segment.  
+.It Fl interposable_list Ar filename
+The specified 
+.Ar filename 
+contains a list of global symbol names that should always be accessed indirectly.  For instance, if libSystem.dylib
+is linked such that _malloc is interposable, then calls to malloc() from within libSystem will go through a dyld
+stub and could potentially indirected to an alternate malloc.  If libSystem.dylib were built without making _malloc 
+interposable then if _malloc was interposed at runtime, calls to malloc from with libSystem would be missed 
+(not interposed) because they would be direct calls.
 .El
 .Ss Obsolete Options
 .Bl -tag

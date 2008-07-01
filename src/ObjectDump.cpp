@@ -27,15 +27,14 @@
 #include <sys/mman.h>
 #include <fcntl.h>
 #include <fcntl.h>
-#include <mach-o/loader.h>
-#include <mach-o/fat.h>
-#include <mach-o/stab.h>
 
 #include "MachOReaderRelocatable.hpp"
+#include "LTOReader.hpp"
 
 static bool			sDumpContent= true;
 static bool			sDumpStabs	= false;
 static bool			sSort		= true;
+static bool			sNMmode		= false;
 static cpu_type_t	sPreferredArch = CPU_TYPE_POWERPC64;
 static const char* sMatchName;
 static int sPrintRestrict;
@@ -54,6 +53,16 @@ void throwf(const char* format, ...)
 	
 	const char*	t = p;
 	throw t;
+}
+
+void warning(const char* format, ...)
+{
+	va_list	list;
+	fprintf(stderr, "warning: ");
+	va_start(list, format);
+	vfprintf(stderr, format, list);
+	va_end(list);
+	fprintf(stderr, "\n");
 }
 
 static void dumpStabs(std::vector<ObjectFile::Reader::Stab>* stabs)
@@ -154,6 +163,49 @@ static void dumpStabs(std::vector<ObjectFile::Reader::Stab>* stabs)
 }
 
 
+static void dumpAtomLikeNM(ObjectFile::Atom* atom)
+{
+	uint32_t size = atom->getSize();
+	
+	const char* visibility;
+	switch ( atom->getScope() ) {
+		case ObjectFile::Atom::scopeTranslationUnit:
+			visibility = "internal";
+			break;
+		case ObjectFile::Atom::scopeLinkageUnit:
+			visibility = "hidden  ";
+			break;
+		case ObjectFile::Atom::scopeGlobal:
+			visibility = "global  ";
+			break;
+		default:
+			visibility = "        ";
+			break;
+	}
+
+	const char* kind;
+	switch ( atom->getDefinitionKind() ) {
+		case ObjectFile::Atom::kRegularDefinition:
+			kind = "regular  ";
+			break;
+		case ObjectFile::Atom::kTentativeDefinition:
+			kind = "tentative";
+			break;
+		case ObjectFile::Atom::kWeakDefinition:
+			kind = "weak     ";
+			break;
+		case ObjectFile::Atom::kAbsoluteSymbol:
+			kind = "absolute ";
+			break;
+		default:
+			kind = "         ";
+			break;
+	}
+
+	printf("0x%08X %s %s %s\n", size, visibility, kind, atom->getDisplayName());
+}
+
+
 static void dumpAtom(ObjectFile::Atom* atom)
 {
 	if(sMatchName && strcmp(sMatchName, atom->getDisplayName()))
@@ -207,7 +259,7 @@ static void dumpAtom(ObjectFile::Atom* atom)
 		}
 
 	// segment and section
-	if(!sPrintRestrict)
+	if(!sPrintRestrict && (atom->getSectionName() != NULL) )
 		printf("section: %s,%s\n", atom->getSegment().getName(), atom->getSectionName());
 
 	// attributes
@@ -217,6 +269,8 @@ static void dumpAtom(ObjectFile::Atom* atom)
 			printf("dont-dead-strip ");
 		if ( atom->isZeroFill() )
 			printf("zero-fill ");
+		if ( atom->isThumb() )
+			printf("thumb ");
 		printf("\n");
 	}
 	
@@ -307,8 +361,12 @@ static void dumpFile(ObjectFile::Reader* reader)
 	if ( sSort )
 		std::sort(sortedAtoms.begin(), sortedAtoms.end(), AtomSorter());
 	
-	for(std::vector<ObjectFile::Atom*>::iterator it=sortedAtoms.begin(); it != sortedAtoms.end(); ++it)
-		dumpAtom(*it);
+	for(std::vector<ObjectFile::Atom*>::iterator it=sortedAtoms.begin(); it != sortedAtoms.end(); ++it) {
+		if ( sNMmode )
+			dumpAtomLikeNM(*it);
+		else
+			dumpAtom(*it);
+	}
 }
 
 
@@ -341,6 +399,12 @@ static ObjectFile::Reader* createReader(const char* path, const ObjectFile::Read
 		return new mach_o::relocatable::Reader<ppc64>::Reader(p, path, 0, options, 0);
 	else if ( mach_o::relocatable::Reader<x86_64>::validFile(p) )
 		return new mach_o::relocatable::Reader<x86_64>::Reader(p, path, 0, options, 0);
+	else if ( mach_o::relocatable::Reader<arm>::validFile(p) )
+		return new mach_o::relocatable::Reader<arm>::Reader(p, path, 0, options, 0);
+	if ( lto::Reader::validFile(p, stat_buf.st_size, 0) ) {
+		return new lto::Reader(p, stat_buf.st_size, path, 0, options, 0);
+	}
+	
 	throwf("not a mach-o object file: %s", path);
 }
 
@@ -372,6 +436,9 @@ int main(int argc, const char* argv[])
 			if ( arg[0] == '-' ) {
 				if ( strcmp(arg, "-no_content") == 0 ) {
 					sDumpContent = false;
+				}
+				else if ( strcmp(arg, "-nm") == 0 ) {
+					sNMmode = true;
 				}
 				else if ( strcmp(arg, "-stabs") == 0 ) {
 					sDumpStabs = true;

@@ -37,7 +37,7 @@ all:
 	${FAIL_IF_BAD_OBJ} a-${ARCH}.o
 	${FAIL_IF_ERROR} ar -r libtest-${ARCH}.a test-${ARCH}.o 2>/dev/null
 	${FAIL_IF_ERROR} ranlib libtest-${ARCH}.a
-	${CC} ${LDFLAGS} a-${ARCH}.o -L. -ltest-${ARCH} -o a-${ARCH}
+	${CC} ${CCFLAGS} a-${ARCH}.o -L. -ltest-${ARCH} -o a-${ARCH}
 	${PASS_IFF_GOOD_MACHO} a-${ARCH}
 
 clean:

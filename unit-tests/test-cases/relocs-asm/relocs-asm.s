@@ -21,6 +21,72 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+#if __arm__
+	.text
+	.align 2
+		
+	.globl _test_loads
+_test_loads:
+    @ PIC load of a
+    ldr r0, L6
+L0:
+    ldr r0, [pc, r0]
+
+    @ PIC load of c
+    ldr r0, L6+4
+L1:
+    ldr r0, [pc, r0]
+
+	@ sorta-absolute load of a
+	ldr r0, L6+8
+	ldr r0, [r0, #0]
+	
+	@ sorta-absolute load of c
+	ldr r0, L6+12
+	ldr r0, [r0, #0]
+
+	@ sorta-absolute load of external
+	ldr r0, L6+16
+	ldr r0, [r0, #0]
+
+	@ PIC load of a + addend ??
+    bx lr
+
+L6:
+    .long _a-(L0+8)
+    .long _c-(L1+8)
+    .long _a
+    .long _c
+    .long _ax
+
+_test_calls:
+	@ call internal
+	bl	_test_branches
+	
+	@ call internal + addend
+	bl	_test_branches+0x19000
+
+	@ call external
+	bl	_external
+	
+	@ call external + addend
+	bl	_external+0x19000
+	
+
+_test_branches:
+	@ call internal
+	bne	_test_calls
+	
+	@ call internal + addend
+	bne	_test_calls+16
+
+	@ call external
+	bne	_external
+	
+	@ call external + addend
+	bne	_external+16
+#endif
+
 #if __ppc__ || __ppc64__
 
 	.text
@@ -65,6 +131,14 @@ Lpicbase:
 	lis r2,ha16(_a+0x19000)
 	lwz r2,lo16(_a+0x19000)(r2)
 
+	; lea of a + addend
+	lis r2,ha16(_a+0x19000)
+	addi r2,r2,lo16(_a+0x19000)
+
+	; alt lea of a + addend
+	lis r2,hi16(_a+0x19000)
+	ori r2,r2,lo16(_a+0x19000)
+
 	; absolute load of external + addend
 	lis r2,ha16(_ax+0x19000)
 	lwz r2,lo16(_ax+0x19000)(r2)
@@ -81,6 +155,14 @@ Lpicbase:
 	; absolute load of a + addend
 	lis r2,ha16(_a+0x09000)
 	lwz r2,lo16(_a+0x09000)(r2)
+
+	; lea of a + addend
+	lis r2,ha16(_a+0x09000)
+	addi r2,r2,lo16(_a+0x09000)
+
+	; alt lea of a + addend
+	lis r2,hi16(_a+0x09000)
+	ori r2,r2,lo16(_a+0x09000)
 
 	; absolute load of external + addend
 	lis r2,ha16(_ax+0x09000)
@@ -198,6 +280,15 @@ _pointer_diffs:
 _word_relocs:
 	callw	_pointer_diffs
 
+_byte_relocs:
+    mov          $100, %ecx 
+c_1:  
+    loop         c_1
+    mov          $100, %ecx
+c_2:
+    sub          $(1), %ecx
+    jcxz         c_2
+
 #endif
 
 
@@ -273,6 +364,13 @@ _test_branches:
 	
 	# call external + addend
 	jne	_external+16
+	
+_byte_relocs:
+    mov          $100, %ecx 
+c_1:  
+    loop         _byte_relocs
+    nop
+
 #endif
 
 
@@ -345,7 +443,7 @@ _a:
 	.long	0
 
 _b:
-#if __ppc__ || __i386__
+#if __ppc__ || __i386__ || __arm__
 	.long	_test_calls
 	.long	_test_calls+16
 	.long	_external

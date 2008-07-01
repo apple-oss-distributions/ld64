@@ -34,16 +34,18 @@
 
 #include "ObjectFile.h"
 
-void throwf (const char* format, ...) __attribute__ ((noreturn));
+extern void throwf (const char* format, ...) __attribute__ ((noreturn));
+extern void warning(const char* format, ...);
 
 class DynamicLibraryOptions
 {
 public:
-	DynamicLibraryOptions() : fWeakImport(false), fReExport(false), fBundleLoader(false) {}
+	DynamicLibraryOptions() : fWeakImport(false), fReExport(false), fBundleLoader(false), fLazyLoad(false) {}
 
 	bool		fWeakImport;
 	bool		fReExport;
 	bool		fBundleLoader;
+	bool		fLazyLoad;
 };
 
 //
@@ -120,7 +122,9 @@ public:
 	const char*							getOutputFilePath();
 	std::vector<FileInfo>&				getInputFiles();
 
-	cpu_type_t					architecture();
+	cpu_type_t					architecture() { return fArchitecture; }
+	bool						preferSubArchitecture() { return fHasPreferredSubType; }
+	cpu_subtype_t				subArchitecture() { return fSubArchitecture; }
 	OutputKind					outputKind();
 	bool						prebind();
 	bool						bindAtLoad();
@@ -132,10 +136,12 @@ public:
 	const char*					entryName();			// only for kDynamicExecutable or kStaticExecutable
 	const char*					executablePath();
 	uint64_t					baseAddress();
-	bool						keepPrivateExterns();	// only for kObjectFile
-	bool						interposable();			// only for kDynamicLibrary
-	bool						needsModuleTable();		// only for kDynamicLibrary
+	bool						keepPrivateExterns();			// only for kObjectFile
+	bool						needsModuleTable();				// only for kDynamicLibrary
+	bool						interposable(const char* name);
 	bool						hasExportRestrictList();
+	bool						hasExportMaskList();
+	bool						hasWildCardExportRestrictList();
 	bool						allGlobalsAreDeadStripRoots();
 	bool						shouldExport(const char*);
 	bool						ignoreOtherArchInputFiles();
@@ -186,6 +192,7 @@ public:
 	bool						saveTempFiles() { return fSaveTempFiles; }
 	const std::vector<const char*>&   rpaths() { return fRPaths; }
 	bool						readOnlyx86Stubs() { return fReadOnlyx86Stubs; }
+	bool						slowx86Stubs() { return fReaderOptions.fSlowx86Stubs; }
 	std::vector<DylibOverride>&	dylibOverrides() { return fDylibOverrides; }
 	const char*					generatedMapPath() { return fMapPath; }
 	bool						positionIndependentExecutable() { return fPositionIndependentExecutable; }
@@ -195,7 +202,11 @@ public:
 	bool						someAllowedUndefines() { return (fAllowedUndefined.size() != 0); }
 	LocalSymbolHandling			localSymbolHandling() { return fLocalSymbolHandling; }
 	bool						keepLocalSymbol(const char* symbolName);
-	bool						emitWarnings() { return !fSuppressWarnings; }
+	bool						allowTextRelocs() { return fAllowTextRelocs; }
+	bool						warnAboutTextRelocs() { return fWarnTextRelocs; }
+	bool						usingLazyDylibLinking() { return fUsingLazyDylibLinking; }
+	bool						verbose() { return fVerbose; }
+	bool						makeEncryptable() { return fEncryptable; }
 
 private:
 	class CStringEquals
@@ -207,15 +218,17 @@ private:
 	typedef __gnu_cxx::hash_set<const char*, __gnu_cxx::hash<const char*>, CStringEquals>  NameSet;
 	enum ExportMode { kExportDefault, kExportSome, kDontExportSome };
 	enum LibrarySearchMode { kSearchDylibAndArchiveInEachDir, kSearchAllDirsForDylibsThenAllDirsForArchives };
+	enum InterposeMode { kInterposeNone, kInterposeAllExternal, kInterposeSome };
 
 	class SetWithWildcards {
 	public:
 		void					insert(const char*);
 		bool					contains(const char*);
+		bool					hasWildCards()	{ return !fWildCard.empty(); }
 		NameSet::iterator		regularBegin()	{ return fRegular.begin(); }
 		NameSet::iterator		regularEnd()	{ return fRegular.end(); }
 	private:
-		bool					hasWildCards(const char*);
+		static bool				hasWildCards(const char*);
 		bool					wildCardMatch(const char* pattern, const char* candidate);
 		bool					inCharRange(const char*& range, unsigned char c);
 
@@ -228,7 +241,7 @@ private:
 	void						checkIllegalOptionCombinations();
 	void						buildSearchPaths(int argc, const char* argv[]);
 	void						parseArch(const char* architecture);
-	FileInfo					findLibrary(const char* rootName);
+	FileInfo					findLibrary(const char* rootName, bool dylibsOnly=false);
 	FileInfo					findFramework(const char* frameworkName);
 	FileInfo					findFramework(const char* rootName, const char* suffix);
 	bool						checkForFile(const char* format, const char* dir, const char* rootName,
@@ -245,7 +258,8 @@ private:
 	void						parsePreCommandLineEnvironmentSettings();
 	void						parsePostCommandLineEnvironmentSettings();
 	void						setUndefinedTreatment(const char* treatment);
-	void						setVersionMin(const char* version);
+	void						setMacOSXVersionMin(const char* version);
+	void						setIPhoneVersionMin(const char* version);
 	void						setWeakReferenceMismatchTreatment(const char* treatment);
 	void						addDylibOverride(const char* paths);
 	void						addSectionAlignment(const char* segment, const char* section, const char* alignment);
@@ -263,14 +277,16 @@ private:
 	const char*							fOutputFile;
 	std::vector<Options::FileInfo>		fInputFiles;
 	cpu_type_t							fArchitecture;
+	cpu_subtype_t						fSubArchitecture;
 	OutputKind							fOutputKind;
+	bool								fHasPreferredSubType;
 	bool								fPrebind;
 	bool								fBindAtLoad;
 	bool								fKeepPrivateExterns;
-	bool								fInterposable;
 	bool								fNeedsModuleTable;
 	bool								fIgnoreOtherArchFiles;
 	bool								fForceSubtypeAll;
+	InterposeMode						fInterposeMode;
 	DeadStripMode						fDeadStrip;
 	NameSpace							fNameSpace;
 	uint32_t							fDylibCompatVersion;
@@ -283,6 +299,7 @@ private:
 	bool								fSplitSegs;
 	SetWithWildcards					fExportSymbols;
 	SetWithWildcards					fDontExportSymbols;
+	SetWithWildcards					fInterposeList;
 	ExportMode							fExportMode;
 	LibrarySearchMode					fLibrarySearchMode;
 	UndefinedTreatment					fUndefinedTreatment;
@@ -325,7 +342,10 @@ private:
 	bool								fPositionIndependentExecutable;
 	bool								fMaxMinimumHeaderPad;
 	bool								fDeadStripDylibs;
-	bool								fSuppressWarnings;
+	bool								fAllowTextRelocs;
+	bool								fWarnTextRelocs;
+	bool								fUsingLazyDylibLinking;
+	bool								fEncryptable;
 	std::vector<const char*>			fInitialUndefines;
 	NameSet								fAllowedUndefined;
 	NameSet								fWhyLive;

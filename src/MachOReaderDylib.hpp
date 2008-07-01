@@ -87,6 +87,7 @@ public:
 	virtual SymbolTableInclusion				getSymbolTableInclusion() const	{ return ObjectFile::Atom::kSymbolTableIn; }
 	virtual	bool								dontDeadStrip() const		{ return false; }
 	virtual bool								isZeroFill() const			{ return false; }
+	virtual bool								isThumb() const				{ return false; }
 	virtual uint64_t							getSize() const				{ return 0; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return fgEmptyReferenceList; }
 	virtual bool								mustRemainInSection() const { return false; }
@@ -170,6 +171,7 @@ public:
 	virtual SymbolTableInclusion				getSymbolTableInclusion() const	{ return ObjectFile::Atom::kSymbolTableNotIn; }
 	virtual	bool								dontDeadStrip() const		{ return false; }
 	virtual bool								isZeroFill() const			{ return false; }
+	virtual bool								isThumb() const				{ return false; }
 	virtual uint64_t							getSize() const				{ return 0; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual bool								mustRemainInSection() const { return false; }
@@ -221,7 +223,7 @@ class Reader : public ObjectFile::Reader
 public:
 	static bool										validFile(const uint8_t* fileContent, bool executableOrDylib);
 													Reader(const uint8_t* fileContent, uint64_t fileLength, const char* path,
-														bool executableOrDylib, const ObjectFile::ReaderOptions& options,
+														const DynamicLibraryOptions& dylibOptions, const ObjectFile::ReaderOptions& options,
 														uint32_t ordinalBase);
 	virtual											~Reader() {}
 
@@ -243,6 +245,8 @@ public:
 	virtual bool									providedExportAtom()		{ return fProvidedAtom; }
 	virtual const char*								parentUmbrella()			{ return fParentUmbrella; }
 	virtual std::vector<const char*>*				getAllowableClients();
+	virtual bool									hasWeakExternals()			{ return fHasWeakExports; }
+	virtual bool									isLazyLoadedDylib()			{ return fLazyLoaded; }
 
 	virtual void									setImplicitlyLinked()		{ fImplicitlyLinked = true; }
 
@@ -250,7 +254,7 @@ protected:
 
 	struct ReExportChain { ReExportChain* prev; Reader<A>* reader; };
 
-	void											assertNoReExportCycles(std::set<ObjectFile::Reader*>& chainedReExportReaders, ReExportChain*);
+	void											assertNoReExportCycles(ReExportChain*);
 
 private:
 	typedef typename A::P						P;
@@ -283,12 +287,15 @@ private:
 	NameToAtomMap								fAtoms;
 	NameSet										fIgnoreExports;
 	bool										fNoRexports;
+	bool										fHasWeakExports;
 	const bool									fLinkingFlat;
 	const bool									fLinkingMainExecutable;
 	bool										fExplictReExportFound;
 	bool										fExplicitlyLinked;
 	bool										fImplicitlyLinked;
 	bool										fProvidedAtom;
+	bool										fImplicitlyLinkPublicDylibs;
+	bool										fLazyLoaded;
 	ObjectFile::Reader::ObjcConstraint			fObjcContraint;
 	std::vector<ObjectFile::Reader*>   			fReExportedChildren;
 	const ObjectFile::ReaderOptions::VersionMin	fDeploymentVersionMin;
@@ -305,16 +312,19 @@ bool									Reader<A>::fgLogHashtable = false;
 
 
 template <typename A>
-Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* path, bool executableOrDylib, 
+Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* path, 
+		const DynamicLibraryOptions& dylibOptions, 
 		const ObjectFile::ReaderOptions& options, uint32_t ordinalBase)
 	: fParentUmbrella(NULL), fDylibInstallPath(NULL), fDylibTimeStamp(0), fDylibtCurrentVersion(0), 
 	fDylibCompatibilityVersion(0), fLinkingFlat(options.fFlatNamespace), 
 	fLinkingMainExecutable(options.fLinkingMainExecutable), fExplictReExportFound(false), 
-	fExplicitlyLinked(false), fImplicitlyLinked(false), fProvidedAtom(false), fObjcContraint(ObjectFile::Reader::kObjcNone),
+	fExplicitlyLinked(false), fImplicitlyLinked(false), fProvidedAtom(false), 
+	fImplicitlyLinkPublicDylibs(options.fImplicitlyLinkPublicDylibs), fLazyLoaded(dylibOptions.fLazyLoad),
+	fObjcContraint(ObjectFile::Reader::kObjcNone),
 	fDeploymentVersionMin(options.fVersionMin)
 {
 	// sanity check
-	if ( ! validFile(fileContent, executableOrDylib) )
+	if ( ! validFile(fileContent, dylibOptions.fBundleLoader) )
 		throw "not a valid mach-o object file";
 
 	fPath = strdup(path);
@@ -322,16 +332,17 @@ Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* p
 	const macho_header<P>* header = (const macho_header<P>*)fileContent;
 	const uint32_t cmd_count = header->ncmds();
 	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((char*)header + sizeof(macho_header<P>));
+	const macho_load_command<P>* const cmdsEnd = (macho_load_command<P>*)((char*)header + sizeof(macho_header<P>) + header->sizeofcmds());
 
 	// write out path for -whatsloaded option
 	if ( options.fLogAllFiles )
 		printf("%s\n", path);
 
 	if ( options.fRootSafe && ((header->flags() & MH_ROOT_SAFE) == 0) )
-		fprintf(stderr, "ld: warning using -root_safe but linking against %s which is not root safe\n", path);
+		warning("using -root_safe but linking against %s which is not root safe", path);
 
 	if ( options.fSetuidSafe && ((header->flags() & MH_SETUID_SAFE) == 0) )
-		fprintf(stderr, "ld: warning using -setuid_safe but linking against %s which is not setuid safe\n", path);
+		warning("using -setuid_safe but linking against %s which is not setuid safe", path);
 
 	// a "blank" stub has zero load commands
 	if ( (header->filetype() == MH_DYLIB_STUB) && (cmd_count == 0) ) {	
@@ -343,6 +354,7 @@ Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* p
 
 	// optimize the case where we know there is no reason to look at indirect dylibs
 	fNoRexports = (header->flags() & MH_NO_REEXPORTED_DYLIBS);
+	fHasWeakExports = (header->flags() & MH_WEAK_DEFINES);
 	bool trackDependentLibraries = !fNoRexports || options.fFlatNamespace;
 	
 	// pass 1 builds list of all dependent libraries
@@ -362,6 +374,8 @@ Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* p
 					break;
 			}
 			cmd = (const macho_load_command<P>*)(((char*)cmd)+cmd->cmdsize());
+			if ( cmd > cmdsEnd )
+				throwf("malformed dylb, load command #%d is outside size of load commands in %s", i, path);
 		}
 	}
 	
@@ -449,7 +463,7 @@ Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* p
 									fObjcContraint = ObjectFile::Reader::kObjcRetainRelease;
 							}
 							else if ( sect->size() > 0 ) {
-								fprintf(stderr, "ld: warning, can't parse __OBJC/__image_info section in %s\n", fPath);
+								warning("can't parse __OBJC/__image_info section in %s", fPath);
 							}
 						}
 					}
@@ -457,6 +471,8 @@ Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* p
 		}
 
 		cmd = (const macho_load_command<P>*)(((char*)cmd)+cmd->cmdsize());
+		if ( cmd > cmdsEnd )
+			throwf("malformed dylb, load command #%d is outside size of load commands in %s", i, path);
 	}
 	
 	// Process the rest of the commands here.
@@ -472,12 +488,12 @@ Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* p
 	}
 
 	// validate minimal load commands
-	if ( (fDylibInstallPath == NULL) && (header->filetype() != MH_EXECUTE) ) 
-		throw "dylib missing LC_ID_DYLIB load command";
+	if ( (fDylibInstallPath == NULL) && ((header->filetype() == MH_DYLIB) || (header->filetype() == MH_DYLIB_STUB)) ) 
+		throwf("dylib %s missing LC_ID_DYLIB load command", path);
 	if ( symbolTable == NULL )
-		throw "dylib missing LC_SYMTAB load command";
+		throw "binary missing LC_SYMTAB load command";
 	if ( dynamicInfo == NULL )
-		throw "dylib missing LC_DYSYMTAB load command";
+		throw "binary missing LC_DYSYMTAB load command";
 	
 	// if linking flat and this is a flat dylib, create one atom that references all imported symbols
 	if ( fLinkingFlat && fLinkingMainExecutable && ((header->flags() & MH_TWOLEVEL) == 0) ) {
@@ -552,6 +568,9 @@ void Reader<A>::addSymbol(const char* name, bool weak, uint32_t ordinal)
 					case 5:
 						symVersionCondition = ObjectFile::ReaderOptions::k10_5;
 						break;
+					case 6:
+						symVersionCondition = ObjectFile::ReaderOptions::k10_6;
+						break;
 				}
 				const char* symName = strchr(&symCond[1], '$');
 				if ( symName != NULL ) {
@@ -567,20 +586,20 @@ void Reader<A>::addSymbol(const char* name, bool weak, uint32_t ordinal)
 							return;
 						}
 						else {
-							fprintf(stderr, "ld: warning bad symbol action: %s in dylib %s\n", name, this->getPath());
+							warning("bad symbol action: %s in dylib %s", name, this->getPath());
 						}
 					}
 				}
 				else {
-					fprintf(stderr, "ld: warning bad symbol name: %s in dylib %s\n", name, this->getPath());
+					warning("bad symbol name: %s in dylib %s", name, this->getPath());
 				}
 			}
 			else {
-				fprintf(stderr, "ld: warning bad symbol version: %s in dylib %s\n", name, this->getPath());
+				warning("bad symbol version: %s in dylib %s", name, this->getPath());
 			}
 		}	
 		else {
-			fprintf(stderr, "ld: warning bad symbol condition: %s in dylib %s\n", name, this->getPath());
+			warning("bad symbol condition: %s in dylib %s", name, this->getPath());
 		}
 	}
 	
@@ -650,6 +669,10 @@ std::vector<class ObjectFile::Atom*>* Reader<A>::getJustInTimeAtomsFor(const cha
 template <typename A>
 bool Reader<A>::isPublicLocation(const char* path)
 {
+	// -no_implicit_dylibs disables this optimization
+	if ( ! fImplicitlyLinkPublicDylibs )
+		return false;
+	
 	// /usr/lib is a public location
 	if ( (strncmp(path, "/usr/lib/", 9) == 0) && (strchr(&path[9], '/') == NULL) )
 		return true;
@@ -723,30 +746,28 @@ void Reader<A>::processIndirectLibraries(DylibHander* handler)
 	}
 	
 	// check for re-export cycles
-	std::set<ObjectFile::Reader*> chainedReExportReaders;
 	ReExportChain chain;
 	chain.prev = NULL;
 	chain.reader = this;
-	this->assertNoReExportCycles(chainedReExportReaders, &chain);
+	this->assertNoReExportCycles(&chain);
 }
 
 template <typename A>
-void Reader<A>::assertNoReExportCycles(std::set<ObjectFile::Reader*>& chainedReExportReaders, ReExportChain* prev)
+void Reader<A>::assertNoReExportCycles(ReExportChain* prev)
 {
-	// check none of my re-exported dylibs are already in set
-	for (std::vector<ObjectFile::Reader*>::iterator it = fReExportedChildren.begin(); it != fReExportedChildren.end(); it++) {
-		if ( chainedReExportReaders.count(*it) != 0 ) {
-			// we may want to print out the chain of dylibs causing the cylce...
-			throwf("cycle in dylib re-exports with %s", this->getPath());
-		}
-	}
-	// recursively check my re-exportted dylibs
-	chainedReExportReaders.insert(this);
+	// recursively check my re-exported dylibs
 	ReExportChain chain;
 	chain.prev = prev;
 	chain.reader = this;
 	for (std::vector<ObjectFile::Reader*>::iterator it = fReExportedChildren.begin(); it != fReExportedChildren.end(); it++) {
-		((Reader<A>*)(*it))->assertNoReExportCycles(chainedReExportReaders, &chain);
+		ObjectFile::Reader* child = *it;
+		// check child is not already in chain 
+		for (ReExportChain* p = prev; p != NULL; p = p->prev) {
+			if ( p->reader == child ) {
+				throwf("cycle in dylib re-exports with %s", child->getPath());
+			}
+		}
+		((Reader<A>*)(*it))->assertNoReExportCycles(&chain);
 	}
 }
 
@@ -764,7 +785,7 @@ std::vector<const char*>* Reader<A>::getAllowableClients()
 }
 
 template <>
-bool Reader<ppc>::validFile(const uint8_t* fileContent, bool executableOrDylib)
+bool Reader<ppc>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
 {
 	const macho_header<P>* header = (const macho_header<P>*)fileContent;
 	if ( header->magic() != MH_MAGIC )
@@ -775,15 +796,23 @@ bool Reader<ppc>::validFile(const uint8_t* fileContent, bool executableOrDylib)
 		case MH_DYLIB:
 		case MH_DYLIB_STUB:
 			return true;
+		case MH_BUNDLE:
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with bundle (MH_BUNDLE) only dylibs (MH_DYLIB)";
 		case MH_EXECUTE:
-			return executableOrDylib;
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with a main executable";
 		default:
 			return false;
 	}
 }
 
 template <>
-bool Reader<ppc64>::validFile(const uint8_t* fileContent, bool executableOrDylib)
+bool Reader<ppc64>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
 {
 	const macho_header<P>* header = (const macho_header<P>*)fileContent;
 	if ( header->magic() != MH_MAGIC_64 )
@@ -794,15 +823,23 @@ bool Reader<ppc64>::validFile(const uint8_t* fileContent, bool executableOrDylib
 		case MH_DYLIB:
 		case MH_DYLIB_STUB:
 			return true;
+		case MH_BUNDLE:
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with bundle (MH_BUNDLE) only dylibs (MH_DYLIB)";
 		case MH_EXECUTE:
-			return executableOrDylib;
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with a main executable";
 		default:
 			return false;
 	}
 }
 
 template <>
-bool Reader<x86>::validFile(const uint8_t* fileContent, bool executableOrDylib)
+bool Reader<x86>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
 {
 	const macho_header<P>* header = (const macho_header<P>*)fileContent;
 	if ( header->magic() != MH_MAGIC )
@@ -813,15 +850,23 @@ bool Reader<x86>::validFile(const uint8_t* fileContent, bool executableOrDylib)
 		case MH_DYLIB:
 		case MH_DYLIB_STUB:
 			return true;
+		case MH_BUNDLE:
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with bundle (MH_BUNDLE) only dylibs (MH_DYLIB)";
 		case MH_EXECUTE:
-			return executableOrDylib;
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with a main executable";
 		default:
 			return false;
 	}
 }
 
 template <>
-bool Reader<x86_64>::validFile(const uint8_t* fileContent, bool executableOrDylib)
+bool Reader<x86_64>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
 {
 	const macho_header<P>* header = (const macho_header<P>*)fileContent;
 	if ( header->magic() != MH_MAGIC_64 )
@@ -832,15 +877,47 @@ bool Reader<x86_64>::validFile(const uint8_t* fileContent, bool executableOrDyli
 		case MH_DYLIB:
 		case MH_DYLIB_STUB:
 			return true;
+		case MH_BUNDLE:
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with bundle (MH_BUNDLE) only dylibs (MH_DYLIB)";
 		case MH_EXECUTE:
-			return executableOrDylib;
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with a main executable";
 		default:
 			return false;
 	}
 }
 
-
-
+template <>
+bool Reader<arm>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
+{
+	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	if ( header->magic() != MH_MAGIC )
+		return false;
+	if ( header->cputype() != CPU_TYPE_ARM )
+		return false;
+	switch ( header->filetype() ) {
+		case MH_DYLIB:
+		case MH_DYLIB_STUB:
+			return true;
+		case MH_BUNDLE:
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with bundle (MH_BUNDLE) only dylibs (MH_DYLIB)";
+		case MH_EXECUTE:
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with a main executable";
+		default:
+			return false;
+	}
+}
 
 }; // namespace dylib
 }; // namespace mach_o
