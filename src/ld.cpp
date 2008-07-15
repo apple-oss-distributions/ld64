@@ -753,7 +753,17 @@ inline void Linker::addAtom(ObjectFile::Atom& atom)
 			}
 		}
 		// add to symbol table
-		fGlobalSymbolTable.add(atom);
+		if ( fOptions.outputKind() == Options::kObjectFile ) {
+			// in ld -r mode don't add .eh symbols to symbol table 
+			// instead kGroupSubordinate references will keep them paired
+			// with their functions.
+			const char* sectionName = atom.getSectionName();
+			if ( (sectionName != NULL) && (strcmp(sectionName, "__eh_frame") != 0) )
+				fGlobalSymbolTable.add(atom);
+		}
+		else {
+			fGlobalSymbolTable.add(atom);
+		}
 	}
 
 	// record section orders so output file can have same order

@@ -29,7 +29,12 @@
 #include <fcntl.h>
 
 #include "MachOReaderRelocatable.hpp"
-#include "LTOReader.hpp"
+
+#define LTO_SUPPORT 1
+
+#if LTO_SUPPORT
+	#include "LTOReader.hpp"
+#endif
 
 static bool			sDumpContent= true;
 static bool			sDumpStabs	= false;
@@ -401,9 +406,11 @@ static ObjectFile::Reader* createReader(const char* path, const ObjectFile::Read
 		return new mach_o::relocatable::Reader<x86_64>::Reader(p, path, 0, options, 0);
 	else if ( mach_o::relocatable::Reader<arm>::validFile(p) )
 		return new mach_o::relocatable::Reader<arm>::Reader(p, path, 0, options, 0);
+#if LTO_SUPPORT
 	if ( lto::Reader::validFile(p, stat_buf.st_size, 0) ) {
 		return new lto::Reader(p, stat_buf.st_size, path, 0, options, 0);
 	}
+#endif
 	
 	throwf("not a mach-o object file: %s", path);
 }

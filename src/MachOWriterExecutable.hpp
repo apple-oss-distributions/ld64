@@ -1155,7 +1155,7 @@ StubHelperAtom<x86_64>::StubHelperAtom(Writer<x86_64>& writer, ObjectFile::Atom&
 	fReferences.push_back(new WriterReference<x86_64>(3, x86_64::kPCRel32, &lazyPointer));
 	if ( forLazyDylib ) {
 		if ( writer.fDyldLazyDylibHelper == NULL )
-			throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
+			throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in lazydylib1.o)";
 		fReferences.push_back(new WriterReference<x86_64>(8, x86_64::kPCRel32, writer.fDyldLazyDylibHelper));
 	}
 	else {
@@ -1332,7 +1332,7 @@ StubAtom<ppc>::StubAtom(Writer<ppc>& writer, ObjectFile::Atom& target, bool forL
 		// for non-prebound ppc, lazy pointer starts out pointing to dyld_stub_binding_helper glue code
 		if ( forLazyDylib ) {
 			if ( writer.fDyldLazyDylibHelper == NULL )
-				throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
+				throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in lazydylib1.o)";
 			lp = new LazyPointerAtom<ppc>(writer, *writer.fDyldLazyDylibHelper, *this, forLazyDylib);
 		}
 		else {
@@ -1362,7 +1362,7 @@ StubAtom<ppc64>::StubAtom(Writer<ppc64>& writer, ObjectFile::Atom& target, bool 
 	LazyPointerAtom<ppc64>* lp;
 	if ( forLazyDylib ) {
 		if ( writer.fDyldLazyDylibHelper == NULL )
-			throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
+			throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in lazydylib1.o)";
 		lp = new LazyPointerAtom<ppc64>(writer, *writer.fDyldLazyDylibHelper, *this, forLazyDylib);
 	}
 	else {
@@ -1395,7 +1395,7 @@ StubAtom<x86>::StubAtom(Writer<x86>& writer, ObjectFile::Atom& target, bool forL
 		ObjectFile::Atom* helper;
 		if ( forLazyDylib ) {
 			if ( writer.fDyldLazyDylibHelper == NULL )
-				throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
+				throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in lazydylib1.o)";
 			helper = writer.fDyldLazyDylibHelper;
 		}
 		else {
@@ -1441,16 +1441,25 @@ StubAtom<arm>::StubAtom(Writer<arm>& writer, ObjectFile::Atom& target, bool forL
 	writer.fAllSynthesizedStubs.push_back(this);
 
 	LazyPointerAtom<arm>* lp;
-	if (  fWriter.fOptions.prebind() ) {
+	if (  fWriter.fOptions.prebind() && !forLazyDylib ) {
 		// for prebound arm, lazy pointer starts out pointing to target symbol's address
 		// if target is a weak definition within this linkage unit or zero if in some dylib
 		lp = new LazyPointerAtom<arm>(writer, target, *this, forLazyDylib);
 	}
 	else {
 		// for non-prebound arm, lazy pointer starts out pointing to dyld_stub_binding_helper glue code
-		if ( writer.fDyldHelper == NULL )
-			throw "symbol dyld_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
-		lp = new LazyPointerAtom<arm>(writer, *writer.fDyldHelper, *this, forLazyDylib);
+		ObjectFile::Atom* helper;
+		if ( forLazyDylib ) {
+			if ( writer.fDyldLazyDylibHelper == NULL )
+				throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in lazydylib1.o)";
+			helper = writer.fDyldLazyDylibHelper;
+		}
+		else {
+			if ( writer.fDyldHelper == NULL )
+				throw "symbol dyld_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
+			helper = writer.fDyldHelper;
+		}
+		lp = new LazyPointerAtom<arm>(writer, *helper, *this, forLazyDylib);
 	}
 	if ( pic() )
 		fReferences.push_back(new WriterReference<arm>(12, arm::kPointerDiff, lp, 0, this, 12));
@@ -2930,6 +2939,7 @@ uint32_t Writer<arm>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Refere
 			return 0;
 
 		case arm::kPointer:
+		case arm::kReadOnlyPointer:
 		case arm::kPointerWeakImport:
 			if ( !isExtern && (ref->getTargetOffset() != 0) ) {
 				// use scattered reloc is target offset is non-zero
@@ -3525,6 +3535,22 @@ bool Writer<x86_64>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference&
 template <>
 bool Writer<arm>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& ref)
 {
+	if ( ref.getKind() == arm::kReadOnlyPointer ) {
+		switch ( ref.getTarget().getDefinitionKind() ) {
+			case ObjectFile::Atom::kTentativeDefinition:
+			case ObjectFile::Atom::kRegularDefinition:
+			case ObjectFile::Atom::kWeakDefinition:
+				// illegal in dylibs/bundles, until we support TEXT relocs 
+				return fSlideable;
+			case ObjectFile::Atom::kExternalDefinition:
+			case ObjectFile::Atom::kExternalWeakDefinition:
+				// illegal until we support TEXT relocs
+				return true;
+			case ObjectFile::Atom::kAbsoluteSymbol:
+				// absolute symbbols only allowed in static executables
+				return ( fOptions.outputKind() != Options::kStaticExecutable);
+		}
+	}
 	return false;
 }
 
@@ -3628,9 +3654,51 @@ bool Writer<ppc>::generatesLocalTextReloc(const ObjectFile::Reference& ref, cons
 	return false;
 }
 
-template <typename A>
-bool Writer<A>::generatesLocalTextReloc(const ObjectFile::Reference&, const ObjectFile::Atom& atom, SectionInfo* curSection)
+template <>
+bool Writer<arm>::generatesLocalTextReloc(const ObjectFile::Reference& ref, const ObjectFile::Atom& atom, SectionInfo* atomSection)
 {
+	if ( ref.getKind() == arm::kReadOnlyPointer ) {
+		switch ( ref.getTarget().getDefinitionKind() ) {
+			case ObjectFile::Atom::kTentativeDefinition:
+			case ObjectFile::Atom::kRegularDefinition:
+			case ObjectFile::Atom::kWeakDefinition:
+				// a reference to the absolute address of something in this same linkage unit can be 
+				// encoded as a local text reloc in a dylib or bundle 
+				if ( fSlideable ) {
+					macho_relocation_info<P> reloc;
+					SectionInfo* sectInfo = (SectionInfo*)(ref.getTarget().getSection());
+					reloc.set_r_address(this->relocAddressInFinalLinkedImage(atom.getAddress() + ref.getFixUpOffset(), &atom));
+					reloc.set_r_symbolnum(sectInfo->getIndex());
+					reloc.set_r_pcrel(false);
+					reloc.set_r_length();
+					reloc.set_r_extern(false);
+					reloc.set_r_type(GENERIC_RELOC_VANILLA);
+					fInternalRelocs.push_back(reloc);
+					atomSection->fHasTextLocalRelocs = true;
+					return true;
+				}
+				return false;
+			case ObjectFile::Atom::kExternalDefinition:
+			case ObjectFile::Atom::kExternalWeakDefinition:
+			case ObjectFile::Atom::kAbsoluteSymbol:
+				return false;
+		}
+	}
+	return false;
+}
+
+
+template <>
+bool Writer<x86_64>::generatesLocalTextReloc(const ObjectFile::Reference&, const ObjectFile::Atom& atom, SectionInfo* curSection)
+{
+	// text relocs not supported (usually never needed because of RIP addressing)
+	return false;
+}
+
+template <>
+bool Writer<ppc64>::generatesLocalTextReloc(const ObjectFile::Reference&, const ObjectFile::Atom& atom, SectionInfo* curSection)
+{
+	// text relocs not supported
 	return false;
 }
 
@@ -4063,7 +4131,8 @@ void Writer<arm>::addCrossSegmentRef(const ObjectFile::Atom* atom, const ObjectF
 		case arm::kNoFixUp:
 		case arm::kGroupSubordinate:
 		case arm::kPointer:
-    case arm::kPointerWeakImport:
+		case arm::kPointerWeakImport:
+		case arm::kReadOnlyPointer:
 			// ignore
 			break;
 		default:
@@ -4600,6 +4669,25 @@ void Writer<arm>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 			LittleEndian::set32(*fixUp,
 				(ref->getTarget().getAddress() + ref->getTargetOffset()) - (ref->getFromTarget().getAddress() + ref->getFromTargetOffset()) );
 			break;
+		case arm::kReadOnlyPointer:
+			switch ( ref->getTarget().getDefinitionKind() ) {
+				case ObjectFile::Atom::kRegularDefinition:
+				case ObjectFile::Atom::kWeakDefinition:
+				case ObjectFile::Atom::kTentativeDefinition:
+					// pointer contains target address
+					LittleEndian::set32(*fixUp, ref->getTarget().getAddress() + ref->getTargetOffset());
+					break;
+				case ObjectFile::Atom::kExternalDefinition:
+				case ObjectFile::Atom::kExternalWeakDefinition:
+					// external relocation ==> pointer contains addend
+					LittleEndian::set32(*fixUp, ref->getTargetOffset());
+					break;
+				case ObjectFile::Atom::kAbsoluteSymbol:
+					// pointer contains target address
+					LittleEndian::set32(*fixUp, ref->getTarget().getSectionOffset() + ref->getTargetOffset());
+					break;
+			}
+			break;
 		case arm::kBranch24WeakImport:
 		case arm::kBranch24:
 			displacement = targetAddr - (inAtom->getAddress() + ref->getFixUpOffset());
@@ -4737,6 +4825,7 @@ void Writer<arm>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref, co
 			// do nothing
 			break;
 		case arm::kPointer:
+		case arm::kReadOnlyPointer:
 		case arm::kPointerWeakImport:
 			{
 			if ( ((SectionInfo*)inAtom->getSection())->fAllNonLazyPointers ) {
@@ -4891,8 +4980,6 @@ void Writer<arm>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref, co
 		case arm::kDtraceTypeReference:
 			// nothing to fix up
 			break;
-		default:
-			throw "unhandled arm refernce kind";
 	}
 }
 
@@ -5753,6 +5840,7 @@ bool Writer<arm>::stubableReference(const ObjectFile::Atom* inAtom, const Object
 		case arm::kFollowOn:
 		case arm::kGroupSubordinate:
 		case arm::kPointer:
+		case arm::kReadOnlyPointer:
 		case arm::kPointerWeakImport:
 		case arm::kPointerDiff:
 		case arm::kDtraceProbe:
@@ -6526,6 +6614,8 @@ void Writer<A>::partitionIntoSections()
 				currentSectionInfo->fAllSelfModifyingStubs = true;
 				currentSectionInfo->fAlignment = 6; // force x86 fast stubs to start on 64-byte boundary
 			}
+			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__eh_frame") == 0) )
+				currentSectionInfo->fAlignment = __builtin_ctz(sizeof(pint_t)); // always start CFI info pointer aligned
 			curSection = atom->getSection();
 			if ( currentSectionInfo->fAllNonLazyPointers || currentSectionInfo->fAllLazyPointers || currentSectionInfo->fAllLazyDylibPointers
 				|| currentSectionInfo->fAllStubs || currentSectionInfo->fAllSelfModifyingStubs ) {
@@ -6617,8 +6707,8 @@ bool Writer<x86_64>::addBranchIslands()
 template <>
 bool Writer<arm>::addBranchIslands()
 {
-	if ( fLoadCommandsSegment->fSize > 16000000 )
-		throw "arm branch islands unimplemented"; // FIXME: implement this
+	// arm branch islands not (yet) supported
+	// you can instead compile with -mlong-call
 	return false;
 }
 

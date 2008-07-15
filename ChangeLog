@@ -1,11 +1,68 @@
 
------ Tagged ld64-84.1.2
+----- Tagged ld64-85
+
+2008-04-29     Nick Kledzik    <kledzik@apple.com>
+
+	* ld64.xcodeproj/project.pbxproj: <llvm-c/lto.h> is moving from /usr/local/include to /Developer/usr/local/include
+
+
+2008-04-29     Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/5829579> ld doesn't honor "rightmost" -syslibroot argument
+	* src/Options.cpp: if last -syslibroot is /, then ignore all syslibroots
+
+
+2008-04-29     Nick Kledzik    <kledzik@apple.com>
+	
+	<rdar://problem/5866582> GLRendererFloat has bad __eh_frame section caused by mixing llvm-gcc and gcc object files
+	* src/MachOReaderRelocatable.hpp: make all atoms in __eh_frame section have 1-byte alignment
+	* src/MachOWriterExecutable.hpp: make __eh_frame section have pointer sized alignment
+
+
+2008-04-17     Nick Kledzik    <kledzik@apple.com>
+
+	* src/MachOReaderRelocatable.hpp: better cpu subtype support
+
+
+2008-04-14     Nick Kledzik    <kledzik@apple.com>
+	
+	<rdar://problem/5733759> ld64 has bad ARM branch island check
+	* src/MachOWriterExecutable.hpp: in addBranchIslands() don't force large arm programs to fail
+	
+
+2008-04-10     Nick Kledzik    <kledzik@apple.com>
+
+	* src/MachOWriterExecutable.hpp: fix stubs used with lazy dylibs
+	
+
+----- Tagged ld64-84.4
+
+2008-04-10     Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/5847206> SPEC2000/eon built with -mdynamic-no-pic won't run
+	* src/Architectures.hpp: added arm::kReadOnlyPointer
+	* src/MachOReaderRelocatable.hpp: generate arm::kReadOnlyPointer
+	* src/MachOWriterExecutable.hpp: use arm::kReadOnlyPointer
+	* src/machochecker.cpp: allow MH_PIE bit
+	* unit-tests/test-cases/switch-jump-table: added test cases
+	
+
+----- Tagged ld64-84.3
 
 2008-04-09     Nick Kledzik    <kledzik@apple.com>
 	
 	<rdar://problem/5852023> -undefined dynamic_lookup busted
 	* src/ld.cpp: don't create proxy atom when scanning for dylib duplicates
 	* unit-tests/test-cases/tentative-and-archive: use -undefined dynamic_lookup
+
+
+----- Tagged ld64-84.2
+
+2008-04-04     Nick Kledzik    <kledzik@apple.com>
+
+	* src/ld.cpp: don't add .eh symbols to symbol table in -r mode
+	* unit-tests/test-cases/eh-coalescing-r: update to test out of order coalescing
+	
 
 ----- Tagged ld64-84.1
 

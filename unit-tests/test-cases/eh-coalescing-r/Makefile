@@ -31,15 +31,17 @@ SHELL = bash # use bash shell so we can redirect just stderr
 #
 #   <rdar://problem/5726215> comdat warnings in ld -r
 #
-
+#  also use -falign-functions to force an out of order coalesing  
+#
 run: all
 
 all:
 	${CXX} ${CCXXFLAGS} foo.cxx -c -o foo.o
-	${CXX} ${CCXXFLAGS} bar.cxx -c -o bar.o
-	${LD} -r foo.o bar.o -o foobar.o 2> warnings.log
+	${CXX} ${CCXXFLAGS} bar.cxx -c -o bar.o -falign-functions=32
+	${CXX} ${CCXXFLAGS} baz.cxx -c -o baz.o
+	${LD} -r foo.o bar.o baz.o -o foobarbaz.o 2> warnings.log
 	grep warning warnings.log | ${PASS_IFF_EMPTY}
 
 
 clean:
-	rm  foo.o bar.o foobar.o warnings.log
+	rm  foo.o bar.o baz.o foobarbaz.o warnings.log

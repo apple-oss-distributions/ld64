@@ -2392,6 +2392,14 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 		//frameworkPaths.push_back("/Network/Library/Frameworks/");
 	}
 
+	// <rdar://problem/5829579> Support for configure based hacks 
+	// if last -syslibroot is /, then ignore all syslibroots
+	if ( fSDKPaths.size() > 0 ) {
+		if ( strcmp(fSDKPaths.back(), "/") == 0 ) {
+			fSDKPaths.clear();
+		}
+	}
+
 	// now merge sdk and library paths to make real search paths
 	fLibrarySearchPaths.reserve(libraryPaths.size()*(fSDKPaths.size()+1));
 	for (std::vector<const char*>::iterator it = libraryPaths.begin(); it != libraryPaths.end(); it++) {

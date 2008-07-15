@@ -14,6 +14,9 @@ cd `echo "$0" | sed 's/run-all-unit-tests/test-cases/'`
 all_archs="x86_64 armv6 thumb ppc ppc64 i386  "
 valid_archs="x86_64 armv6 ppc ppc64 i386  "
 
+# clean first
+../bin/make-recursive.pl clean > /dev/null
+
 mkdir /tmp/$$
 for arch in $all_archs
 do

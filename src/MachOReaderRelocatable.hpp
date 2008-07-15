@@ -140,7 +140,8 @@ Reference<A>::Reference(Kinds kind, const AtomAndOffset& at, const AtomAndOffset
 	// - the target kind is not regular (is weak or tentative)
 	if ( (kind != A::kNoFixUp) && (kind != A::kFollowOn) && (kind != A::kGroupSubordinate)
 		&& (toTarget.atom->getScope() != ObjectFile::Atom::scopeTranslationUnit) 
-		&& (toTarget.atom->getDefinitionKind() != ObjectFile::Atom::kRegularDefinition) ) {
+		&& (toTarget.atom->getDefinitionKind() != ObjectFile::Atom::kRegularDefinition)
+		&& (toTarget.atom != at.atom) ) {
 		fToTargetName = toTarget.atom->getName();
 		//fprintf(stderr, "Reference(): changing to by-name %p %s, target scope=%d, target section=%s\n", toTarget.atom, fToTargetName, toTarget.atom->getScope(), toTarget.atom->getSectionName());
 		fToTarget.atom = NULL;
@@ -488,6 +489,9 @@ SymbolAtom<A>::SymbolAtom(Reader<A>& owner, const macho_nlist<P>* symbol, const 
 			break;
 	}
 	
+	// compute alignment
+	fAlignment = ObjectFile::Alignment(fSection->align(), fAddress % (1 << fSection->align()));
+
 	// compute whether this atom needs to be in symbol table
 	if ( (fSymbol->n_desc() & REFERENCED_DYNAMICALLY) != 0) {
 		fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableInAndNeverStrip;
@@ -500,6 +504,8 @@ SymbolAtom<A>::SymbolAtom(Reader<A>& owner, const macho_nlist<P>* symbol, const 
 		// .eh symbols exist so the linker can associate them with functions
 		// removing them from final linked images is a big space savings rdar://problem/4180168
 		fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableNotIn;
+		// FDEs and CIEs are always packed together in a final linked image, so ignore section alignment
+		fAlignment = ObjectFile::Alignment(0);
 	}
 	else if (  fOwner.fOptions.fForFinalLinkedImage 
 			&& ((section->flags() & SECTION_TYPE) == S_REGULAR) 
@@ -516,8 +522,6 @@ SymbolAtom<A>::SymbolAtom(Reader<A>& owner, const macho_nlist<P>* symbol, const 
 	else {
 		fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableIn;
 	}
-	// compute alignment
-	fAlignment = ObjectFile::Alignment(fSection->align(), fAddress % (1 << fSection->align()));
 	
 	// work around malformed icc generated .o files  <rdar://problem/5349847>
 	// if section starts with a symbol and that symbol address does not match section alignment, then force it to
@@ -2269,6 +2273,7 @@ void Reader<arm>::setCpuConstraint(uint32_t cpusubtype)
 		case CPU_SUBTYPE_ARM_V5TEJ:
 		case CPU_SUBTYPE_ARM_V6:
 		case CPU_SUBTYPE_ARM_XSCALE:
+		case CPU_SUBTYPE_ARM_V7:
 			fCpuConstraint = cpusubtype;
 			break;
 		default:
@@ -2322,27 +2327,38 @@ uint32_t Reader<arm>::updateCpuConstraint(uint32_t previous)
 			return fCpuConstraint;
 			break;
 		case CPU_SUBTYPE_ARM_V5TEJ:
-			// v6 and xscale are more constrained than previous file (v5), so use it
+			// v6, v7, and xscale are more constrained than previous file (v5), so use it
 			if (   (fCpuConstraint == CPU_SUBTYPE_ARM_V6)
+				|| (fCpuConstraint == CPU_SUBTYPE_ARM_V7) 
 				|| (fCpuConstraint == CPU_SUBTYPE_ARM_XSCALE) )
 				return fCpuConstraint;
 			break;
 		case CPU_SUBTYPE_ARM_V4T:
-			// v5, v6, and xscale are more constrained than previous file (v4t), so use it
-			if (   (fCpuConstraint == CPU_SUBTYPE_ARM_V6)
+			// v5, v6, v7, and xscale are more constrained than previous file (v4t), so use it
+			if (   (fCpuConstraint == CPU_SUBTYPE_ARM_V7)
+				|| (fCpuConstraint == CPU_SUBTYPE_ARM_V6)
 				|| (fCpuConstraint == CPU_SUBTYPE_ARM_V5TEJ)
 				|| (fCpuConstraint == CPU_SUBTYPE_ARM_XSCALE) )
 				return fCpuConstraint;
 			break;
 		case CPU_SUBTYPE_ARM_V6:
-			// v6 can run everything except xscale
+			// v6 can run everything except xscale and v7
 			if ( fCpuConstraint == CPU_SUBTYPE_ARM_XSCALE )
 				throw "can't mix xscale and v6 code";
+			if ( fCpuConstraint == CPU_SUBTYPE_ARM_V7 )
+				return fCpuConstraint;
 			break;
 		case CPU_SUBTYPE_ARM_XSCALE:
-			// xscale can run everything except v6
+			// xscale can run everything except v6 and v7
 			if ( fCpuConstraint == CPU_SUBTYPE_ARM_V6 )
 				throw "can't mix xscale and v6 code";
+			if ( fCpuConstraint == CPU_SUBTYPE_ARM_V7 )
+				throw "can't mix xscale and v7 code";
+			break;
+		case CPU_SUBTYPE_ARM_V7:
+			// v7 can run everything except xscale
+			if ( fCpuConstraint == CPU_SUBTYPE_ARM_XSCALE )
+				throw "can't mix xscale and v7 code";
 			break;
 		default:
 			throw "Unhandled ARM cpu subtype!";
@@ -3946,11 +3962,16 @@ bool Reader<arm>::addRelocReference(const macho_section<arm::P>* sect,
 				if ( reloc->r_extern() ) {
 					if ( weakImport )
 						makeByNameReference(arm::kPointerWeakImport, srcAddr, targetName, pointerValue);
+					else if ( strcmp(sect->segname(), "__TEXT") == 0 ) 
+						makeByNameReference(arm::kReadOnlyPointer, srcAddr, targetName, pointerValue);
 					else
 						makeByNameReference(arm::kPointer, srcAddr, targetName, pointerValue);
 				}
 				else {
-					makeReference(arm::kPointer, srcAddr, pointerValue);
+					if ( strcmp(sect->segname(), "__TEXT") == 0 ) 
+						makeReference(arm::kReadOnlyPointer, srcAddr, pointerValue);
+					else
+						makeReference(arm::kPointer, srcAddr, pointerValue);
 				}
 				break;
 				
@@ -3988,7 +4009,10 @@ bool Reader<arm>::addRelocReference(const macho_section<arm::P>* sect,
 				betterDstAddr = LittleEndian::get32(*fixUpPtr);
 				//fprintf(stderr, "scattered pointer reloc: srcAddr=0x%08X, dstAddr=0x%08X, pointer=0x%08X\n", srcAddr, dstAddr, betterDstAddr);
 				// with a scattered relocation we get both the target (sreloc->r_value()) and the target+offset (*fixUpPtr)
-				makeReferenceWithToBase(arm::kPointer, srcAddr, betterDstAddr, dstAddr);
+				if ( strcmp(sect->segname(), "__TEXT") == 0 ) 
+					makeReferenceWithToBase(arm::kReadOnlyPointer, srcAddr, betterDstAddr, dstAddr);
+				else
+					makeReferenceWithToBase(arm::kPointer, srcAddr, betterDstAddr, dstAddr);
 				break;
 		
 			case ARM_RELOC_BR24:
@@ -4511,6 +4535,9 @@ const char* Reference<arm>::getDescription() const
 							   fromQuotes, this->getFromTargetName(), fromQuotes, fFromTarget.offset );
 			return temp;
 			}
+		case arm::kReadOnlyPointer:
+			sprintf(temp, "offset 0x%04X, read-only pointer to ", fFixUpOffsetInSrc);
+			break;
 		case arm::kBranch24:
         case arm::kThumbBranch22:
 			sprintf(temp, "offset 0x%04X, pc-rel branch fixup to ", fFixUpOffsetInSrc);
