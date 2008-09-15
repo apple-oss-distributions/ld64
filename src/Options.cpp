@@ -2311,12 +2311,6 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(arg, "-no_encryption") == 0 ) {
 				fEncryptable = false;
 			}
-			else if ( strcmp(arg, "-mllvm") == 0 ) {
-				const char* opts = argv[++i];
-				if ( opts == NULL )
-					throw "missing argument to -mllvm";
-				fLLVMOptions.push_back(opts);
-			}
 			else {
 				throwf("unknown option: %s", arg);
 			}

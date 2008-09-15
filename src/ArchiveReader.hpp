@@ -65,9 +65,7 @@ public:
 	virtual std::vector<class ObjectFile::Atom*>*	getJustInTimeAtomsFor(const char* name);
 	virtual std::vector<Stab>*						getStabs()			{ return NULL; }
 	virtual void									optimize(std::vector<ObjectFile::Atom*>&, std::vector<ObjectFile::Atom*>&, 
-																std::vector<const char*>&, const std::set<ObjectFile::Atom*>&,
-																uint32_t, ObjectFile::Reader* writer, 
-																const std::vector<const char*>& llvmOptions,
+																std::vector<const char*>&,  uint32_t, ObjectFile::Reader* writer, 
 																bool allGlobalsAReDeadStripRoots, int okind, 
 																bool verbose, bool saveTemps, const char* outputFilePath,
 																bool pie, bool allowTextRelocs);
@@ -368,16 +366,14 @@ std::vector<class ObjectFile::Atom*>&	Reader<A>::getAtoms()
 
 template <typename A>
 void  Reader<A>::optimize(std::vector<ObjectFile::Atom*>& allAtoms, std::vector<ObjectFile::Atom*>& newAtoms, 
-							std::vector<const char*>& additionalUndefines, const std::set<ObjectFile::Atom*>& deadAtoms,
-							uint32_t nextOrdinal, ObjectFile::Reader* writer,  
-							const std::vector<const char*>& llvmOptions,
+							std::vector<const char*>& additionalUndefines, uint32_t nextOrdinal, ObjectFile::Reader* writer, 
 							bool allGlobalsAReDeadStripRoots, int okind, 
 							bool verbose, bool saveTemps, const char* outputFilePath,
 							bool pie, bool allowTextRelocs)
 {
 	for(std::vector<ObjectFile::Reader*>::iterator it=fInstantiatedReaders.begin(); it != fInstantiatedReaders.end(); ++it) {
-		(*it)->optimize(allAtoms, newAtoms, additionalUndefines, deadAtoms, nextOrdinal, writer, llvmOptions, 
-						allGlobalsAReDeadStripRoots, okind, verbose, saveTemps, outputFilePath, pie, allowTextRelocs);
+		(*it)->optimize(allAtoms, newAtoms, additionalUndefines, nextOrdinal, writer, allGlobalsAReDeadStripRoots, 
+							okind, verbose, saveTemps, outputFilePath, pie, allowTextRelocs);
 	}
 }
 

@@ -207,8 +207,7 @@ public:
 	bool						usingLazyDylibLinking() { return fUsingLazyDylibLinking; }
 	bool						verbose() { return fVerbose; }
 	bool						makeEncryptable() { return fEncryptable; }
-	std::vector<const char*>&	llvmOptions() { return fLLVMOptions; }
-	
+
 private:
 	class CStringEquals
 	{
@@ -356,7 +355,7 @@ private:
 	std::vector<SegmentStart>			fCustomSegmentAddresses;
 	std::vector<SegmentProtect>			fCustomSegmentProtections;
 	std::vector<DylibOverride>			fDylibOverrides; 
-	std::vector<const char*>			fLLVMOptions;
+
 	std::vector<const char*>			fLibrarySearchPaths;
 	std::vector<const char*>			fFrameworkSearchPaths;
 	std::vector<const char*>			fSDKPaths;

@@ -350,7 +350,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "if [ -f /Developer/usr/local/include/llvm-c/lto.h ]; then\n\techo \"#define LTO_SUPPORT 1\" > ${DERIVED_FILE_DIR}/configure.h\nelse\n\techo \"#undef LTO_SUPPORT\t\" > ${DERIVED_FILE_DIR}/configure.h\nfi\n";
+			shellScript = "echo \"#undef LTO_SUPPORT\t\" > ${DERIVED_FILE_DIR}/configure.h\n";
 			showEnvVarsInLog = 0;
 		};
 		F96D5367094A2754008E9EE8 /* ShellScript */ = {
@@ -498,7 +498,7 @@
 				INSTALL_PATH = /usr/bin;
 				MACOSX_DEPLOYMENT_TARGET = "";
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
-				OTHER_LDFLAGS = "-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib";
+				OTHER_LDFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;
 				SECTORDER_FLAGS = "";
@@ -548,7 +548,6 @@
 				);
 				INSTALL_PATH = /usr/bin;
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
-				OTHER_LDFLAGS = "-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib";
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;
 				SECTORDER_FLAGS = "";

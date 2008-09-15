@@ -209,7 +209,7 @@ public:
 	bool 										getTranslationUnitSource (const char **dir, const char **name) const 
 																			{ return false; }
 	const char *								getName () const 			{ return "__llvm-internal-atom";	}
-	const char *								getDisplayName() const 		{ return "llvm bitcode"; }
+	const char *								getDisplayName() const 		{ return this->getName(); }
 	Scope 										getScope() const 			{ return scopeTranslationUnit; }
 	DefinitionKind 								getDefinitionKind() const   { return kRegularDefinition; }
 	SymbolTableInclusion 						getSymbolTableInclusion() const { return kSymbolTableNotIn; }
@@ -232,7 +232,7 @@ public:
 	void 										addReference(const char* targetName);
 	
 private:
-	class Reader&								fOwner;
+	class Reader&							fOwner;
 	std::vector<ObjectFile::Reference*> 		fReferences;
 };
 
@@ -279,12 +279,9 @@ public:
 	virtual time_t									getModificationTime()	{ return fModTime; }
 	virtual ObjectFile::Reader::DebugInfoKind		getDebugInfoKind()		{ return kDebugInfoNone; }
 	virtual std::vector<Stab>*						getStabs()				{ return NULL; }
-	virtual void									optimize(std::vector<ObjectFile::Atom*>& allAtoms, std::vector<ObjectFile::Atom*>& newAtoms, 
-																std::vector<const char*>& additionalUndefines, const std::set<ObjectFile::Atom*>&,
-																uint32_t nextInputOrdinal, 
-																ObjectFile::Reader* writer,
-																const std::vector<const char*>& llvmOptions,
-																bool allGlobalsAReDeadStripRoots,
+	virtual void									optimize(std::vector<ObjectFile::Atom*> &allAtoms, std::vector<ObjectFile::Atom*> &newAtoms, 
+																std::vector<const char*> &additionalUndefines, uint32_t nextInputOrdinal, 
+																ObjectFile::Reader* writer, bool allGlobalsAReDeadStripRoots,
 																int outputKind, bool verbose, bool saveTemps, const char* outputFilePath,
 																bool pie, bool allowTextRelocs);
 
@@ -324,7 +321,7 @@ Reader::~Reader()
 
 Reader::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* path, time_t modTime, 
 				const ObjectFile::ReaderOptions& options, cpu_type_t arch)
-	: fArchitecture(arch), fPath(strdup(path)), fModTime(modTime), fInternalAtom(*this), fReaderOptions(options)
+	: fArchitecture(arch), fPath(path), fModTime(modTime), fInternalAtom(*this), fReaderOptions(options)
 {
 	fgReaders.insert(this);
 
@@ -332,7 +329,6 @@ Reader::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* path
     if ( fModule == NULL )
 		throwf("could not parse object file %s: %s", path, lto_get_error_message());
 	
-	fAtoms.push_back(&fInternalAtom);
 	
 	uint32_t count = ::lto_module_get_num_symbols(fModule);
 	for (uint32_t i=0; i < count; ++i) {
@@ -410,10 +406,8 @@ bool Reader::validFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type
 }
 
 void Reader::optimize(std::vector<ObjectFile::Atom *>& allAtoms, std::vector<ObjectFile::Atom*>& newAtoms, 
-							std::vector<const char*>& additionalUndefines, const std::set<ObjectFile::Atom*>& deadAtoms,
-							uint32_t nextInputOrdinal,  ObjectFile::Reader* writer, 
-							const std::vector<const char*>& llvmOptions,
-							bool allGlobalsAReDeadStripRoots,
+							std::vector<const char*>& additionalUndefines, uint32_t nextInputOrdinal, 
+							ObjectFile::Reader* writer, bool allGlobalsAReDeadStripRoots,
 							int okind, bool verbose, bool saveTemps, const char* outputFilePath,
 							bool pie, bool allowTextRelocs)
 { 
@@ -433,12 +427,7 @@ void Reader::optimize(std::vector<ObjectFile::Atom *>& allAtoms, std::vector<Obj
 	lto_code_gen_t generator = ::lto_codegen_create();
 	for (std::set<Reader*>::iterator it=fgReaders.begin(); it != fgReaders.end(); ++it) {
 		if ( ::lto_codegen_add_module(generator, (*it)->fModule) )
-			throwf("lto: could not merge in %s because %s", (*it)->fPath, ::lto_get_error_message());
-	}
-
-	// add any -mllvm command line options
-	for (std::vector<const char*>::const_iterator it=llvmOptions.begin(); it != llvmOptions.end(); ++it) {
-		::lto_codegen_debug_options(generator, *it);
+			throwf("lto: could not merge in %s", (*it)->fPath);
 	}
 
 	// the linker must preserve all globals in dylibs and flat images
@@ -455,7 +444,7 @@ void Reader::optimize(std::vector<ObjectFile::Atom *>& allAtoms, std::vector<Obj
 		ObjectFile::Atom* atom = *it;
 		// only look at references come from an atom that is not an llvm atom
 		if ( fgReaders.count((Reader*)(atom->getFile())) == 0 ) {
-				// remember if we've seen any atoms not from an llvm reader and not from the writer
+				// remember if we've seen an atoms not from an llvm reader and not from the writer
 				if ( atom->getFile() != writer )
 					hasNonllvmAtoms = true;
 				std::vector<ObjectFile::Reference*>& refs = atom->getReferences();
@@ -473,21 +462,6 @@ void Reader::optimize(std::vector<ObjectFile::Atom *>& allAtoms, std::vector<Obj
 				llvmAtoms[name] = (Atom*)atom;
 		}
 	}
-	// deadAtoms are the atoms that the linker coalesced.  For instance weak or tentative definitions
-	// overriden by another atom.  If any of these deadAtoms are llvm atoms and they were replaced
-	// with a mach-o atom, we need to tell the lto engine to preserve (not optimize away) its dead 
-	// atom so that the linker can replace it with the mach-o one later.
-	CStringToAtom deadllvmAtoms;
-	for (std::set<ObjectFile::Atom*>::iterator it = deadAtoms.begin(); it != deadAtoms.end(); ++it) {
-		ObjectFile::Atom* atom = *it;
-		if ( fgReaders.count((Reader*)(atom->getFile())) != 0 ) {
-			const char* name = atom->getName();
-			::lto_codegen_add_must_preserve_symbol(generator, name);
-			deadllvmAtoms[name] = (Atom*)atom;
-		}
-	}
-
-	
 	// tell code generator about symbols that must be preserved
 	for (CStringToAtom::iterator it = llvmAtoms.begin(); it != llvmAtoms.end(); ++it) {
 		const char* name = it->first;
@@ -565,7 +539,7 @@ void Reader::optimize(std::vector<ObjectFile::Atom *>& allAtoms, std::vector<Obj
 	// parse generated mach-o file into a MachOReader
 	ObjectFile::Reader* machoReader = this->makeMachOReader(machOFile, machOFileLen, nextInputOrdinal);
 	
-	// sync generated mach-o atoms with existing atoms ld knows about
+	// sync generated mach-o atoms with existing atoms ld know about
 	std::vector<ObjectFile::Atom*> machoAtoms = machoReader->getAtoms();
 	for (std::vector<ObjectFile::Atom *>::iterator it = machoAtoms.begin(); it != machoAtoms.end(); ++it) {
 		ObjectFile::Atom* atom = *it;
@@ -577,24 +551,8 @@ void Reader::optimize(std::vector<ObjectFile::Atom *>& allAtoms, std::vector<Obj
 				pos->second->setRealAtom(atom);
 			}
 			else {
-				// an atom of this name was not in the allAtoms list the linker gave us
-				if ( deadllvmAtoms.find(name) != deadllvmAtoms.end() ) {
-					// this corresponding to an atom that the linker coalesced away.  Ignore it
-					// Make sure there any dependent atoms are also marked dead
-					std::vector<ObjectFile::Reference*>& refs = atom->getReferences();
-					for (std::vector<ObjectFile::Reference*>::iterator ri=refs.begin(), re=refs.end(); ri != re; ++ri) {
-						ObjectFile::Reference* ref = *ri;
-						if ( ref->getKind() == 2 /*kGroupSubordinate*/ ) {	// FIX FIX
-							ObjectFile::Atom* targ = &ref->getTarget();
-							deadllvmAtoms[targ->getName()] = (Atom*)atom;
-						}
-					}
-				}
-				else
-				{
-					// this is something new that lto conjured up, tell ld its new
-					newAtoms.push_back(atom);
-				}
+				// this atom is did not exist orginally, tell ld about it
+				newAtoms.push_back(atom);
 			}
 		}
 		else {

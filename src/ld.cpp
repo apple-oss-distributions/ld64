@@ -565,8 +565,7 @@ void Linker::optimize()
 	std::vector<class ObjectFile::Atom*> newAtoms;
 	std::vector<const char *> additionalUndefines;
 	for (std::vector<class ObjectFile::Reader*>::iterator it=fInputFiles.begin(); it != fInputFiles.end(); it++) {
-		(*it)->optimize(fAllAtoms, newAtoms, additionalUndefines, fDeadAtoms, fNextInputOrdinal, fOutputFile, 
-			fOptions.llvmOptions(),
+		(*it)->optimize(fAllAtoms, newAtoms, additionalUndefines, fNextInputOrdinal, fOutputFile, 
 			 fOptions.allGlobalsAreDeadStripRoots(), (int)fOptions.outputKind(), fOptions.verbose(),
 			fOptions.saveTempFiles(), fOptions.getOutputFilePath(), fOptions.positionIndependentExecutable(),
 			fOptions.allowTextRelocs());

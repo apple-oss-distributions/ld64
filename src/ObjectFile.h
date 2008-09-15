@@ -29,7 +29,6 @@
 #include <stdint.h>
 #include <vector>
 #include <map>
-#include <set>
 
 
 
@@ -140,9 +139,7 @@ public:
 	// For relocatable object files only
 	virtual bool						canScatterAtoms()			{ return true; }
 	virtual void						optimize(std::vector<ObjectFile::Atom*>&, std::vector<ObjectFile::Atom*>&, 
-													std::vector<const char*>&, const std::set<ObjectFile::Atom*>&,
-													uint32_t, ObjectFile::Reader* writer, 
-													const std::vector<const char*>& llvmOptions,
+													std::vector<const char*>&,  uint32_t, ObjectFile::Reader* writer, 
 													bool allGlobalsAReDeadStripRoots, int okind, 
 													bool verbose, bool saveTemps, const char* outputFilePath,
 													bool pie, bool allowTextRelocs) { }

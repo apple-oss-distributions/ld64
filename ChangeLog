@@ -1,42 +1,4 @@
 
-2008-07-10     Nick Kledzik    <kledzik@apple.com>
-
-	* src/LTOReader.hpp: improve missing symbol error message
-
-
-2008-07-08     Nick Kledzik    <kledzik@apple.com>
-
-	<rdar://problem/6054476> ld: add support for mllvm LTO options
-	* src/Options.cpp: support -mllvm option
-	* src/LTOReader.hpp: call lto_codegen_debug_options() with -mllvm options
-	* src/ld.cpp: pass llvmOptions to optimize()
-	* src/Options.h: add fLLVMOptions
-	* src/ArchiveReader.hpp: add llvmOptions parameter to optimize()
-	* src/ObjectFile.h: add llvmOptions parameter to optimize()
-	* unit-tests/test-cases/lto-llvm-options: add test case
-	
-
-2008-06-04     Nick Kledzik    <kledzik@apple.com>
-
-	* src/LTOReader.hpp: if lto_codegen_add_module() fails, add explanation to error message	
-
-2008-06-04     Nick Kledzik    <kledzik@apple.com>
-
-	* src/ObjectFile.h: add deadAtoms parameter to optimize()
-	* src/ld.cpp: ditto
-	* src/ArchiveReader.hpp: ditto
-	* src/MachOReaderRelocatable.hpp: handle llvm use of 0x1B pointer encodings in CIEs
-	* src/LTOReader.hpp: make sure libLTO.dylib knows about any llvm symbol coalesced away
-	* unit-tests/test-cases/lto-weak-native-override: add test case
-
-
-2008-06-04     Nick Kledzik    <kledzik@apple.com>
-
-	<rdar://problem/5935600> LTO : 176.gcc and 177.mesa build failure at -O4
-	* src/LTOReader.hpp: make sure internal is returned by getAtoms()
-	* unit-tests/test-cases/lto-archive-dylib: update test case
-
-
 2008-05-06     Nick Kledzik    <kledzik@apple.com>
 
 	<rdar://problem/5905889> ARM ld should take W bit off of maxprot for __TEXT segment
@@ -47,9 +9,9 @@
 
 	<rdar://problem/5914343> encryptable images may not be signable
 	* src/MachOWriterExecutable.hpp: use minimum header padding when aligning __text section
+	
 
-
------ Tagged ld64-85 (Xcode 3.1)
+----- Tagged ld64-85
 
 2008-04-29     Nick Kledzik    <kledzik@apple.com>
 

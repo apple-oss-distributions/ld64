@@ -30,7 +30,7 @@
 
 #include "MachOReaderRelocatable.hpp"
 
-#define LTO_SUPPORT 0
+#define LTO_SUPPORT 1
 
 #if LTO_SUPPORT
 	#include "LTOReader.hpp"
