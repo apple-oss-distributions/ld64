@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2006-2009 Apple Inc. All rights reserved.
+# Copyright (c) 2006-2007 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -30,9 +30,6 @@ all:
 	# verify if operator new is overridden that WEAK_DEFINES is set
 	${CXX} ${CXXFLAGS} -DOP_NEW -I${TESTROOT}/include -o main main.cxx
 	otool -hv main | grep WEAK_DEFINES | ${FAIL_IF_EMPTY}
-	# verify if operator new is overridden but not exported, WEAK_DEFINES is not set
-	${CXX} ${CXXFLAGS} -DOP_NEW -I${TESTROOT}/include -o main main.cxx -Wl,-exported_symbol,_main
-	otool -hv main | grep WEAK_DEFINES | ${FAIL_IF_STDIN}
 	# verify if operator new is not overridden that WEAK_DEFINES is not set
 	${CXX} ${CXXFLAGS} -I${TESTROOT}/include -o main main.cxx
 	otool -hv main | grep WEAK_DEFINES | ${PASS_IFF_EMPTY}

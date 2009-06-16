@@ -453,7 +453,6 @@ private:
 	std::vector<class ObjectFile::Atom*>			fLocalSymbolAtoms;
 	std::vector<macho_nlist<P> >					fLocalExtraLabels;
 	std::vector<macho_nlist<P> >					fGlobalExtraLabels;
-	std::map<ObjectFile::Atom*, uint32_t>			fAtomToSymbolIndex;
 	class SectionRelocationsLinkEditAtom<A>*		fSectionRelocationsAtom;	
 	class CompressedRebaseInfoLinkEditAtom<A>*		fCompressedRebaseInfoAtom;
 	class CompressedBindingInfoLinkEditAtom<A>*		fCompressedBindingInfoAtom;
@@ -973,20 +972,17 @@ public:
 	virtual void									copyRawContent(uint8_t buffer[]) const;
 
 	void											addUnwindInfo(ObjectFile::Atom* func, uint32_t offset, uint32_t encoding, 
-															ObjectFile::Reference* fdeRef, ObjectFile::Reference* lsda,
-															 ObjectFile::Atom* personalityPointer);
+															ObjectFile::Reference* lsda, ObjectFile::Atom* personalityPointer);
 	void											generate();
 	
 private:
 	using WriterAtom<A>::fWriter;
 	typedef typename A::P					P;
-	struct Info { ObjectFile::Atom* func; ObjectFile::Atom* fde; ObjectFile::Atom* lsda; uint32_t lsdaOffset; ObjectFile::Atom* personalityPointer; uint32_t encoding; };
+	struct Info { ObjectFile::Atom* func; ObjectFile::Atom* lsda; uint32_t lsdaOffset; ObjectFile::Atom* personalityPointer; uint32_t encoding; };
 	struct LSDAEntry { ObjectFile::Atom* func; ObjectFile::Atom* lsda; uint32_t lsdaOffset; };
-	struct RegFixUp { uint8_t* contentPointer; ObjectFile::Atom* func; ObjectFile::Atom* fde; };
+	struct RegFixUp { uint8_t* contentPointer; ObjectFile::Atom* func; };
 	struct CompressedFixUp { uint8_t* contentPointer; ObjectFile::Atom* func; ObjectFile::Atom* fromFunc; };
-	struct CompressedEncodingFixUp { uint8_t* contentPointer; ObjectFile::Atom* fde; };
 
-	bool				encodingMeansUseDwarf(compact_unwind_encoding_t encoding);
 	void				compressDuplicates(std::vector<Info>& uniqueInfos);
 	void				findCommonEncoding(const std::vector<Info>& uniqueInfos, std::map<uint32_t, unsigned int>& commonEncodings);
 	void				makeLsdaIndex(const std::vector<Info>& uniqueInfos, std::map<ObjectFile::Atom*, uint32_t>& lsdaIndexOffsetMap);
@@ -1009,7 +1005,6 @@ private:
 	std::vector<LSDAEntry>					fLSDAIndex;
 	std::vector<RegFixUp>					fRegFixUps;
 	std::vector<CompressedFixUp>			fCompressedFixUps;
-	std::vector<CompressedEncodingFixUp>	fCompressedEncodingFixUps;
 	std::vector<ObjectFile::Reference*>		fReferences;
 };
 
@@ -3240,8 +3235,6 @@ void Writer<A>::setExportNlist(const ObjectFile::Atom* atom, macho_nlist<P>* ent
         desc |= N_ARM_THUMB_DEF;
     if ( atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableInAndNeverStrip )
         desc |= REFERENCED_DYNAMICALLY;
-    if ( atom->dontDeadStrip() && (fOptions.outputKind() == Options::kObjectFile) )
-        desc |= N_NO_DEAD_STRIP;
     if ( atom->getDefinitionKind() == ObjectFile::Atom::kWeakDefinition ) {
         desc |= N_WEAK_DEF;
         fHasWeakExports = true;
@@ -3326,14 +3319,8 @@ void Writer<A>::setLocalNlist(const ObjectFile::Atom* atom, macho_nlist<P>* entr
 	const char* symbolName = this->symbolTableName(atom);
 	char anonName[32];
 	if ( (fOptions.outputKind() == Options::kObjectFile) && !fOptions.keepLocalSymbol(symbolName) ) {
-		if ( stringsNeedLabelsInObjects() && (atom->getContentType() == ObjectFile::Atom::kCStringType) ) {
-			// don't use 'l' labels for x86_64 strings
-			// <rdar://problem/6605499> x86_64 obj-c runtime confused when static lib is stripped
-		}
-		else {
-			sprintf(anonName, "l%u", fAnonNameIndex++);
-			symbolName = anonName;
-		}
+		sprintf(anonName, "l%u", fAnonNameIndex++);
+		symbolName = anonName;
 	}
 	entry->set_n_strx(this->fStringsAtom->add(symbolName));
 
@@ -3356,8 +3343,6 @@ void Writer<A>::setLocalNlist(const ObjectFile::Atom* atom, macho_nlist<P>* entr
 
 	// set n_desc
 	uint16_t desc = 0;
-    if ( atom->dontDeadStrip() && (fOptions.outputKind() == Options::kObjectFile) )
-        desc |= N_NO_DEAD_STRIP;
 	if ( atom->getDefinitionKind() == ObjectFile::Atom::kWeakDefinition )
 		desc |= N_WEAK_DEF;
 	if ( atom->isThumb() )
@@ -3496,27 +3481,6 @@ void Writer<A>::buildSymbolTable()
 	// set up module table
 	if ( fModuleInfoAtom != NULL )
 		fModuleInfoAtom->setName();
-		
-	// create atom to symbol index map
-	// imports
-	int i = 0;
-	for(std::vector<ObjectFile::Atom*>::iterator it=fImportedAtoms.begin(); it != fImportedAtoms.end(); ++it) {
-		fAtomToSymbolIndex[*it] = i + fSymbolTableImportStartIndex;
-		++i;
-	}
-	// locals
-	i = 0;
-	for(std::vector<ObjectFile::Atom*>::iterator it=fLocalSymbolAtoms.begin(); it != fLocalSymbolAtoms.end(); ++it) {
-		fAtomToSymbolIndex[*it] = i + fSymbolTableLocalStartIndex;
-		++i;
-	}
-	// exports
-	i = 0;
-	for(std::vector<ObjectFile::Atom*>::iterator it=fExportedAtoms.begin(); it != fExportedAtoms.end(); ++it) {
-		fAtomToSymbolIndex[*it] = i + fSymbolTableExportStartIndex;
-		++i;
-	}
-	
 }
 
 
@@ -3726,9 +3690,30 @@ void Writer<A>::addStabs(uint32_t startIndex)
 template <typename A>
 uint32_t Writer<A>::symbolIndex(ObjectFile::Atom& atom)
 {
-	std::map<ObjectFile::Atom*, uint32_t>::iterator pos = fAtomToSymbolIndex.find(&atom);
-	if ( pos != fAtomToSymbolIndex.end() )
-		return pos->second;
+	// search imports
+	int i = 0;
+	for(std::vector<ObjectFile::Atom*>::iterator it=fImportedAtoms.begin(); it != fImportedAtoms.end(); ++it) {
+		if ( &atom == *it )
+			return i + fSymbolTableImportStartIndex;
+		++i;
+	}
+
+	// search locals
+	i = 0;
+	for(std::vector<ObjectFile::Atom*>::iterator it=fLocalSymbolAtoms.begin(); it != fLocalSymbolAtoms.end(); ++it) {
+		if ( &atom == *it )
+			return i + fSymbolTableLocalStartIndex;
+		++i;
+	}
+
+	// search exports
+	i = 0;
+	for(std::vector<ObjectFile::Atom*>::iterator it=fExportedAtoms.begin(); it != fExportedAtoms.end(); ++it) {
+		if ( &atom == *it )
+			return i + fSymbolTableExportStartIndex;
+		++i;
+	}
+
 	throwf("atom not found in symbolIndex(%s) for %s", atom.getDisplayName(), atom.getFile()->getPath());
 }
 
@@ -3933,9 +3918,6 @@ uint32_t Writer<x86_64>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Ref
 		case x86_64::kImageOffset32:
 			throw "internal linker error, kImageOffset32 can't be encoded into object files";
 
-		case x86_64::kSectionOffset24:
-			throw "internal linker error, kSectionOffset24 can't be encoded into object files";
-
 		case x86_64::kDtraceTypeReference:
 		case x86_64::kDtraceProbe:
 			// generates no relocs
@@ -4058,9 +4040,6 @@ uint32_t Writer<x86>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Refere
 		case x86::kImageOffset32:
 			throw "internal linker error, kImageOffset32 can't be encoded into object files";
 			
-		case x86::kSectionOffset24:
-			throw "internal linker error, kSectionOffset24 can't be encoded into object files";
-
 		case x86::kDtraceTypeReference:
 		case x86::kDtraceProbe:
 			// generates no relocs
@@ -4759,6 +4738,14 @@ bool Writer<x86_64>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference&
 template <>
 bool Writer<arm>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& ref)
 {
+	switch ( fOptions.outputKind()) {
+		case Options::kStaticExecutable:
+		case Options::kPreload:
+			// all relocations allowed in static executables
+			return false;
+		default:
+			break;
+	}
 	if ( ref.getKind() == arm::kReadOnlyPointer ) {
 		switch ( ref.getTarget().getDefinitionKind() ) {
 			case ObjectFile::Atom::kTentativeDefinition:
@@ -4772,7 +4759,7 @@ bool Writer<arm>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& re
 				return true;
 			case ObjectFile::Atom::kAbsoluteSymbol:
 				// absolute symbbols only allowed in static executables
-				return ( fOptions.outputKind() != Options::kStaticExecutable);
+				return true;
 		}
 	}
 	return false;
@@ -5260,23 +5247,11 @@ void Writer<A>::buildExecutableFixups()
 											uint64_t addresss = atom->getAddress();
 											if ( targetRequiresWeakBinding(ref->getTarget()) ) {
 												fWeakBindingInfo.push_back(BindingInfo(type, ref->getTarget().getName(), false, addresss, 0));
-												// if this is a non-lazy pointer to a weak definition within this linkage unit
+												// if this is a non-lazy pointer to a weak definition with this linkage unit
 												// the pointer needs to initially point within linkage unit and have
-												// rebase command to slide it.
-												if ( ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kWeakDefinition ) {
-													// unless if this is a hybrid format, in which case the non-lazy pointer
-													// is zero on disk.  So use a bind instead of a rebase to set initial value
-													if ( fOptions.makeClassicDyldInfo() )
-														fBindingInfo.push_back(BindingInfo(type, BIND_SPECIAL_DYLIB_SELF, ref->getTarget().getName(), false, addresss, 0));
-													else
-														fRebaseInfo.push_back(RebaseInfo(REBASE_TYPE_POINTER,atom->getAddress()));
-												}
-												// if this is a non-lazy pointer to a weak definition in a dylib,
-												// the pointer needs to initially bind to the dylib
-												else if ( ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kExternalWeakDefinition ) {
-													int ordinal = compressedOrdinalForImortedAtom(pointerTarget);
-													fBindingInfo.push_back(BindingInfo(BIND_TYPE_POINTER, ordinal, pointerTarget->getName(), false, addresss, 0));
-												}
+												// rease command to slide it.
+												if ( ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kWeakDefinition ) 
+													fRebaseInfo.push_back(RebaseInfo(REBASE_TYPE_POINTER,atom->getAddress()));
 											}
 											else {
 												int ordinal = compressedOrdinalForImortedAtom(pointerTarget);
@@ -5345,16 +5320,6 @@ void Writer<A>::buildExecutableFixups()
 											uint8_t type = BIND_TYPE_POINTER;
 											if ( targetRequiresWeakBinding(ref->getTarget()) ) {
 												fWeakBindingInfo.push_back(BindingInfo(type, ref->getTarget().getName(), false, addresss, addend));
-												if ( fOptions.makeClassicDyldInfo() && (ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kWeakDefinition) ) {
-													// hybrid linkedit puts addend in data, so we need bind phase to reset pointer to local definifion
-													fBindingInfo.push_back(BindingInfo(type, BIND_SPECIAL_DYLIB_SELF, ref->getTarget().getName(), false, addresss, addend));
-												}
-												// if this is a pointer to a weak definition in a dylib,
-												// the pointer needs to initially bind to the dylib
-												else if ( ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kExternalWeakDefinition ) {
-													int ordinal = compressedOrdinalForImortedAtom(&ref->getTarget());
-													fBindingInfo.push_back(BindingInfo(BIND_TYPE_POINTER, ordinal, ref->getTarget().getName(), false, addresss, addend));
-												}
 											}
 											else {
 												int ordinal = compressedOrdinalForImortedAtom(&ref->getTarget());
@@ -6543,9 +6508,9 @@ void Writer<x86>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 								break;
 						}
 					} 
-					else if ( !fOptions.makeClassicDyldInfo() 
+					else if ( fOptions.makeCompressedDyldInfo()  
 									&& (ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kWeakDefinition) ) {
-						// when using only compressed dyld info, pointer is initially set to point directly to weak definition
+						// lazy pointer is initially set to point directly to weak definition
 						LittleEndian::set32(*fixUp, ref->getTarget().getAddress() + ref->getTargetOffset());
 					}
 					else {
@@ -6572,15 +6537,6 @@ void Writer<x86>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 			break;
 		case x86::kPointerDiff24:
 			displacement = (ref->getTarget().getAddress() + ref->getTargetOffset()) - (ref->getFromTarget().getAddress() + ref->getFromTargetOffset());
-			if ( (displacement > kSixteenMegLimit) || (displacement < 0) ) 
-				throwf("24-bit pointer diff out of range in %s", inAtom->getDisplayName());
-			temp = LittleEndian::get32(*fixUp);
-			temp &= 0xFF000000;
-			temp |= (displacement & 0x00FFFFFF);
-			LittleEndian::set32(*fixUp, temp);
-			break;
-		case x86::kSectionOffset24:
-			displacement = ref->getTarget().getSectionOffset();
 			if ( (displacement > kSixteenMegLimit) || (displacement < 0) ) 
 				throwf("24-bit pointer diff out of range in %s", inAtom->getDisplayName());
 			temp = LittleEndian::get32(*fixUp);
@@ -6777,8 +6733,6 @@ void Writer<x86>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref, co
 			throw "internal linker error, kPointerDiff24 can't be encoded into object files";
 		case x86::kImageOffset32:
 			throw "internal linker error, kImageOffset32 can't be encoded into object files";
-		case x86::kSectionOffset24:
-			throw "internal linker error, kSectionOffset24 can't be encoded into object files";
 		case x86::kDtraceProbe:
 		case x86::kDtraceTypeReference:
 			// nothing to fix up
@@ -6808,9 +6762,9 @@ void Writer<x86_64>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const
 				if ( &ref->getTarget() != NULL ) {
 					//fprintf(stderr, "fixUpReferenceFinal: %s reference to %s\n", this->getDisplayName(), target.getDisplayName());
 					if ( this->relocationNeededInFinalLinkedImage(ref->getTarget()) == kRelocExternal) {
-						if ( !fOptions.makeClassicDyldInfo() 
-									&& (ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kWeakDefinition) ) {
-							// when using only compressed dyld info, pointer is initially set to point directly to weak definition
+						if ( fOptions.makeCompressedDyldInfo() 
+										&& (ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kWeakDefinition) ) {
+							// lazy pointer is initially set to point directly to weak definition
 							LittleEndian::set64(*fixUp, ref->getTarget().getAddress() + ref->getTargetOffset());
 						}
 						else {
@@ -6872,15 +6826,6 @@ void Writer<x86_64>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const
 			break;
 		case x86_64::kPointerDiff24:
 			displacement = (ref->getTarget().getAddress() + ref->getTargetOffset()) - (ref->getFromTarget().getAddress() + ref->getFromTargetOffset());
-			if ( (displacement > kSixteenMegLimit) || (displacement < 0) ) 
-				throwf("24-bit pointer diff out of range in %s", inAtom->getDisplayName());
-			temp = LittleEndian::get32(*((uint32_t*)fixUp));
-			temp &= 0xFF000000;
-			temp |= (displacement & 0x00FFFFFF);
-			LittleEndian::set32(*((uint32_t*)fixUp), temp);
-			break;
-		case x86_64::kSectionOffset24:
-			displacement = ref->getTarget().getSectionOffset();
 			if ( (displacement > kSixteenMegLimit) || (displacement < 0) ) 
 				throwf("24-bit pointer diff out of range in %s", inAtom->getDisplayName());
 			temp = LittleEndian::get32(*((uint32_t*)fixUp));
@@ -7105,8 +7050,6 @@ void Writer<x86_64>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref,
 			throw "internal linker error, kPointerDiff24 can't be encoded into object files";
 		case x86_64::kImageOffset32:
 			throw "internal linker error, kImageOffset32 can't be encoded into object files";
-		case x86_64::kSectionOffset24:
-			throw "internal linker error, kSectionOffset24 can't be encoded into object files";
 		case x86_64::kDtraceTypeReference:
 		case x86_64::kDtraceProbe:
 			// nothing to fix up
@@ -8310,12 +8253,12 @@ void Writer<A>::synthesizeUnwindInfoTable()
 			if ( atom->beginUnwind() == atom->endUnwind() ) {
 				// be sure to mark that we have no unwind info for stuff in the TEXT segment without unwind info
 				if ( strcmp(atom->getSegment().getName(), "__TEXT") == 0 )
-					fUnwindInfoAtom->addUnwindInfo(atom, 0, 0, NULL, NULL, NULL);
+					fUnwindInfoAtom->addUnwindInfo(atom, 0, 0, NULL, NULL);
 			}
 			else {
 				// atom has unwind 
 				for ( ObjectFile::UnwindInfo::iterator uit = atom->beginUnwind(); uit != atom->endUnwind(); ++uit ) {
-					fUnwindInfoAtom->addUnwindInfo(atom, uit->startOffset, uit->unwindInfo, atom->getFDE(), atom->getLSDA(), atom->getPersonalityPointer());
+					fUnwindInfoAtom->addUnwindInfo(atom, uit->startOffset, uit->unwindInfo, atom->getLSDA(), atom->getPersonalityPointer());
 				}
 			}
 		}
@@ -10045,15 +9988,10 @@ void LoadCommandsPaddingAtom<A>::setSize(uint64_t newSize)
 
 template <typename A>
 void UnwindInfoAtom<A>::addUnwindInfo(ObjectFile::Atom* func, uint32_t offset, uint32_t encoding, 
-										ObjectFile::Reference* fdeRef, ObjectFile::Reference* lsdaRef,
-										ObjectFile::Atom* personalityPointer) 
+												ObjectFile::Reference* lsdaRef, ObjectFile::Atom* personalityPointer) 
 { 
 	Info info;
 	info.func = func;
-	if ( fdeRef != NULL )  
-		info.fde = &fdeRef->getTarget();
-	else 
-		info.fde = NULL;
 	if ( lsdaRef != NULL )  {
 		info.lsda = &lsdaRef->getTarget();
 		info.lsdaOffset = lsdaRef->getTargetOffset();
@@ -10069,24 +10007,6 @@ void UnwindInfoAtom<A>::addUnwindInfo(ObjectFile::Atom* func, uint32_t offset, u
 	//				encoding, info.lsda, info.lsdaOffset, personalityPointer, func->getDisplayName());
 }
 
-template <>
-bool UnwindInfoAtom<x86>::encodingMeansUseDwarf(compact_unwind_encoding_t encoding)
-{
-	return ( (encoding & UNWIND_X86_MODE_MASK) == UNWIND_X86_MODE_DWARF);
-}
-
-template <>
-bool UnwindInfoAtom<x86_64>::encodingMeansUseDwarf(compact_unwind_encoding_t encoding)
-{
-	return ( (encoding & UNWIND_X86_64_MODE_MASK) == UNWIND_X86_64_MODE_DWARF);
-}
-
-template <typename A>
-bool UnwindInfoAtom<A>::encodingMeansUseDwarf(compact_unwind_encoding_t encoding)
-{
-	return false;
-}
-
 
 template <typename A>
 void UnwindInfoAtom<A>::compressDuplicates(std::vector<Info>& uniqueInfos)
@@ -10100,10 +10020,9 @@ void UnwindInfoAtom<A>::compressDuplicates(std::vector<Info>& uniqueInfos)
 	last.personalityPointer = NULL;
 	last.encoding = 0xFFFFFFFF;
 	for(typename std::vector<Info>::iterator it=fInfos.begin(); it != fInfos.end(); ++it) {
-		Info& newInfo = *it;
-		bool newNeedsDwarf = encodingMeansUseDwarf(newInfo.encoding);
+		Info newInfo = *it;
 		// remove infos which have same encoding and personalityPointer as last one
-		if ( newNeedsDwarf || (newInfo.encoding != last.encoding) || (newInfo.personalityPointer != last.personalityPointer) 
+		if ( (newInfo.encoding != last.encoding) || (newInfo.personalityPointer != last.personalityPointer) 
 						|| (newInfo.lsda != NULL) || (last.lsda != NULL) ) {
 			uniqueInfos.push_back(newInfo);
 		}
@@ -10119,9 +10038,6 @@ void UnwindInfoAtom<A>::findCommonEncoding(const std::vector<Info>& uniqueInfos,
 	std::map<uint32_t, unsigned int> encodingsUsed;
 	unsigned int mostCommonEncodingUsageCount = 0;
 	for(typename std::vector<Info>::const_iterator it=uniqueInfos.begin(); it != uniqueInfos.end(); ++it) {
-		// never put dwarf into common table
-		if ( encodingMeansUseDwarf(it->encoding) )
-			continue;
 		std::map<uint32_t, unsigned int>::iterator pos = encodingsUsed.find(it->encoding);
 		if ( pos == encodingsUsed.end() ) {
 			encodingsUsed[it->encoding] = 1;
@@ -10197,8 +10113,7 @@ unsigned int UnwindInfoAtom<A>::makeRegularSecondLevelPage(const std::vector<Inf
 		RegFixUp fixup;
 		fixup.contentPointer = (uint8_t*)(&entryTable[i]);
 		fixup.func = info.func;
-		fixup.fde = ( encodingMeansUseDwarf(info.encoding) ? info.fde : NULL );
- 		fRegFixUps.push_back(fixup);
+		fRegFixUps.push_back(fixup);
 	}
 	//fprintf(stderr, "regular page with %u entries\n", entriesToAdd);
 	pageEnd = pageStart;
@@ -10212,7 +10127,6 @@ unsigned int UnwindInfoAtom<A>::makeCompressedSecondLevelPage(const std::vector<
 															uint32_t pageSize, unsigned int endIndex, uint8_t*& pageEnd)
 {
 	const bool log = false;
-	if (log) fprintf(stderr, "makeCompressedSecondLevelPage(pageSize=%u, endIndex=%u)\n", pageSize, endIndex);
 	// first pass calculates how many compressed entries we could fit in this sized page
 	// keep adding entries to page until:
 	//  1) encoding table plus entry table plus header exceed page size
@@ -10235,20 +10149,14 @@ unsigned int UnwindInfoAtom<A>::makeCompressedSecondLevelPage(const std::vector<
 			encodingIndex = pos->second;
 		}
 		else {
-			// no commmon entry, so add one on this page
-			uint32_t encoding = info.encoding;
-			if ( encodingMeansUseDwarf(encoding) ) {
-				// make unique pseudo encoding so this dwarf will gets is own encoding entry slot
-				encoding += (index+1);
-			}
-			std::map<uint32_t, unsigned int>::iterator ppos = pageSpecificEncodings.find(encoding);
+			std::map<uint32_t, unsigned int>::iterator ppos = pageSpecificEncodings.find(info.encoding);
 			if ( ppos != pageSpecificEncodings.end() ) {
 				encodingIndex = pos->second;
 			}
 			else {
 				encodingIndex = commonEncodings.size() + pageSpecificEncodings.size();
 				if ( encodingIndex <= 255 ) {
-					pageSpecificEncodings[encoding] = encodingIndex;
+					pageSpecificEncodings[info.encoding] = encodingIndex;
 				}
 				else {
 					canDo = false; // case 3)
@@ -10270,72 +10178,52 @@ unsigned int UnwindInfoAtom<A>::makeCompressedSecondLevelPage(const std::vector<
 			++entryCount;
 		}
 		// check room for entry
-		if ( (pageSpecificEncodings.size()+entryCount) >= space4 ) {
+		if ( (pageSpecificEncodings.size()+entryCount) > space4 ) {
 			canDo = false; // case 1)
 			--entryCount;
 			if (log) fprintf(stderr, "end of compressed page with %u entries because full\n", entryCount);
 		}
-		//if (log) fprintf(stderr, "space4=%d, pageSpecificEncodings.size()=%ld, entryCount=%d\n", space4, pageSpecificEncodings.size(), entryCount);
 	}
 	
-	// check for cases where it would be better to use a regular (non-compressed) page
-	const unsigned int compressPageUsed = sizeof(unwind_info_compressed_second_level_page_header) 
+	// sanity check that we fit more entries into this page than a regular page would hold
+	const int compressPageUsed = sizeof(unwind_info_compressed_second_level_page_header) 
 								+ pageSpecificEncodings.size()*sizeof(uint32_t)
 								+ entryCount*sizeof(uint32_t);
-	if ( (compressPageUsed < (pageSize-4) && (index >= 0) ) ) {
-		const int regularEntriesPerPage = (pageSize - sizeof(unwind_info_regular_second_level_page_header))/sizeof(unwind_info_regular_second_level_entry);
-		if ( entryCount < regularEntriesPerPage ) {
-			return makeRegularSecondLevelPage(uniqueInfos, pageSize, endIndex, pageEnd);
-		}
+	const int regularEntriesPerPage = (compressPageUsed - sizeof(unwind_info_regular_second_level_page_header))/sizeof(unwind_info_regular_second_level_entry);
+	if ( entryCount < regularEntriesPerPage ) {
+		return makeRegularSecondLevelPage(uniqueInfos, pageSize, endIndex, pageEnd);
 	}
-	
-	// check if we need any padding because adding another entry would take 8 bytes but only have room for 4
-	uint32_t pad = 0;
-	if ( compressPageUsed == (pageSize-4) )
-		pad = 4;
-	
+
 	// second pass fills in page 
-	uint8_t* pageStart = pageEnd - compressPageUsed - pad;
+	uint8_t* pageStart = pageEnd - compressPageUsed;
 	macho_unwind_info_compressed_second_level_page_header<P>* page = (macho_unwind_info_compressed_second_level_page_header<P>*)pageStart;
 	page->set_kind(UNWIND_SECOND_LEVEL_COMPRESSED);
 	page->set_entryPageOffset(sizeof(macho_unwind_info_compressed_second_level_page_header<P>));
 	page->set_entryCount(entryCount);
 	page->set_encodingsPageOffset(page->entryPageOffset()+entryCount*sizeof(uint32_t));
 	page->set_encodingsCount(pageSpecificEncodings.size());
-	uint32_t* const encodingsArray = (uint32_t*)&pageStart[page->encodingsPageOffset()];
 	// fill in entry table
 	uint32_t* const entiresArray = (uint32_t*)&pageStart[page->entryPageOffset()];
 	ObjectFile::Atom* firstFunc = uniqueInfos[endIndex-entryCount].func;
 	for(unsigned int i=endIndex-entryCount; i < endIndex; ++i) {
 		const Info& info = uniqueInfos[i];
 		uint8_t encodingIndex;
-		if ( encodingMeansUseDwarf(info.encoding) ) {
-			// dwarf entries are always in page specific encodings
-			encodingIndex = pageSpecificEncodings[info.encoding+i];
-		}
-		else {
-			std::map<uint32_t, unsigned int>::const_iterator pos = commonEncodings.find(info.encoding);
-			if ( pos != commonEncodings.end() ) 
-				encodingIndex = pos->second;
-			else 
-				encodingIndex = pageSpecificEncodings[info.encoding];
-		}
+		std::map<uint32_t, unsigned int>::const_iterator pos = commonEncodings.find(info.encoding);
+		if ( pos != commonEncodings.end() ) 
+			encodingIndex = pos->second;
+		else 
+			encodingIndex = pageSpecificEncodings[info.encoding];
 		uint32_t entryIndex = i - endIndex + entryCount;
 		A::P::E::set32(entiresArray[entryIndex], encodingIndex << 24);
-		CompressedFixUp			funcStartFixUp;
-		funcStartFixUp.contentPointer = (uint8_t*)(&entiresArray[entryIndex]);
-		funcStartFixUp.func = info.func;
-		funcStartFixUp.fromFunc = firstFunc;
-		fCompressedFixUps.push_back(funcStartFixUp);
-		if ( encodingMeansUseDwarf(info.encoding) ) {
-			CompressedEncodingFixUp	dwarfStartFixup;
-			dwarfStartFixup.contentPointer = (uint8_t*)(&encodingsArray[encodingIndex-commonEncodings.size()]); 
-			dwarfStartFixup.fde = info.fde;
-			fCompressedEncodingFixUps.push_back(dwarfStartFixup);
-		}
+		CompressedFixUp fixup;
+		fixup.contentPointer = (uint8_t*)(&entiresArray[entryIndex]);
+		fixup.func = info.func;
+		fixup.fromFunc = firstFunc;
+		fCompressedFixUps.push_back(fixup);
 	}
 	// fill in encodings table
-	for(std::map<uint32_t, unsigned int>::const_iterator it = pageSpecificEncodings.begin(); it != pageSpecificEncodings.end(); ++it) {
+	uint32_t* const encodingsArray = (uint32_t*)&pageStart[page->encodingsPageOffset()];
+	for(std::map<uint32_t, unsigned int>::iterator it = pageSpecificEncodings.begin(); it != pageSpecificEncodings.end(); ++it) {
 		A::P::E::set32(encodingsArray[it->second-commonEncodings.size()], it->first);
 	}
 	
@@ -10383,8 +10271,8 @@ void UnwindInfoAtom<A>::generate()
 		fPagesSize = 0;
 		if ( fPagesContentForDelete == NULL )
 			throw "could not allocate space for compact unwind info";
-		ObjectFile::Atom* secondLevelFirstFuncs[pageCount*3];
-		uint8_t* secondLevelPagesStarts[pageCount*3];
+		ObjectFile::Atom* secondLevelFirstFuncs[pageCount];
+		uint8_t* secondLevelPagesStarts[pageCount];
 		
 		// make last second level page smaller so that all other second level pages can be page aligned
 		uint32_t maxLastPageSize = unwindSectionInfo->fFileOffset % 4096;
@@ -10478,17 +10366,11 @@ void UnwindInfoAtom<A>::generate()
 		for (typename std::vector<RegFixUp>::iterator it = fRegFixUps.begin(); it != fRegFixUps.end(); ++it) {
 			uint32_t offset = (it->contentPointer - fPagesContent) + fHeaderSize;
 			fReferences.push_back(new WriterReference<A>(offset, A::kImageOffset32, it->func));
-			if ( it->fde != NULL )
-				fReferences.push_back(new WriterReference<A>(offset+4, A::kSectionOffset24, it->fde));
 		}
 		// make references for compressed second level entries
 		for (typename std::vector<CompressedFixUp>::iterator it = fCompressedFixUps.begin(); it != fCompressedFixUps.end(); ++it) {
 			uint32_t offset = (it->contentPointer - fPagesContent) + fHeaderSize;
 			fReferences.push_back(new WriterReference<A>(offset, A::kPointerDiff24, it->func, 0, it->fromFunc, 0));
-		}
-		for (typename std::vector<CompressedEncodingFixUp>::iterator it = fCompressedEncodingFixUps.begin(); it != fCompressedEncodingFixUps.end(); ++it) {
-			uint32_t offset = (it->contentPointer - fPagesContent) + fHeaderSize;
-			fReferences.push_back(new WriterReference<A>(offset, A::kSectionOffset24, it->fde));
 		}
 				
 		// update section record with new size
@@ -11236,7 +11118,7 @@ void CompressedBindingInfoLinkEditAtom<A>::encode()
 	std::vector<binding_tmp> mid;
 	const SegmentInfo* currentSegment = NULL;
 	unsigned int segIndex = 0;
-	int ordinal = 0x80000000;
+	int ordinal = 0;
 	const char* symbolName = NULL;
 	uint8_t type = 0;
 	uint64_t address = (uint64_t)(-1);
@@ -11340,11 +11222,9 @@ void CompressedBindingInfoLinkEditAtom<A>::encode()
 			p->opcode = BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED;
 			p->operand1 = p->operand1/sizeof(pint_t);
 		}
-		else if ( (p->opcode == BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB) && (p->operand1 <= 15) ) {
-			p->opcode = BIND_OPCODE_SET_DYLIB_ORDINAL_IMM;
-		}
 	}	
 	dst->opcode = BIND_OPCODE_DONE;
+
 
 	// convert to compressed encoding
 	const static bool log = false;

@@ -43,7 +43,7 @@ all:
 	${LD} -r foo.no.o bar.no.o baz.no.o -o foobarbaz.no.o 
 	${OBJECTDUMP} -no_content -no_sort foobarbaz.o > foobarbaz.dump
 	${OBJECTDUMP} -no_content -no_sort foobarbaz.no.o > foobarbaz.no.dump
-	${FAIL_IF_ERROR} dwarfdump --eh-frame --verify foobarbaz.no.o >/dev/null
+	${FAIL_IF_ERROR} dwarfdump --eh-frame --verify >/dev/null
 	${PASS_IFF_SUCCESS} diff foobarbaz.dump foobarbaz.no.dump 
  
 

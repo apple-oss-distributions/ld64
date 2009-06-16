@@ -36,7 +36,7 @@
 #if OP_NEW
 void* operator new(size_t s) throw (std::bad_alloc)
 {
-  return malloc(s);
+  return malloc(s);;
 }
 #endif
 

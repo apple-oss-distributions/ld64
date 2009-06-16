@@ -24,16 +24,14 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Check that __cstring sections in other segments are not coalesced
-#<rdar://problem/6535736> ld coalesces C strings in different segments
+# Check that ld resolves the magic section start/end symbols.
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} main.c custom.s -o main 
-	size -l main | grep __cstring | wc -l | grep 2 | ${FAIL_IF_EMPTY}
+	${CC} ${CCFLAGS} main.c -o main
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:
-	rm main
+	rm  main

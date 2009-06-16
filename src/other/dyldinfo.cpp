@@ -722,7 +722,7 @@ void DyldInfoPrinter<A>::printBindingInfo()
 	}
 	else {
 		printf("bind information:\n");
-		printf("segment section          address        type   weak  addend dylib            symbol\n");
+		printf("segment section          address        type     addend dylib            symbol\n");
 		const uint8_t* p = (uint8_t*)fHeader + fInfo->bind_off();
 		const uint8_t* end = &p[fInfo->bind_size()];
 		
@@ -738,7 +738,6 @@ void DyldInfoPrinter<A>::printBindingInfo()
 		pint_t segStartAddr = 0;
 		const char* segName = "??";
 		const char* typeName = "??";
-		const char* weak_import = "";
 		bool done = false;
 		while ( !done && (p < end) ) {
 			uint8_t immediate = *p & BIND_IMMEDIATE_MASK;
@@ -771,10 +770,6 @@ void DyldInfoPrinter<A>::printBindingInfo()
 					while (*p != '\0')
 						++p;
 					++p;
-					if ( (immediate & BIND_SYMBOL_FLAGS_WEAK_IMPORT) != 0 )
-						weak_import = "weak";
-					else
-						weak_import = "";
 					break;
 				case BIND_OPCODE_SET_TYPE_IMM:
 					type = immediate;
@@ -793,22 +788,22 @@ void DyldInfoPrinter<A>::printBindingInfo()
 					segOffset += read_uleb128(p, end);
 					break;
 				case BIND_OPCODE_DO_BIND:
-					printf("%-7s %-16s 0x%08llX %10s %4s  %5lld %-16s %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, weak_import, addend, fromDylib, symbolName );
+					printf("%-7s %-16s 0x%08llX %10s   %5lld %-16s %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, addend, fromDylib, symbolName );
 					segOffset += sizeof(pint_t);
 					break;
 				case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
-					printf("%-7s %-16s 0x%08llX %10s %4s  %5lld %-16s %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, weak_import, addend, fromDylib, symbolName );
+					printf("%-7s %-16s 0x%08llX %10s   %5lld %-16s %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, addend, fromDylib, symbolName );
 					segOffset += read_uleb128(p, end) + sizeof(pint_t);
 					break;
 				case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-					printf("%-7s %-16s 0x%08llX %10s %4s  %5lld %-16s %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, weak_import, addend, fromDylib, symbolName );
+					printf("%-7s %-16s 0x%08llX %10s   %5lld %-16s %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, addend, fromDylib, symbolName );
 					segOffset += immediate*sizeof(pint_t) + sizeof(pint_t);
 					break;
 				case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
 					count = read_uleb128(p, end);
 					skip = read_uleb128(p, end);
 					for (uint32_t i=0; i < count; ++i) {
-						printf("%-7s %-16s 0x%08llX %10s %4s  %5lld %-16s %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, weak_import, addend, fromDylib, symbolName );
+						printf("%-7s %-16s 0x%08llX %10s   %5lld %-16s %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName, addend, fromDylib, symbolName );
 						segOffset += skip + sizeof(pint_t);
 					}
 					break;

@@ -23,6 +23,7 @@ all:
 	nm -nm mykext | grep '(undefined) external _extern_global' | ${FAIL_IF_EMPTY}
 	nm -nm mykext | grep '(__DATA,__data) external _my_global' | ${FAIL_IF_EMPTY}
 	otool -rv mykext | grep '_extern_global' | ${FAIL_IF_EMPTY}
+	otool -rv mykext | grep '_OSRuntimeFinalizeCPP' | ${FAIL_IF_EMPTY}
 	${PASS_IFF} true
 
 clean:

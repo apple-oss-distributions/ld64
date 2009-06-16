@@ -61,7 +61,7 @@ struct x86
 	
 	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff, kPointerDiff32=kPointerDiff, kPointerDiff16,
 							kPCRel32, kPCRel32WeakImport, kAbsolute32,  kPCRel16, kPCRel8, 
-							kImageOffset32, kPointerDiff24, kSectionOffset24,
+							kImageOffset32, kPointerDiff24,
 							kDtraceProbe, kDtraceProbeSite, kDtraceIsEnabledSite, kDtraceTypeReference  };
 };
 
@@ -74,7 +74,7 @@ struct x86_64
 							kBranchPCRel32, kBranchPCRel32WeakImport,
 							kPCRel32GOTLoad, kPCRel32GOTLoadWeakImport,
 							kPCRel32GOT, kPCRel32GOTWeakImport, kBranchPCRel8, kGOTNoFixUp, 
-							kImageOffset32, kPointerDiff24, kSectionOffset24,
+							kImageOffset32, kPointerDiff24,
 							kDtraceProbe, kDtraceProbeSite, kDtraceIsEnabledSite, kDtraceTypeReference  };
 };
 
@@ -83,7 +83,7 @@ struct arm
 	typedef Pointer32<LittleEndian>		P;
 	
 	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff, kPointerDiff32=kPointerDiff, kReadOnlyPointer,
-							kBranch24, kBranch24WeakImport, kThumbBranch22, kThumbBranch22WeakImport,
+							kBranch24, kBranch24WeakImport, kThumbBranch22, kThumbBranch22WeakImport, 
 							kDtraceProbe, kDtraceProbeSite, kDtraceIsEnabledSite, kDtraceTypeReference  };
 };
 

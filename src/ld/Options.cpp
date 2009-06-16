@@ -101,7 +101,8 @@ Options::Options(int argc, const char* argv[])
 	  fSharedRegionEligible(false), fPrintOrderFileStatistics(false),  
 	  fReadOnlyx86Stubs(false), fPositionIndependentExecutable(false), fMaxMinimumHeaderPad(false),
 	  fDeadStripDylibs(false),  fAllowTextRelocs(false), fWarnTextRelocs(false), 
-	  fUsingLazyDylibLinking(false), fEncryptable(true), fOrderData(true), fMarkDeadStrippableDylib(false),
+	  fUsingLazyDylibLinking(false), fEncryptable(true), 
+	  fOrderData(true), fMarkDeadStrippableDylib(false),
 	  fMakeClassicDyldInfo(true), fMakeCompressedDyldInfo(true), fAllowCpuSubtypeMismatches(false), fSaveTempFiles(false)
 {
 	this->checkForClassic(argc, argv);
@@ -2510,6 +2511,9 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(arg, "-allow_sub_type_mismatches") == 0 ) {
 				fAllowCpuSubtypeMismatches = true;
 			}
+			else if ( strcmp(arg, "-no_zero_fill_sections") == 0 ) {
+				fReaderOptions.fOptimizeZeroFill = false;
+			}
 			else {
 				throwf("unknown option: %s", arg);
 			}
@@ -2776,6 +2780,7 @@ void Options::parsePostCommandLineEnvironmentSettings()
 	// allow build system to force on -warn_commons
 	if ( getenv("LD_WARN_COMMONS") != NULL )
 		fWarnCommons = true;
+		
 }
 
 void Options::reconfigureDefaults()
@@ -3064,7 +3069,7 @@ void Options::reconfigureDefaults()
 		fEncryptable = false;
 	if ( fArchitecture != CPU_TYPE_ARM )
 		fEncryptable = false;
-	
+
 	// don't move inits in dyld because dyld wants certain
 	// entries point at stable locations at the start of __text
 	if ( fOutputKind == Options::kDyld ) 
@@ -3125,6 +3130,11 @@ void Options::reconfigureDefaults()
 	// only ARM enforces that cpu-sub-types must match
 	if ( fArchitecture != CPU_TYPE_ARM )
 		fAllowCpuSubtypeMismatches = true;
+		
+	// only final linked images can not optimize zero fill sections
+	if ( fOutputKind == Options::kObjectFile )
+		fReaderOptions.fOptimizeZeroFill = true;
+		
 }
 
 void Options::checkIllegalOptionCombinations()
@@ -3464,6 +3474,12 @@ void Options::checkIllegalOptionCombinations()
 		}
 	}
 	
+	// -force_cpusubtype_ALL is not supported for ARM
+	if ( fForceSubtypeAll ) {
+		if ( fArchitecture == CPU_TYPE_ARM ) {
+			warning("-force_cpusubtype_ALL will become unsupported for ARM architectures");
+		}
+	}
 }	
 
 

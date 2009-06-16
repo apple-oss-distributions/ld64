@@ -8,6 +8,8 @@ Bar::Bar()
 __static_initialization_and_destruction_0(int, int)
 global constructors keyed to b1
 start
+dyld_stub_binding_helper
+__dyld_func_lookup
 _main
 M::~M()
 Foo::~Foo()

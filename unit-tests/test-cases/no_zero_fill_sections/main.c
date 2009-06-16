@@ -1,4 +1,5 @@
-/*
+/* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
+ *
  * Copyright (c) 2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
@@ -20,24 +21,14 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+#include <stdio.h>
 
-		
+static int a[2000];
+int b[2000];
 
-#if __i386__
-	.text
-	.align 2
-	
-_negative_offset_from_local_label:
-	nop
-	.space 100
-	movl      -80+L3(,%eax,4), %edx
-	ret
-	
-	.data
-L2:	.space	50
-L3:	.space	50
-_d:	.long	0
-
-#endif
-
-
+int main()
+{
+	a[0] = 0;
+	b[0] = 0;
+	return 0;
+}

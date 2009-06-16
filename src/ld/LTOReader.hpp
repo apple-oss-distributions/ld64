@@ -358,7 +358,6 @@ Reader::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* path
 				kind = ObjectFile::Atom::kWeakDefinition;
 				break;
 			case LTO_SYMBOL_DEFINITION_UNDEFINED:
-			case LTO_SYMBOL_DEFINITION_WEAKUNDEF:
 				kind = ObjectFile::Atom::kExternalDefinition;
 				break;
 			default:
@@ -407,7 +406,7 @@ const char* Reader::tripletPrefixForArch(cpu_type_t arch)
 		case CPU_TYPE_X86_64:
 			return "x86_64-";
 		case CPU_TYPE_ARM:
-			return "arm";
+			return "arm-";
 	}
 	return "";
 }

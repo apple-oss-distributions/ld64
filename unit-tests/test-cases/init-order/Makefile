@@ -33,8 +33,8 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	${CXX} ${CXXFLAGS} main.cxx foo.cxx bar.cxx -o main -dead_strip
-	nm -s __TEXT __text -nj main | grep -v dyld_stub_binding_helper | c++filt  > actual-order.txt
+	${CXX} ${CXXFLAGS} main.cxx foo.cxx bar.cxx -o main
+	nm -s __TEXT __text -nj main | c++filt  > actual-order.txt
 	${PASS_IFF} diff actual-order.txt expected-order.txt
 	
 

@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2009 Apple Inc. All rights reserved.
+# Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -24,28 +24,16 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# <rdar://problem/6583757> i386 relocation error with negative offsets from local labels
+# Check that the -no_zero_fill_sections works
 #
 
-ifeq (${ARCH},i386)
-	TARGET =  run-i386
-else 
-	TARGET =  run-other
-endif
+run: all
 
-run: ${TARGET}
+all:
+	${CC} ${CCFLAGS} main.c -o main -Wl,-no_zero_fill_sections 
+	size -l main | grep __bss | grep "offset 0" | ${FAIL_IF_STDIN}
+	size -l main | grep __common | grep "offset 0" | ${FAIL_IF_STDIN}
+	${PASS_IFF_GOOD_MACHO} main
 
-run-other:
-	${PASS_IFF} /usr/bin/true
-	
-
-run-i386:
-	${CC} ${ASMFLAGS} test.s -c -o test.o
-	${OBJECTDUMP} test.o | grep "__data@0 plus 0xFFFFFFE2" | ${FAIL_IF_EMPTY}
-
-	${LD} -arch ${ARCH} -r -keep_private_externs test.o -o test-r.o
-	${OBJECTDUMP} test-r.o | grep "__data@0 plus 0xFFFFFFE2" | ${PASS_IFF_STDIN}
-
-	
 clean:
-	rm -rf *.o
+	rm  main

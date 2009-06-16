@@ -1,5 +1,5 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-*
- * Copyright (c) 2005-2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2005-2007 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -86,11 +86,11 @@ public:
 class Section : public ObjectFile::Section
 {
 public:
-	static Section*	find(const char* sectionName, const char* segmentName, bool zeroFill, bool createIfNeeded=true);
+	static Section*	find(const char* sectionName, const char* segmentName, bool zeroFill, bool untrustedZeroFill, bool createIfNeeded=true);
 	static void		assignIndexes();
 	const char*		getName() { return fSectionName; }
 private:
-					Section(const char* sectionName, const char* segmentName, bool zeroFill);
+					Section(const char* sectionName, const char* segmentName, bool zeroFill, bool untrustedZeroFill);
 
 	struct Sorter {
 		static int	segmentOrdinal(const char* segName);
@@ -101,9 +101,10 @@ private:
 	typedef __gnu_cxx::hash_map<const char*, class Section*, __gnu_cxx::hash<const char*>, CStringEquals> NameToSection;
 	//typedef std::map<const char*, class Section*, CStringComparor> NameToSection;
 
-	char			fSectionName[18];
-	char			fSegmentName[18];
+	const char*		fSectionName;
+	const char*		fSegmentName;
 	bool			fZeroFill;
+	bool			fUntrustedZeroFill;
 
 	static NameToSection			fgMapping;
 	static std::vector<Section*>	fgSections;
@@ -114,12 +115,9 @@ Section::NameToSection	Section::fgMapping;
 std::vector<Section*>	Section::fgSections;
 Section::NameToOrdinal	Section::fgSegmentDiscoverOrder;
 
-Section::Section(const char* sectionName, const char* segmentName, bool zeroFill)
- : fZeroFill(zeroFill)
+Section::Section(const char* sectionName, const char* segmentName, bool zeroFill, bool untrustedZeroFill)
+ : fSectionName(sectionName), fSegmentName(segmentName), fZeroFill(zeroFill), fUntrustedZeroFill(untrustedZeroFill)
 {
-	strlcpy(fSectionName, sectionName, sizeof(fSectionName));
-	strlcpy(fSegmentName, segmentName, sizeof(fSegmentName));
-	
 	this->fIndex = fgSections.size() + 20;  // room for 20 standard sections
 	// special placement of some sections
 	if ( strcmp(segmentName, "__TEXT") == 0 ) {
@@ -179,12 +177,17 @@ Section::Section(const char* sectionName, const char* segmentName, bool zeroFill
 	//fprintf(stderr, "new Section(%s, %s) => %p, %u\n", sectionName, segmentName, this, this->getIndex());
 }
 
-Section* Section::find(const char* sectionName, const char* segmentName, bool zeroFill, bool createIfNeeded)
+Section* Section::find(const char* sectionName, const char* segmentName, bool zeroFill, bool untrustedZeroFill, bool createIfNeeded)
 {
 	NameToSection::iterator pos = fgMapping.find(sectionName);
 	if ( pos != fgMapping.end() ) {
-		if ( strcmp(pos->second->fSegmentName, segmentName) == 0 )
+		if ( strcmp(pos->second->fSegmentName, segmentName) == 0 ) {
+			if ( !untrustedZeroFill && pos->second->fUntrustedZeroFill ) {
+				pos->second->fZeroFill = zeroFill;
+				pos->second->fUntrustedZeroFill = false;
+			}
 			return pos->second;
+		}
 		// otherwise same section name is used in different segments, look slow way
 		for (std::vector<Section*>::iterator it=fgSections.begin(); it != fgSections.end(); it++) {
 			if ( (strcmp((*it)->fSectionName, sectionName) == 0) && (strcmp((*it)->fSegmentName, segmentName) == 0) )
@@ -196,13 +199,13 @@ Section* Section::find(const char* sectionName, const char* segmentName, bool ze
 		return NULL;
 	
 	// does not exist, so make a new one
-	Section* sect = new Section(sectionName, segmentName, zeroFill);
+	Section* sect = new Section(sectionName, segmentName, zeroFill, untrustedZeroFill);
 	fgMapping[sectionName] = sect;
 	fgSections.push_back(sect);
 
 	if ( (strcmp(sectionName, "__text") == 0) && (strcmp(segmentName, "__TEXT") == 0) ) {
 		// special case __StaticInit to be right after __text
-		find("__StaticInit", "__TEXT", false);
+		find("__StaticInit", "__TEXT", false, true);
 	}
 
 	// remember segment discovery order
@@ -658,7 +661,7 @@ void Linker::optimize()
 		for(std::vector<class ObjectFile::Atom*>::iterator itr = fAllAtoms.begin(); itr != fAllAtoms.end(); ++itr) {
 			ObjectFile::Atom *atom = *itr;
 			if ( atom->getSection() == NULL )
-				atom->setSection(Section::find(atom->getSectionName(), atom->getSegment().getName(), atom->isZeroFill()));
+				atom->setSection(Section::find(atom->getSectionName(), atom->getSegment().getName(), atom->isZeroFill(), true));
 		}
 
 		// resolve new undefines
@@ -871,8 +874,17 @@ inline void Linker::addAtom(ObjectFile::Atom& atom)
 	}
 
 	// record section orders so output file can have same order
-	if (atom.getSectionName())
-		atom.setSection(Section::find(atom.getSectionName(), atom.getSegment().getName(), atom.isZeroFill()));
+	if (atom.getSectionName()) {
+		bool untrusted = false;
+		switch ( atom.getContentType() ) {
+			case ObjectFile::Atom::kSectionStart:
+			case ObjectFile::Atom::kSectionEnd:
+				untrusted = true;
+			default:
+				break;
+		}
+		atom.setSection(Section::find(atom.getSectionName(), atom.getSegment().getName(), atom.isZeroFill(), untrusted));
+	}
 }
 
 
@@ -2213,7 +2225,7 @@ void Linker::tweakLayout()
 			throwf("total output size exceeds 2GB (%lldMB)", (fTotalSize-fTotalZeroFillSize)/(1024*1024));		
 
 		// move very large (>1MB) zero fill atoms to a new section at very end of __DATA segment
-		Section* hugeZeroFills = Section::find("__huge", "__DATA", true);
+		Section* hugeZeroFills = Section::find("__huge", "__DATA", true, true);
 		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); it++) {
 			ObjectFile::Atom* atom = *it;
 			if ( atom->isZeroFill() && (atom->getSize() > 1024*1024) && (strcmp(atom->getSegment().getName(), "__DATA") == 0) )
@@ -2232,7 +2244,7 @@ void Linker::tweakLayout()
 		}
 		
 		// move all functions pointed to by __mod_init_func section to front of __text
-		Section* initSection = Section::find("__mod_init_func", "__DATA", false, false);
+		Section* initSection = Section::find("__mod_init_func", "__DATA", false, true, false);
 		if ( initSection != NULL ) {
 			for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); ++it) {
 				if ( (*it)->getSection() == initSection ) {
@@ -2263,7 +2275,7 @@ void Linker::tweakLayout()
 				break;
 		}
 		const bool hasPreferredLoadAddress = (fOptions.baseAddress() != 0);
-		Section* dataSection = Section::find("__data", "__DATA", false, false);
+		Section* dataSection = Section::find("__data", "__DATA", false, true, false);
 		if ( dataSection != NULL ) {
 			for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); ++it) {
 				ObjectFile::Atom* dataAtom = *it;
@@ -3984,6 +3996,12 @@ bool Linker::AtomSorter::operator()(const ObjectFile::Atom* left, const ObjectFi
 	unsigned int rightSectionIndex = right->getSection()->getIndex();
 	if ( leftSectionIndex != rightSectionIndex)
 		return (leftSectionIndex < rightSectionIndex);
+	
+	// magic section$start symbol always sorts to the start of its section
+	if ( left->getContentType() == ObjectFile::Atom::kSectionStart )
+		return true;
+	if ( right->getContentType() == ObjectFile::Atom::kSectionStart )
+		return false;
 
 	// if a -order_file is specified, then sorting is altered to sort those symbols first
 	if ( fOverriddenOrdinalMap != NULL ) {
@@ -4019,6 +4037,12 @@ bool Linker::AtomSorter::operator()(const ObjectFile::Atom* left, const ObjectFi
 	if ( leftIsTent != rightIsTent )
 		return rightIsTent; 
 	
+	// magic section$end symbol always sorts to the end of its section
+	if ( left->getContentType() == ObjectFile::Atom::kSectionEnd )
+		return false;
+	if ( right->getContentType() == ObjectFile::Atom::kSectionEnd )
+		return true;
+
 	// initializers are auto sorted to start of section
 	if ( !fInitializerSet.empty() ) {
 		bool leftFirst  = (fInitializerSet.count(left) != 0);

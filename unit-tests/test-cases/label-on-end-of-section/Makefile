@@ -24,18 +24,14 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Check that symbols in no-dead-strip sections can be coalesced.
-# <rdar://problem/6578360> -dead_strip inhibits weak coalescing in no_dead_strip section
+# Check that ld handles labels at the end of a section
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} baz.c -c -o baz.o
-	libtool -static baz.o -o libbaz.a
-	${CC} ${CCFLAGS} main.c foo.c libbaz.a -dead_strip -o main
-	nm -j main | grep _hidden | wc -l | grep 1 | ${FAIL_IF_EMPTY}
-	${PASS_IFF_GOOD_MACHO} main
+	${CC} ${CCFLAGS} foo.s -c -o foo.o
+	${OBJECTDUMP} foo.o | grep "pointer to _end" | ${PASS_IFF_STDIN}
 
 clean:
-	rm -rf main baz.o libbaz.a
+	rm  foo.o
