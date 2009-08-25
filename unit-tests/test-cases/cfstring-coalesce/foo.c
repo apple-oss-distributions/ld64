@@ -2,10 +2,13 @@
 
 extern void bar();
 
+extern CFStringRef OtherCFString;
+
 void foo()
 {
 	CFStringGetLength(CFSTR("hello"));
 	CFStringGetLength(CFSTR("world"));
+	CFStringGetLength(OtherCFString);
 }
 
 

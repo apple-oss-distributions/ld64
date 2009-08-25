@@ -25,14 +25,23 @@ include ${TESTROOT}/include/common.makefile
 
 #
 # Test that -mdynamic-no-pic jump table in the middle of
-# a function does not  cause relocations.
+# a function does not cause relocations.
 #
 # <rdar://problem/5847206> SPEC2000/eon built with -mdynamic-no-pic won't run
 #
 
-run: all
+run: test-run-${ARCH}
 
-all:
+
+test-run-ppc:
+	${PASS_IFF} true
+
+test-run-x86_64:
+	${PASS_IFF} true
+	
+test-run-armv6: test-run-i386
+
+test-run-i386:
 	# check jump table in a weak function
 	${CC} ${CCFLAGS} main.c switch.s -o main
 	otool -rv main | grep _foo | ${FAIL_IF_STDIN}
@@ -48,7 +57,7 @@ all:
 	# check jump table with -pie, should have no external and some local relocations
 	${CC} ${CCFLAGS} main.c switch.s -o main  -Wl,-pie -read_only_relocs suppress
 	otool -rv main | grep "External relocation" | ${FAIL_IF_STDIN}
-	otool -rv main | grep "Local relocation" | ${FAIL_IF_EMPTY}
+#	otool -rv main | grep "Local relocation" | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 
 

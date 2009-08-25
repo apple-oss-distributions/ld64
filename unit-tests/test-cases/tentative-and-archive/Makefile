@@ -29,22 +29,31 @@ SHELL = bash # use bash shell so we can redirect just stderr
 #
 # Test how tentative definitions interact with archives
 # main.c has a tenative definition for _var which 
-# should *not* cause libfoo.a(foo.o) to be loaded.
+# should cause libfoo.a(foo.o) to be loaded which in turn
+# should cause _bar from libbar.dylib to be used.
 #
 # <rdar://problem/5779681> ld crashes building XsanFS
 # <rdar://problem/5852023> -undefined dynamic_lookup causes spurious extra symbols
+# <rdar://problem/5613343> need to search for definitions for common symbols
 #
 
 run: all
 
 all:
+	${CC} ${CCFLAGS} bar.c -dynamiclib -o libbar.dylib
 	${CC} ${CCFLAGS} foo.c -c -o foo.o
-	libtool -static foo.o -o libfoo.a
-	${CC} ${CCFLAGS} main.c libfoo.a -o main
+	libtool -static foo.o -o libfoo.a 
+	${CC} ${CCFLAGS} main.c libfoo.a libbar.dylib -o main
+	# verify _foo got pulled in because _var was a tentative in main.o
+	nm main | grep "_foo" | ${FAIL_IF_EMPTY}
+	# verify -dead_strip pulls in non-tentative _var from libfoo.a
+	${CC} ${CCFLAGS} main.c libfoo.a libbar.dylib -o main -dead_strip
+	nm -m main | grep "_var" | grep __data | ${FAIL_IF_EMPTY}
+	# verify dynamic_lookup works and has no duplicate symbols
 	${CC} ${CCFLAGS} main.c libfoo.a -o main -undefined dynamic_lookup
-	nm -m main | grep "looked up" | ${FAIL_IF_STDIN}
+	nm -m main | grep "looked up" | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 		
 
 clean:
-	rm -rf main libfoo.a foo.o
+	rm -rf main libfoo.a foo.o libbar.dylib

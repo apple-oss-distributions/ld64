@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2007 Apple Inc. All rights reserved.
+# Copyright (c) 2007-2008 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -42,7 +42,7 @@ all-true:
 
 all-x86_64:
 	${CC} ${CCFLAGS} foo.c bar.c -dynamiclib -o libfoobar.dylib 
-	otool -Iv libfoobar.dylib  | grep 0x | ${FAIL_IF_STDIN}
+	otool -Iv libfoobar.dylib  | grep 0x | grep _ | ${FAIL_IF_STDIN}
 	${CC} ${CCFLAGS} foo.c bar.c -dynamiclib -o libfoobar.dylib -flat_namespace
 	otool -Iv libfoobar.dylib  | grep 0x | ${PASS_IFF_STDIN}
 

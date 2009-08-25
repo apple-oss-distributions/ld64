@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2007 Apple Inc. All rights reserved.
+# Copyright (c) 2007-2008 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,6 +23,8 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
+SHELL = bash # use bash shell so we can redirect just stderr
+
 #
 # Test that cfstring literals are coalesced and dead stripped
 # There is 3 CFSTR in foo.c and 1 CFSTR in bar.c
@@ -31,10 +33,8 @@ include ${TESTROOT}/include/common.makefile
 
 ifeq (,${findstring 64,$(ARCH)})
 	CFSTRING_SIZE = 16
-	CFSTRING_SIZE_WRITABLE = 32
 else
 	CFSTRING_SIZE = 32
-	CFSTRING_SIZE_WRITABLE = 64
 endif
 
 
@@ -45,8 +45,8 @@ all:
 	${CC} ${CCFLAGS} foo.c bar.c -o foo -framework CoreFoundation -dead_strip
 	size -l foo | grep "__cfstring: ${CFSTRING_SIZE}" | ${FAIL_IF_EMPTY}
 	# now try with -fwritable-strings
-	${CC} ${CCFLAGS} foo.c bar.c -o foo_writable -framework CoreFoundation -dead_strip -fwritable-strings
-	size -l foo_writable | grep "__cfstring: ${CFSTRING_SIZE_WRITABLE}" | ${PASS_IFF_STDIN}
+	${CC} ${CCFLAGS} foo.c bar.c -o foo_writable -framework CoreFoundation -dead_strip -fwritable-strings 2>/dev/null
+	size -l foo_writable | grep "__cfstring: ${CFSTRING_SIZE}" | ${PASS_IFF_STDIN}
 
 clean:
 	rm -rf foo foo_writable

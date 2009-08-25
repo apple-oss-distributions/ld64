@@ -11,13 +11,16 @@ cd `echo "$0" | sed 's/run-all-unit-tests/test-cases/'`
 
 [ "$PROCTORRUN" ] && exec ../proctor-run
 
-all_archs="x86_64 armv6 thumb ppc ppc64 i386  "
-valid_archs="x86_64 armv6 ppc ppc64 i386  "
+all_archs="x86_64  ppc i386  "
+#armv6 thumb
+valid_archs="x86_64 armv6 ppc i386  "
 
 # clean first
 ../bin/make-recursive.pl clean > /dev/null
 
 mkdir /tmp/$$
+mkdir $BUILD_ROOT/lib
+ln -s /Developer/usr/lib/libLTO.dylib ${BUILD_ROOT}/lib/libLTO.dylib
 for arch in $all_archs
 do
 	echo ""

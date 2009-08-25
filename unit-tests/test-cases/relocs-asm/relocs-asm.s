@@ -21,6 +21,8 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
+		
+		
 #if __arm__
 	.text
 	.align 2
@@ -85,6 +87,18 @@ _test_branches:
 	
 	@ call external + addend
 	bne	_external+16
+
+_pointer_diffs:
+	nop
+	bl	  1f
+1:	nop
+	.long _foo-1b
+	.long _foo+10-1b
+	.long _test_branches-1b
+	.long _test_branches+3-1b
+	.long (_test_branches - _test_loads) + -2097152
+	.long (_test_calls - _test_loads) + -2097152 
+
 #endif
 
 #if __ppc__ || __ppc64__
@@ -249,6 +263,12 @@ _test_calls:
 	# call internal + addend
 	call	_test_branches+0x19000
 
+	# 16-bit call internal
+	callw	_test_branches
+	
+	# 16-bit call internal + addend
+	callw	_test_branches+13
+
 	# call external
 	call	_external
 	
@@ -276,6 +296,9 @@ _pointer_diffs:
 	movl _foo+10-1b(%eax),%esi
 	movl _test_branches-1b(%eax),%esi
 	movl _test_branches+3-1b(%eax),%esi
+	cmpl $(( (_test_branches - _test_loads) + -2097152 )),(%esp)
+	cmpl $(( (_test_calls - _test_loads) + -2097152 )),(%esp)
+
 	
 _word_relocs:
 	callw	_pointer_diffs
@@ -426,6 +449,9 @@ L1:	.quad _test_branches - _test_diffs
   	.quad _test_branches - .
   	.quad _test_branches - L1
   	.quad L1 - _prev			
+ #tests support for 32-bit absolute pointers
+	.long _prev
+	.long L1
 
 # the following generates: _foo cannot be undefined in a subtraction expression
 # but it should be ok (it will be a linker error if _foo and _bar are not in same linkage unit)

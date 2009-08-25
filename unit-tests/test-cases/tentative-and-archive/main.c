@@ -1,5 +1,6 @@
 
 int var;
+int other_tent;
 
 int main()
 {

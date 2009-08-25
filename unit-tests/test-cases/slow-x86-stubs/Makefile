@@ -24,7 +24,7 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Sanity check that -slow_stubs for i386 leaves no __IMPORT segment
+# Sanity check that  i386 for 10.6 does not use  __IMPORT segment
 #
 
 run: all
@@ -32,9 +32,9 @@ run: all
 
 
 all:
-	${CC} ${CCFLAGS} hello.c -o hello -Wl,-slow_stubs
+	${CC} ${CCFLAGS} hello.c -o hello
 	size -l hello | grep __IMPORT | ${FAIL_IF_STDIN} 
-	${CC} ${CCFLAGS} hello.c -dynamiclib -o libhello.dylib -Wl,-slow_stubs
+	${CC} ${CCFLAGS} hello.c -dynamiclib -o libhello.dylib 
 	size -l libhello.dylib | grep __IMPORT | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} hello
 

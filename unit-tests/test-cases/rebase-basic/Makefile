@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2006-2008 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -38,16 +38,16 @@ all:
 	${CC} ${CCFLAGS} -c bar.m -o bar.${ARCH}.o
 	${FAIL_IF_BAD_OBJ} bar.${ARCH}.o
 
-	${CC} ${CCFLAGS} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -Wl,-no_uuid -o libfoo.${ARCH}.dylib -framework Foundation  -framework CoreFoundation 
+	${CC} ${CCFLAGS} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -Wl,-no_uuid -Wl,-no_order_data -o libfoo.${ARCH}.dylib -framework Foundation  -framework CoreFoundation 
 	${FAIL_IF_BAD_MACHO} libfoo.${ARCH}.dylib
 
-	${CC} ${CCFLAGS} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -Wl,-no_uuid -o libfoo-alt.${ARCH}.dylib -framework Foundation -framework CoreFoundation  -seg1addr 0x12340000 -install_name libfoo.${ARCH}.dylib
+	${CC} ${CCFLAGS} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -Wl,-no_uuid -Wl,-no_order_data -o libfoo-alt.${ARCH}.dylib -framework Foundation -framework CoreFoundation  -seg1addr 0x12340000 -install_name libfoo.${ARCH}.dylib
 	${FAIL_IF_BAD_MACHO} libfoo-alt.${ARCH}.dylib
-
-	rebase -arch ${ARCH} -low_address 0x12340000 libfoo.${ARCH}.dylib
+	
+	${REBASE} -arch ${ARCH} -low_address 0x12340000 libfoo.${ARCH}.dylib
 	${FAIL_IF_BAD_MACHO} libfoo.${ARCH}.dylib
 
 	${PASS_IFF} diff libfoo.${ARCH}.dylib libfoo-alt.${ARCH}.dylib
 
 clean:
-	rm *.o *.dylib
+	rm -f *.o *.dylib

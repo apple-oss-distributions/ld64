@@ -36,10 +36,10 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} test.m -c -o test.o
-	ObjectDump  -no_content test.o | grep -v zero-fill-at> test.dump
+	${OBJECTDUMP}  -no_content test.o | grep -v zero-fill-at> test.dump
 
-	${LD} -arch ${ARCH} -r test.o -o test-r.o
-	ObjectDump  -no_content test-r.o | grep -v zero-fill-at > test-r.dump
+	${LD} -arch ${ARCH} -r test.o -keep_private_externs -o test-r.o
+	${OBJECTDUMP}  -no_content test-r.o | grep -v zero-fill-at > test-r.dump
 
 	diff test.dump test-r.dump | ${PASS_IFF_EMPTY}
 	

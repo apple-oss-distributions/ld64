@@ -43,8 +43,7 @@ run:
 
 all: zero one two three four five six seven eight nine ten \
     eleven twelve thirteen fourteen fifteen sixteen seventeen \
-	eighteen nineteen twenty
-
+	eighteen nineteen 
 
 zero:
 	#
@@ -117,7 +116,7 @@ five:
 	# llvm  : b5.c : Dfoo2
 	# MachO : main5.c : Dfoo3, Ufoo1
 	#
-	#echo "Five..."
+	#echo "verify that if call to mach-o is optimized away, mach-o func is dead stripped"
 	${LLVMGCC} ${CCFLAGS} --emit-llvm a5.c -c -o a5.o
 	${LLVMGCC} ${CCFLAGS} --emit-llvm b5.c -c -o b5.o
 	${LLVMGCC} ${CCFLAGS} main5.c -c -o main5.o
@@ -204,7 +203,7 @@ twelve:
 	# llvm  : a12.c
 	# MachO : main12.c
 	#
-	#echo "Tweleve..."
+	#echo "verify tentative def in llvm .o referenced from mach-o"
 	${LLVMGCC} ${CCFLAGS} --emit-llvm a12.c -c -o a12.o
 	${LLVMGCC} ${CCFLAGS} main12.c -c -o main12.o
 	${LLVMGCC} ${CCFLAGS} a12.o main12.o -o main12.exe
@@ -275,15 +274,16 @@ nineteen:
 
 twenty:
 	#echo verify bitcode files in archives works 
-	${LLVMGCC} ${CCFLAGS} --emit-llvm a20.c -c -o a20.o
-	${LLVMGCC} ${CCFLAGS} --emit-llvm b20.c -c -o b20.o
-	ar cru lib20.a a20.o b20.o
-	${LLVMGCC} ${CCFLAGS} main20.c lib20.a -all_load -o main20.exe
-	nm main20.exe | grep _foo | ${PASS_IFF_STDIN}
+	#${LLVMGCC} ${CCFLAGS} --emit-llvm a20.c -c -o a20.o
+	#${LLVMGCC} ${CCFLAGS} --emit-llvm b20.c -c -o b20.o
+	#libtool -static a20.o b20.o -o lib20.a 
+	#${LLVMGCC} ${CCFLAGS} main20.c lib20.a -all_load -o main20.exe
+	#nm main20.exe | grep _foo | ${PASS_IFF_STDIN}
 	
-	
+
+
 	
 	
 clean:
-	rm -rf *.o main*.exe big.* *.dylib main16.exe.lto.bc fail.log lib20.a
+	rm -rf *.o main*.exe big.* *.dylib main16.exe.lto.bc fail.log lib20.a main21.preload lib21.a 
 	
