@@ -35,8 +35,8 @@
 
 #include "ObjectFile.h"
 
-extern void throwf (const char* format, ...) __attribute__ ((noreturn));
-extern void warning(const char* format, ...);
+extern void throwf (const char* format, ...) __attribute__ ((noreturn,format(printf, 1, 2)));
+extern void warning(const char* format, ...) __attribute__((format(printf, 1, 2)));
 
 class LibraryOptions
 {
@@ -231,6 +231,7 @@ public:
 	bool						errorOnOtherArchFiles() { return fErrorOnOtherArchFiles; }
 	bool						markAutoDeadStripDylib() { return fMarkDeadStrippableDylib; }
 	bool						removeEHLabels() { return fReaderOptions.fNoEHLabels; }
+	bool						useSimplifiedDylibReExports() { return fUseSimplifiedDylibReExports; }
 
 private:
 	class CStringEquals
@@ -380,6 +381,7 @@ private:
 	bool								fMakeCompressedDyldInfo;
 	bool								fNoEHLabels;
 	bool								fAllowCpuSubtypeMismatches;
+	bool								fUseSimplifiedDylibReExports;
 	std::vector<const char*>			fInitialUndefines;
 	NameSet								fAllowedUndefined;
 	NameSet								fWhyLive;

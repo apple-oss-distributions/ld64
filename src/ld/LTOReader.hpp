@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2006-2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2006-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -358,7 +358,6 @@ Reader::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* path
 				kind = ObjectFile::Atom::kWeakDefinition;
 				break;
 			case LTO_SYMBOL_DEFINITION_UNDEFINED:
-			case LTO_SYMBOL_DEFINITION_WEAKUNDEF:
 				kind = ObjectFile::Atom::kExternalDefinition;
 				break;
 			default:
@@ -523,14 +522,6 @@ bool Reader::optimize(const std::vector<ObjectFile::Atom *>& allAtoms, std::vect
 		warning("could not produce merged bitcode file");
     }
     
-    // if requested, save off merged bitcode file
-    if ( saveTemps ) {
-        char tempBitcodePath[MAXPATHLEN];
-        strcpy(tempBitcodePath, outputFilePath);
-        strcat(tempBitcodePath, ".lto.bc");
-        ::lto_codegen_write_merged_modules(generator, tempBitcodePath);
-    }
-
 	// set code-gen model
 	lto_codegen_model model = LTO_CODEGEN_PIC_MODEL_DYNAMIC;
 	switch ( outputKind ) {
@@ -552,12 +543,38 @@ bool Reader::optimize(const std::vector<ObjectFile::Atom *>& allAtoms, std::vect
 				model = LTO_CODEGEN_PIC_MODEL_DYNAMIC;
 			break;
 		case Options::kStaticExecutable:
-			model = LTO_CODEGEN_PIC_MODEL_STATIC;
+			// darwin x86_64 "static" code model is really dynamic code model
+			if ( fArchitecture == CPU_TYPE_X86_64 )
+				model = LTO_CODEGEN_PIC_MODEL_DYNAMIC;
+			else
+				model = LTO_CODEGEN_PIC_MODEL_STATIC;
 			break;
 	}
 	if ( ::lto_codegen_set_pic_model(generator, model) )
 		throwf("could not create set codegen model: %s", lto_get_error_message());
 
+    // if requested, save off merged bitcode file
+    if ( saveTemps ) {
+        char tempBitcodePath[MAXPATHLEN];
+        strcpy(tempBitcodePath, outputFilePath);
+        strcat(tempBitcodePath, ".lto.bc");
+        ::lto_codegen_write_merged_modules(generator, tempBitcodePath);
+    }
+
+#if LTO_API_VERSION >= 3
+	// find assembler next to linker
+	char path[PATH_MAX];
+	uint32_t bufSize = PATH_MAX;
+	if ( _NSGetExecutablePath(path, &bufSize) != -1 ) {
+		char* lastSlash = strrchr(path, '/');
+		if ( lastSlash != NULL ) {
+			strcpy(lastSlash+1, "as");
+			struct stat statInfo;
+			if ( stat(path, &statInfo) == 0 )
+				::lto_codegen_set_assembler_path(generator, path);
+		}
+	}
+#endif
 	// run code generator
 	size_t machOFileLen;
 	const uint8_t* machOFile = (uint8_t*)::lto_codegen_compile(generator, &machOFileLen);
@@ -574,7 +591,12 @@ bool Reader::optimize(const std::vector<ObjectFile::Atom *>& allAtoms, std::vect
 			::write(fd, machOFile, machOFileLen);
 			::close(fd);
 		}
-    }
+		//	save off merged bitcode file
+		char tempOptBitcodePath[MAXPATHLEN];
+        strcpy(tempOptBitcodePath, outputFilePath);
+        strcat(tempOptBitcodePath, ".lto.opt.bc");
+        ::lto_codegen_write_merged_modules(generator, tempOptBitcodePath);
+	}
 
 	// parse generated mach-o file into a MachOReader
 	ObjectFile::Reader* machoReader = this->makeMachOReader(machOFile, machOFileLen, nextInputOrdinal);
@@ -686,9 +708,9 @@ ObjectFile::Reader* Reader::makeMachOReader(const uint8_t* p, size_t len, uint32
 
 }; // namespace lto
 
-extern void printLTOVersion(Options &opts);
+extern void printLTOVersion(Options& opts);
 
-void printLTOVersion(Options &opts) {
+void printLTOVersion(Options& opts) {
 	const char* vers = lto_get_version();
 	if ( vers != NULL )
 		fprintf(stderr, "%s\n", vers);

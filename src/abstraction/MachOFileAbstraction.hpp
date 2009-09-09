@@ -471,7 +471,7 @@ public:
 	void			set_cmdsize(uint32_t value)				INLINE { E::set32(fields.cmdsize, value); }
 
 	const uint8_t*	uuid() const							INLINE { return fields.uuid; }
-	void			set_uuid(uint8_t uuid[16])				INLINE { memcpy(&fields.uuid, uuid, 16); }
+	void			set_uuid(uint8_t u[16])					INLINE { memcpy(&fields.uuid, u, 16); }
 			
 	typedef typename P::E		E;
 private:

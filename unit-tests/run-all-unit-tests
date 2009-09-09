@@ -19,8 +19,6 @@ valid_archs="x86_64 armv6 ppc i386  "
 ../bin/make-recursive.pl clean > /dev/null
 
 mkdir /tmp/$$
-mkdir $BUILD_ROOT/lib
-ln -s /Developer/usr/lib/libLTO.dylib ${BUILD_ROOT}/lib/libLTO.dylib
 for arch in $all_archs
 do
 	echo ""

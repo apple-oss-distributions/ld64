@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2008-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -47,6 +47,7 @@ static bool printOpcodes = false;
 static bool printExport = false;
 static bool printExportGraph = false;
 static cpu_type_t	sPreferredArch = CPU_TYPE_I386;
+static cpu_type_t	sPreferredSubArch = 0;
 
 
  __attribute__((noreturn))
@@ -97,6 +98,13 @@ private:
 	void										printLazyBindingOpcodes();
 	void										printExportInfo();
 	void										printExportInfoGraph();
+	void										printRelocRebaseInfo();
+	void										printSymbolTableExportInfo();
+	void										printClassicLazyBindingInfo();
+	void										printClassicBindingInfo();
+	pint_t										relocBase();
+	const char*									relocTypeName(uint8_t r_type);
+	uint8_t										segmentIndexForAddress(pint_t addr);
 	void										processExportNode(const uint8_t* const start, const uint8_t* p, const uint8_t* const end, 
 																char* cummulativeString, int curStrOffset);
 	void										processExportGraphNode(const uint8_t* const start, const uint8_t* const end,  
@@ -109,6 +117,9 @@ private:
 	const char*									sectionName(uint8_t segIndex, pint_t address);
 	const char*									getSegAndSectName(uint8_t segIndex, pint_t address);
 	const char*									ordinalName(int libraryOrdinal);
+	const char*									classicOrdinalName(int libraryOrdinal);
+	pint_t*										mappedAddressForVMAddress(pint_t vmaddress);
+
 
 		
 	const char*									fPath;
@@ -120,6 +131,10 @@ private:
 	uint32_t									fSymbolCount;
 	const macho_dyld_info_command<P>*			fInfo;
 	uint64_t									fBaseAddress;
+	const macho_dysymtab_command<P>*			fDynamicSymbolTable;
+	const macho_segment_command<P>*				fFirstSegment;
+	const macho_segment_command<P>*				fFirstWritableSegment;
+	bool										fWriteableSegmentWithAddrOver4G;
 	std::vector<const macho_segment_command<P>*>fSegments;
 	std::vector<const char*>					fDylibs;
 };
@@ -216,11 +231,12 @@ bool DyldInfoPrinter<arm>::validFile(const uint8_t* fileContent)
 	return false;
 }
 
-
 template <typename A>
 DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path)
  : fHeader(NULL), fLength(fileLength), 
-   fStrings(NULL), fStringsEnd(NULL), fSymbols(NULL), fSymbolCount(0), fInfo(NULL), fBaseAddress(0)
+   fStrings(NULL), fStringsEnd(NULL), fSymbols(NULL), fSymbolCount(0), fInfo(NULL), 
+   fBaseAddress(0), fDynamicSymbolTable(NULL), fFirstSegment(NULL), fFirstWritableSegment(NULL),
+   fWriteableSegmentWithAddrOver4G(false)
 {
 	// sanity check
 	if ( ! validFile(fileContent) )
@@ -236,7 +252,6 @@ DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLen
 	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((uint8_t*)fHeader + sizeof(macho_header<P>));
 	const macho_load_command<P>* cmd = cmds;
 	for (uint32_t i = 0; i < cmd_count; ++i) {
-		uint32_t size = cmd->cmdsize();
 		const uint8_t* endOfCmd = ((uint8_t*)cmd)+cmd->cmdsize();
 		if ( endOfCmd > endOfLoadCommands )
 			throwf("load command #%d extends beyond the end of the load commands", i);
@@ -253,6 +268,14 @@ DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLen
 				fSegments.push_back(segCmd);
 				if ( (segCmd->fileoff() == 0) && (segCmd->filesize() != 0) )
 					fBaseAddress = segCmd->vmaddr();
+				if ( fFirstSegment == NULL )
+					fFirstSegment = segCmd;
+				if ( (segCmd->initprot() & VM_PROT_WRITE) != 0 ) {
+					if ( fFirstWritableSegment == NULL )
+						fFirstWritableSegment = segCmd;
+					if ( segCmd->vmaddr() > 0x100000000ULL )
+						fWriteableSegmentWithAddrOver4G = true;
+				}
 				}
 				break;
 			case LC_LOAD_DYLIB:
@@ -274,20 +297,48 @@ DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLen
 				}
 				}
 				break;
+			case LC_DYSYMTAB:
+				fDynamicSymbolTable = (macho_dysymtab_command<P>*)cmd;
+				break;
+			case LC_SYMTAB:
+				{
+					const macho_symtab_command<P>* symtab = (macho_symtab_command<P>*)cmd;
+					fSymbolCount = symtab->nsyms();
+					fSymbols = (const macho_nlist<P>*)((char*)fHeader + symtab->symoff());
+					fStrings = (char*)fHeader + symtab->stroff();
+					fStringsEnd = fStrings + symtab->strsize();
+				}
+				break;
 		}
 		cmd = (const macho_load_command<P>*)endOfCmd;
 	}
 	
-	if ( printRebase )
-		printRebaseInfo();
-	if ( printBind ) 
-		printBindingInfo();
+	if ( printRebase ) {
+		if ( fInfo != NULL )
+			printRebaseInfo();
+		else
+			printRelocRebaseInfo();
+	}
+	if ( printBind ) {
+		if ( fInfo != NULL )
+			printBindingInfo();
+		else
+			printClassicBindingInfo();
+	}
 	if ( printWeakBind ) 
 		printWeakBindingInfo();
-	if ( printLazyBind )
-		printLazyBindingInfo();
-	if ( printExport )
-		printExportInfo();
+	if ( printLazyBind ) {
+		if ( fInfo != NULL )
+			printLazyBindingInfo();
+		else
+			printClassicLazyBindingInfo();
+	}
+	if ( printExport ) {
+		if ( fInfo != NULL )
+			printExportInfo();
+		else
+			printSymbolTableExportInfo();
+	}
 	if ( printOpcodes ) {
 		printRebaseInfoOpcodes();
 		printBindingInfoOpcodes(false);
@@ -428,6 +479,29 @@ const char* DyldInfoPrinter<A>::getSegAndSectName(uint8_t segIndex, pint_t addre
 }
 
 template <typename A>
+uint8_t DyldInfoPrinter<A>::segmentIndexForAddress(pint_t address)
+{
+	for(unsigned int i=0; i < fSegments.size(); ++i) {
+		if ( (fSegments[i]->vmaddr() <= address) && (address < (fSegments[i]->vmaddr()+fSegments[i]->vmsize())) ) {
+			return i;
+		}
+	}
+	throwf("address 0x%llX is not in any segment", (uint64_t)address);
+}
+
+template <typename A>
+typename A::P::uint_t*	DyldInfoPrinter<A>::mappedAddressForVMAddress(pint_t vmaddress)
+{
+	for(unsigned int i=0; i < fSegments.size(); ++i) {
+		if ( (fSegments[i]->vmaddr() <= vmaddress) && (vmaddress < (fSegments[i]->vmaddr()+fSegments[i]->vmsize())) ) {
+			unsigned long offsetInMappedFile = fSegments[i]->fileoff()+vmaddress-fSegments[i]->vmaddr();
+			return (pint_t*)((uint8_t*)fHeader + offsetInMappedFile);
+		}
+	}
+	throwf("address 0x%llX is not in any segment", (uint64_t)vmaddress);
+}
+
+template <typename A>
 const char* DyldInfoPrinter<A>::ordinalName(int libraryOrdinal)
 {
 	switch ( libraryOrdinal) {
@@ -440,11 +514,26 @@ const char* DyldInfoPrinter<A>::ordinalName(int libraryOrdinal)
 	}
 	if ( libraryOrdinal < BIND_SPECIAL_DYLIB_FLAT_LOOKUP )
 		throw "unknown special ordinal";
-	if ( libraryOrdinal > fDylibs.size() )
+	if ( libraryOrdinal > (int)fDylibs.size() )
 		throw "libraryOrdinal out of range";
 	return fDylibs[libraryOrdinal-1];
 }
 
+template <typename A>
+const char* DyldInfoPrinter<A>::classicOrdinalName(int libraryOrdinal)
+{
+	switch ( libraryOrdinal) {
+		case SELF_LIBRARY_ORDINAL:
+			return "this-image";
+		case EXECUTABLE_ORDINAL:
+			return "main-executable";
+		case DYNAMIC_LOOKUP_ORDINAL:
+			return "flat-namespace";
+	}
+	if ( libraryOrdinal > (int)fDylibs.size() )
+		throw "libraryOrdinal out of range";
+	return fDylibs[libraryOrdinal-1];
+}
 
 template <typename A>
 void DyldInfoPrinter<A>::printRebaseInfo()
@@ -453,7 +542,7 @@ void DyldInfoPrinter<A>::printRebaseInfo()
 		printf("no compressed rebase info\n");
 	}
 	else {
-		printf("rebase information:\n");
+		printf("rebase information (from compressed dyld info):\n");
 		printf("segment section          address     type\n");
 
 		const uint8_t* p = (uint8_t*)fHeader + fInfo->rebase_off();
@@ -914,7 +1003,7 @@ void DyldInfoPrinter<A>::printLazyBindingInfo()
 		printf("no compressed lazy binding info\n");
 	}
 	else {
-		printf("lazy binding information:\n");
+		printf("lazy binding information (from lazy_bind part of dyld info):\n");
 		printf("segment section          address    index  dylib            symbol\n");
 		const uint8_t* const start = (uint8_t*)fHeader + fInfo->lazy_bind_off();
 		const uint8_t* const end = &start[fInfo->lazy_bind_size()];
@@ -989,90 +1078,6 @@ void DyldInfoPrinter<A>::printLazyBindingInfo()
 	}
 
 }
-
-#if 0
-		uint8_t type = BIND_TYPE_POINTER;
-		uint8_t flags;
-		uint64_t address = fBaseAddress;
-		const char* symbolName = NULL;
-		int libraryOrdinal = 0;
-		int64_t addend = 0;
-		uint32_t segmentIndex = 0;
-		uint32_t count;
-		uint32_t skip;
-		for (const uint8_t* p = start; p < end; ) {
-			uint8_t immediate = *p & BIND_IMMEDIATE_MASK;
-			uint8_t opcode = *p & BIND_OPCODE_MASK;
-			uint32_t opcodeOffset = p-start;
-			++p;
-			switch (opcode) {
-				case BIND_OPCODE_DONE:
-					printf("0x%08X BIND_OPCODE_DONE\n", opcodeOffset);
-					break;
-				case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
-					libraryOrdinal = immediate;
-					printf("0x%08X BIND_OPCODE_SET_DYLIB_ORDINAL_IMM(%d)\n", opcodeOffset, libraryOrdinal);
-					break;
-				case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
-					libraryOrdinal = read_uleb128(p, end);
-					printf("0x%08X BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB(%d)\n", opcodeOffset, libraryOrdinal);
-					break;
-				case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
-					// the special ordinals are negative numbers
-					if ( immediate == 0 )
-						libraryOrdinal = 0;
-					else {
-						int8_t signExtended = BIND_OPCODE_MASK | immediate;
-						libraryOrdinal = signExtended;
-					}
-					printf("0x%08X BIND_OPCODE_SET_DYLIB_SPECIAL_IMM(%d)\n", opcodeOffset, libraryOrdinal);
-					break;
-				case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
-					flags = immediate;
-					symbolName = (char*)p;
-					while (*p != '\0')
-						++p;
-					++p;
-					printf("0x%08X BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM(0x%02X, %s)\n", opcodeOffset, flags, symbolName);
-					break;
-				case BIND_OPCODE_SET_TYPE_IMM:
-					type = immediate;
-					printf("0x%08X BIND_OPCODE_SET_TYPE_IMM(%d)\n", opcodeOffset, type);
-					break;
-				case BIND_OPCODE_SET_ADDEND_SLEB:
-					addend = read_sleb128(p, end);
-					printf("0x%08X BIND_OPCODE_SET_ADDEND_SLEB(%lld)\n", opcodeOffset, addend);
-					break;
-				case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
-					segmentIndex = immediate;
-					address = read_uleb128(p, end);
-					printf("0x%08X BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB(0x%02X, 0x%08llX)\n", opcodeOffset, segmentIndex, address);
-					break;
-				case BIND_OPCODE_ADD_ADDR_ULEB:
-					skip = read_uleb128(p, end);
-					printf("0x%08X BIND_OPCODE_ADD_ADDR_ULEB(0x%08X)\n", opcodeOffset, skip);
-					break;
-				case BIND_OPCODE_DO_BIND:
-					printf("0x%08X BIND_OPCODE_DO_BIND()\n", opcodeOffset);
-					break;
-				case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
-					skip = read_uleb128(p, end);
-					printf("0x%08X BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB(0x%08X)\n", opcodeOffset, skip);
-					break;
-				case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
-					skip = immediate*sizeof(pint_t) + sizeof(pint_t);
-					printf("0x%08X BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED(0x%08X)\n", opcodeOffset, skip);
-					break;
-				case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
-					count = read_uleb128(p, end);
-					skip = read_uleb128(p, end);
-					printf("0x%08X BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB(%d, 0x%08X)\n", opcodeOffset, count, skip);
-					break;
-				default:
-					throwf("unknown bind opcode %d", *p);
-			}
-		}	
-#endif
 
 template <typename A>
 void DyldInfoPrinter<A>::printLazyBindingOpcodes()
@@ -1216,6 +1221,7 @@ void DyldInfoPrinter<A>::printExportInfo()
 		printf("no compressed export info\n");
 	}
 	else {
+		printf("export information (from trie):\n");
 		const uint8_t* start = (uint8_t*)fHeader + fInfo->export_off();
 		const uint8_t* end = &start[fInfo->export_size()];
 		std::vector<mach_o::trie::Entry> list;
@@ -1241,6 +1247,7 @@ void DyldInfoPrinter<A>::processExportGraphNode(const uint8_t* const start, cons
 	const uint8_t* children = p + terminalSize;
 	if ( terminalSize != 0 ) {
 		uint32_t flags = read_uleb128(p, end);
+		(void)flags; // currently unused
 		uint64_t address = read_uleb128(p, end);
 		printf("\tnode%03ld [ label=%s,addr0x%08llX ];\n", (long)(me-start), cummulativeString, address);
 	}
@@ -1280,8 +1287,307 @@ void DyldInfoPrinter<A>::printExportInfoGraph()
 }
 
 
+template <>
+ppc::P::uint_t DyldInfoPrinter<ppc>::relocBase()
+{
+	if ( fHeader->flags() & MH_SPLIT_SEGS )
+		return fFirstWritableSegment->vmaddr();
+	else
+		return fFirstSegment->vmaddr();
+}
+
+template <>
+ppc64::P::uint_t DyldInfoPrinter<ppc64>::relocBase()
+{
+	if ( fWriteableSegmentWithAddrOver4G ) 
+		return fFirstWritableSegment->vmaddr();
+	else
+		return fFirstSegment->vmaddr();
+}
+
+template <>
+x86::P::uint_t DyldInfoPrinter<x86>::relocBase()
+{
+	if ( fHeader->flags() & MH_SPLIT_SEGS )
+		return fFirstWritableSegment->vmaddr();
+	else
+		return fFirstSegment->vmaddr();
+}
+
+template <>
+x86_64::P::uint_t DyldInfoPrinter<x86_64>::relocBase()
+{
+	// check for split-seg
+	return fFirstWritableSegment->vmaddr();
+}
+
+template <>
+arm::P::uint_t DyldInfoPrinter<arm>::relocBase()
+{
+	if ( fHeader->flags() & MH_SPLIT_SEGS )
+		return fFirstWritableSegment->vmaddr();
+	else
+		return fFirstSegment->vmaddr();
+}
 
 
+template <>
+const char*	DyldInfoPrinter<ppc>::relocTypeName(uint8_t r_type)
+{
+	if ( r_type == GENERIC_RELOC_VANILLA )
+		return "pointer";
+	else if ( r_type == PPC_RELOC_PB_LA_PTR )
+		return "pb pointer";
+	else
+		return "??";
+}
+	
+template <>
+const char*	DyldInfoPrinter<ppc64>::relocTypeName(uint8_t r_type)
+{
+	if ( r_type == GENERIC_RELOC_VANILLA )
+		return "pointer";
+	else
+		return "??";
+}
+	
+template <>
+const char*	DyldInfoPrinter<x86>::relocTypeName(uint8_t r_type)
+{
+	if ( r_type == GENERIC_RELOC_VANILLA )
+		return "pointer";
+	else if ( r_type == GENERIC_RELOC_PB_LA_PTR )
+		return "pb pointer";
+	else
+		return "??";
+}
+	
+template <>
+const char*	DyldInfoPrinter<x86_64>::relocTypeName(uint8_t r_type)
+{
+	if ( r_type == X86_64_RELOC_UNSIGNED )
+		return "pointer";
+	else
+		return "??";
+}
+	
+template <>
+const char*	DyldInfoPrinter<arm>::relocTypeName(uint8_t r_type)
+{
+	if ( r_type == ARM_RELOC_VANILLA )
+		return "pointer";
+	else if ( r_type == ARM_RELOC_PB_LA_PTR )
+		return "pb pointer";
+	else
+		return "??";
+}
+	
+
+template <typename A>
+void DyldInfoPrinter<A>::printRelocRebaseInfo()
+{
+	if ( fDynamicSymbolTable == NULL ) {
+		printf("no classic dynamic symbol table");
+	}
+	else {
+		printf("rebase information (from local relocation records and indirect symbol table):\n");
+		printf("segment  section          address     type\n");
+		// walk all local relocations
+		pint_t rbase = relocBase();
+		const macho_relocation_info<P>* const relocsStart = (macho_relocation_info<P>*)(((uint8_t*)fHeader) + fDynamicSymbolTable->locreloff());
+		const macho_relocation_info<P>* const relocsEnd = &relocsStart[fDynamicSymbolTable->nlocrel()];
+		for (const macho_relocation_info<P>* reloc=relocsStart; reloc < relocsEnd; ++reloc) {
+			if ( (reloc->r_address() & R_SCATTERED) == 0 ) {
+				pint_t addr = reloc->r_address() + rbase;
+				uint8_t segIndex = segmentIndexForAddress(addr);
+				const char* typeName = relocTypeName(reloc->r_type());
+				const char* segName  = segmentName(segIndex);
+				const char* sectName = sectionName(segIndex, addr);
+				printf("%-8s %-16s 0x%08llX  %s\n", segName, sectName, (uint64_t)addr, typeName);
+			} 
+			else {
+				const macho_scattered_relocation_info<P>* sreloc = (macho_scattered_relocation_info<P>*)reloc;
+				pint_t addr = sreloc->r_address() + rbase;
+				uint8_t segIndex = segmentIndexForAddress(addr);
+				const char* typeName = relocTypeName(sreloc->r_type());
+				const char* segName  = segmentName(segIndex);
+				const char* sectName = sectionName(segIndex, addr);
+				printf("%-8s %-16s 0x%08llX  %s\n", segName, sectName, (uint64_t)addr, typeName);
+			}
+		}
+		// look for local non-lazy-pointers
+		const uint32_t* indirectSymbolTable =  (uint32_t*)(((uint8_t*)fHeader) + fDynamicSymbolTable->indirectsymoff());
+		uint8_t segIndex = 0;
+		for(typename std::vector<const macho_segment_command<P>*>::iterator segit=fSegments.begin(); segit != fSegments.end(); ++segit, ++segIndex) {
+			const macho_segment_command<P>* segCmd = *segit;
+			macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+			macho_section<P>* const sectionsEnd = &sectionsStart[segCmd->nsects()];
+			for(macho_section<P>* sect = sectionsStart; sect < sectionsEnd; ++sect) {
+				uint8_t type = sect->flags() & SECTION_TYPE;
+				if ( type == S_NON_LAZY_SYMBOL_POINTERS ) {
+					uint32_t indirectOffset = sect->reserved1();
+					uint32_t count = sect->size() / sizeof(pint_t);
+					for (uint32_t i=0; i < count; ++i) {
+						uint32_t symbolIndex = E::get32(indirectSymbolTable[indirectOffset+i]);
+						if ( symbolIndex == INDIRECT_SYMBOL_LOCAL ) {
+							pint_t addr = sect->addr() + i*sizeof(pint_t);							
+							const char* typeName = "pointer";
+							const char* segName  = segmentName(segIndex);
+							const char* sectName = sectionName(segIndex, addr);
+							printf("%-8s %-16s 0x%08llX  %s\n", segName, sectName, (uint64_t)addr, typeName);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+
+template <typename A>
+void DyldInfoPrinter<A>::printSymbolTableExportInfo()
+{
+	if ( fDynamicSymbolTable == NULL ) {
+		printf("no classic dynamic symbol table");
+	}
+	else {
+		printf("export information (from symbol table):\n");
+		const macho_nlist<P>* lastExport = &fSymbols[fDynamicSymbolTable->iextdefsym()+fDynamicSymbolTable->nextdefsym()];
+		for (const macho_nlist<P>* sym = &fSymbols[fDynamicSymbolTable->iextdefsym()]; sym < lastExport; ++sym) {
+			const char* flags = "";
+			if ( sym->n_desc() & N_WEAK_DEF )
+				flags = "[weak_def] ";
+			pint_t thumb = 0;
+			if ( sym->n_desc() & N_ARM_THUMB_DEF )
+				thumb = 1;
+			printf("0x%08llX %s%s\n", sym->n_value()+thumb, flags, &fStrings[sym->n_strx()]);
+		}
+	}
+}
+
+ 
+template <typename A>
+void DyldInfoPrinter<A>::printClassicBindingInfo()
+{
+	if ( fDynamicSymbolTable == NULL ) {
+		printf("no classic dynamic symbol table");
+	}
+	else {
+		printf("binding information (from relocations and indirect symbol table):\n");
+		printf("segment  section          address        type   weak  addend dylib            symbol\n");
+		// walk all external relocations
+		pint_t rbase = relocBase();
+		const macho_relocation_info<P>* const relocsStart = (macho_relocation_info<P>*)(((uint8_t*)fHeader) + fDynamicSymbolTable->extreloff());
+		const macho_relocation_info<P>* const relocsEnd = &relocsStart[fDynamicSymbolTable->nextrel()];
+		for (const macho_relocation_info<P>* reloc=relocsStart; reloc < relocsEnd; ++reloc) {
+			pint_t addr = reloc->r_address() + rbase;
+			uint32_t symbolIndex = reloc->r_symbolnum();
+			const macho_nlist<P>* sym = &fSymbols[symbolIndex];
+			const char* symbolName = &fStrings[sym->n_strx()];
+			const char* weak_import = (sym->n_desc() & N_WEAK_REF) ? "weak" : "";
+			const char* fromDylib = classicOrdinalName(GET_LIBRARY_ORDINAL(sym->n_desc()));
+			uint8_t segIndex = segmentIndexForAddress(addr);
+			const char* typeName = relocTypeName(reloc->r_type());
+			const char* segName  = segmentName(segIndex);
+			const char* sectName = sectionName(segIndex, addr);
+			const pint_t* addressMapped = mappedAddressForVMAddress(addr);
+			int64_t addend = P::getP(*addressMapped); 
+			if ( fHeader->flags() & MH_PREBOUND ) {
+				// In prebound binaries the content is already pointing to the target.
+				// To get the addend requires subtracting out the base address it was prebound to.
+				addend -= sym->n_value();
+			}
+			printf("%-8s %-16s 0x%08llX %10s %4s  %5lld %-16s %s\n", segName, sectName, (uint64_t)addr, 
+									typeName, weak_import, addend, fromDylib, symbolName);
+		}
+		// look for non-lazy pointers
+		const uint32_t* indirectSymbolTable =  (uint32_t*)(((uint8_t*)fHeader) + fDynamicSymbolTable->indirectsymoff());
+		for(typename std::vector<const macho_segment_command<P>*>::iterator segit=fSegments.begin(); segit != fSegments.end(); ++segit) {
+			const macho_segment_command<P>* segCmd = *segit;
+			macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+			macho_section<P>* const sectionsEnd = &sectionsStart[segCmd->nsects()];
+			for(macho_section<P>* sect = sectionsStart; sect < sectionsEnd; ++sect) {
+				uint8_t type = sect->flags() & SECTION_TYPE;
+				if ( type == S_NON_LAZY_SYMBOL_POINTERS ) {
+					uint32_t indirectOffset = sect->reserved1();
+					uint32_t count = sect->size() / sizeof(pint_t);
+					for (uint32_t i=0; i < count; ++i) {
+						uint32_t symbolIndex = E::get32(indirectSymbolTable[indirectOffset+i]);
+						if ( symbolIndex != INDIRECT_SYMBOL_LOCAL ) {
+							const macho_nlist<P>* sym = &fSymbols[symbolIndex];
+							const char* symbolName = &fStrings[sym->n_strx()];
+							const char* weak_import = (sym->n_desc() & N_WEAK_REF) ? "weak" : "";
+							const char* fromDylib = classicOrdinalName(GET_LIBRARY_ORDINAL(sym->n_desc()));
+							pint_t addr = sect->addr() + i*sizeof(pint_t);
+							uint8_t segIndex = segmentIndexForAddress(addr);
+							const char* typeName = "pointer";
+							const char* segName  = segmentName(segIndex);
+							const char* sectName = sectionName(segIndex, addr);
+							int64_t addend = 0;
+							printf("%-8s %-16s 0x%08llX %10s %4s  %5lld %-16s %s\n", segName, sectName, (uint64_t)addr, 
+																	typeName, weak_import, addend, fromDylib, symbolName);
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+
+template <typename A>
+void DyldInfoPrinter<A>::printClassicLazyBindingInfo()
+{
+	if ( fDynamicSymbolTable == NULL ) {
+		printf("no classic dynamic symbol table");
+	}
+	else {
+		printf("lazy binding information (from section records and indirect symbol table):\n");
+		printf("segment section          address    index  dylib            symbol\n");
+		const uint32_t* indirectSymbolTable =  (uint32_t*)(((uint8_t*)fHeader) + fDynamicSymbolTable->indirectsymoff());
+		for(typename std::vector<const macho_segment_command<P>*>::iterator segit=fSegments.begin(); segit != fSegments.end(); ++segit) {
+			const macho_segment_command<P>* segCmd = *segit;
+			macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+			macho_section<P>* const sectionsEnd = &sectionsStart[segCmd->nsects()];
+			for(macho_section<P>* sect = sectionsStart; sect < sectionsEnd; ++sect) {
+				uint8_t type = sect->flags() & SECTION_TYPE;
+				if ( type == S_LAZY_SYMBOL_POINTERS ) {
+					uint32_t indirectOffset = sect->reserved1();
+					uint32_t count = sect->size() / sizeof(pint_t);
+					for (uint32_t i=0; i < count; ++i) {
+						uint32_t symbolIndex = E::get32(indirectSymbolTable[indirectOffset+i]);
+						const macho_nlist<P>* sym = &fSymbols[symbolIndex];
+						const char* symbolName = &fStrings[sym->n_strx()];
+						const char* fromDylib = classicOrdinalName(GET_LIBRARY_ORDINAL(sym->n_desc()));
+						pint_t addr = sect->addr() + i*sizeof(pint_t);
+						uint8_t segIndex = segmentIndexForAddress(addr);
+						const char* segName  = segmentName(segIndex);
+						const char* sectName = sectionName(segIndex, addr);
+						printf("%-7s %-16s 0x%08llX 0x%04X %-16s %s\n", segName, sectName, (uint64_t)addr, symbolIndex, fromDylib, symbolName);
+					}
+				}
+				else if ( (type == S_SYMBOL_STUBS) && (((sect->flags() & S_ATTR_SELF_MODIFYING_CODE) != 0)) && (sect->reserved2() == 5) ) {
+					// i386 self-modifying stubs
+					uint32_t indirectOffset = sect->reserved1();
+					uint32_t count = sect->size() / 5;
+					for (uint32_t i=0; i < count; ++i) {
+						uint32_t symbolIndex = E::get32(indirectSymbolTable[indirectOffset+i]);
+						if ( symbolIndex != INDIRECT_SYMBOL_ABS ) {
+							const macho_nlist<P>* sym = &fSymbols[symbolIndex];
+							const char* symbolName = &fStrings[sym->n_strx()];
+							const char* fromDylib = classicOrdinalName(GET_LIBRARY_ORDINAL(sym->n_desc()));
+							pint_t addr = sect->addr() + i*5;
+							uint8_t segIndex = segmentIndexForAddress(addr);
+							const char* segName  = segmentName(segIndex);
+							const char* sectName = sectionName(segIndex, addr);
+							printf("%-7s %-16s 0x%08llX 0x%04X %-16s %s\n", segName, sectName, (uint64_t)addr, symbolIndex, fromDylib, symbolName);
+						}
+					}
+				}
+			}
+		}
+	}
+}
 
 static void dump(const char* path)
 {
@@ -1306,7 +1612,9 @@ static void dump(const char* path)
 				size_t offset = OSSwapBigToHostInt32(archs[i].offset);
 				size_t size = OSSwapBigToHostInt32(archs[i].size);
 				cpu_type_t cputype = OSSwapBigToHostInt32(archs[i].cputype);
-				if ( cputype == (uint32_t)sPreferredArch ) {	
+				cpu_type_t cpusubtype = OSSwapBigToHostInt32(archs[i].cpusubtype);
+				if ( (cputype == sPreferredArch) 
+					&& ((sPreferredSubArch==0) || (sPreferredSubArch==cpusubtype)) ) {	
 					switch(cputype) {
 					case CPU_TYPE_POWERPC:
 						if ( DyldInfoPrinter<ppc>::validFile(p + offset) )
@@ -1404,6 +1712,24 @@ int main(int argc, const char* argv[])
 						sPreferredArch = CPU_TYPE_I386;
 					else if ( strcmp(arch, "x86_64") == 0 )
 						sPreferredArch = CPU_TYPE_X86_64;
+					else if ( strcmp(arch, "arm") == 0 )
+						sPreferredArch = CPU_TYPE_ARM;
+					else if ( strcmp(arch, "armv4t") == 0 ) {
+						sPreferredArch = CPU_TYPE_ARM;
+						sPreferredSubArch = CPU_SUBTYPE_ARM_V4T;
+					}
+					else if ( strcmp(arch, "armv5") == 0 ) {
+						sPreferredArch = CPU_TYPE_ARM;
+						sPreferredSubArch = CPU_SUBTYPE_ARM_V5TEJ;
+					}
+					else if ( strcmp(arch, "armv6") == 0 ) {
+						sPreferredArch = CPU_TYPE_ARM;
+						sPreferredSubArch = CPU_SUBTYPE_ARM_V6;
+					}
+					else if ( strcmp(arch, "armv7") == 0 ) {
+						sPreferredArch = CPU_TYPE_ARM;
+						sPreferredSubArch = CPU_SUBTYPE_ARM_V7;
+					}
 					else 
 						throwf("unknown architecture %s", arch);
 				}

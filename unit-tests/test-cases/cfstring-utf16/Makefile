@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2008 Apple Inc. All rights reserved.
+# Copyright (c) 2008-2009 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -24,17 +24,17 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Test that utf16 cfstring literals are not coalesced.
+# Test that utf16 cfstring literals are coalesced.
 # There is 3 CFSTR in foo.m and 1 CFSTR in bar.m
-# After coalescing and dead stripping there should be only one CFSTR in the output
+# After coalescing and dead stripping there should be only two CFSTR in the output
 #
 
 ifeq (,${findstring 64,$(ARCH)})
-	CFSTRING_SIZE = 48
+	CFSTRING_SIZE = 32
 else
-	CFSTRING_SIZE = 96
+	CFSTRING_SIZE = 64
 endif
-	USTRING_SIZE = 37
+	USTRING_SIZE = 27
 
 
 

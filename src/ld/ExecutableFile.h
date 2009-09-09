@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2005-2007 Apple Inc. All rights reserved.
+ * Copyright (c) 2005-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -51,15 +51,18 @@ namespace ExecutableFile {
 		virtual ObjectFile::Atom&						makeObjcInfoAtom(ObjectFile::Reader::ObjcConstraint objcContraint, 
 																		bool objcReplacementClasses) = 0;
 		virtual class ObjectFile::Atom*					getUndefinedProxyAtom(const char* name) = 0;
+		virtual void									addSynthesizedAtoms(const std::vector<class ObjectFile::Atom*>& existingAtoms,
+																			  class ObjectFile::Atom* dyldClassicHelperAtom,
+																			  class ObjectFile::Atom* dyldCompressedHelperAtom,
+																			  class ObjectFile::Atom* dyldLazyDylibHelperAtom,
+																			  bool biggerThanTwoGigs,
+																			  uint32_t dylibSymbolCount,
+																			  std::vector<class ObjectFile::Atom*>& newAtoms) = 0;
 		virtual uint64_t								write(std::vector<class ObjectFile::Atom*>& atoms,
 															  std::vector<class ObjectFile::Reader::Stab>& stabs,
 															  class ObjectFile::Atom* entryPointAtom,
-															  class ObjectFile::Atom* dyldClassicHelperAtom,
-															  class ObjectFile::Atom* dyldCompressedHelperAtom,
-															  class ObjectFile::Atom* dyldLazyDylibHelperAtom,
 															  bool createUUID, bool canScatter,
 															  ObjectFile::Reader::CpuConstraint cpuConstraint,
-															  bool biggerThanTwoGigs,
 															  std::set<const class ObjectFile::Atom*>& atomsThatOverrideWeak,
 															  bool hasExternalWeakDefinitions) = 0;
 

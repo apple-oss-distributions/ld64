@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2008 Apple Inc. All rights reserved.
+# Copyright (c) 2009 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -24,8 +24,8 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Check that -mllvm optiions work. Verify --disable-inlining
-# results in foo() not being inlined
+# <rdar://problem/6927148> link failure with -O4 on i386#
+# Check that LTO can bring in an ObjC class from an archive member
 #
 
 LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
@@ -34,12 +34,10 @@ LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
 run: all
 
 all:
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.c -c -o main.o -fvisibility=hidden
-	${LLVMGCC} ${CCFLAGS} main.o -o main
-	nm main | grep  _foo | ${FAIL_IF_STDIN}
-	${LLVMGCC} ${CCFLAGS} main.o -o main2 -fvisibility=hidden -Wl,-mllvm -Wl,--disable-inlining 
-	nm main2 | grep  _foo | ${FAIL_IF_EMPTY}
+	${CC} ${CCFLAGS} foo.c -dynamiclib -o libfoo.dylib
+	${LLVMGCC} ${CCFLAGS} --emit-llvm main.c -c -o main.o
+	${LLVMGCC} ${CCFLAGS} main.o -o main libfoo.dylib
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:
-	rm  main  main.o main2
+	rm -rf main main.o libfoo.dylib

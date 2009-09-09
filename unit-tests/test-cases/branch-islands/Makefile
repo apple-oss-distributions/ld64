@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2008 Apple Inc. All rights reserved.
+# Copyright (c) 2008-2009 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,20 +23,12 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-ifeq ($(ARCH),armv6)
-	ARCH_FLAGS = -mlong-branch
-else
-	ARCH_FLAGS = 
-endif
-
-
 
 #
 # Simple test for branch islands
 #
 
 run: all
-
 
 
 all:

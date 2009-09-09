@@ -107,6 +107,7 @@ template <typename A> class FastStubHelperHelperAtom;
 template <typename A> class LazyPointerAtom;
 template <typename A> class NonLazyPointerAtom;
 template <typename A> class DylibLoadCommandsAtom;
+template <typename A> class BranchIslandAtom;
 
 
 // SectionInfo should be nested inside Writer, but I can't figure out how to make the type accessible to the Atom classes
@@ -286,15 +287,18 @@ public:
 	virtual ObjectFile::Atom&						makeObjcInfoAtom(ObjectFile::Reader::ObjcConstraint objcContraint, 
 																		bool objcReplacementClasses);
 	virtual class ObjectFile::Atom*					getUndefinedProxyAtom(const char* name);
+	virtual void									addSynthesizedAtoms(const std::vector<class ObjectFile::Atom*>& existingAtoms,
+																		  class ObjectFile::Atom* dyldClassicHelperAtom,
+																		  class ObjectFile::Atom* dyldCompressedHelperAtom,
+																		  class ObjectFile::Atom* dyldLazyDylibHelperAtom,
+																			bool biggerThanTwoGigs,
+																			uint32_t dylibSymbolCount,
+																			std::vector<class ObjectFile::Atom*>& newAtoms);
 	virtual uint64_t								write(std::vector<class ObjectFile::Atom*>& atoms,
 														  std::vector<class ObjectFile::Reader::Stab>& stabs,
 														  class ObjectFile::Atom* entryPointAtom,
-														  class ObjectFile::Atom* dyldClassicHelperAtom,
-														  class ObjectFile::Atom* dyldCompressedHelperAtom,
-														  class ObjectFile::Atom* dyldLazyDylibHelperAtom,
 														  bool createUUID, bool canScatter,
 														  ObjectFile::Reader::CpuConstraint cpuConstraint,
-														  bool biggerThanTwoGigs,
 														  std::set<const class ObjectFile::Atom*>& atomsThatOverrideWeak,
 														  bool hasExternalWeakDefinitions);
 
@@ -305,15 +309,19 @@ private:
 	enum RelocKind { kRelocNone, kRelocInternal, kRelocExternal };
 
 	void						assignFileOffsets();
-	void						synthesizeStubs();
-	void						synthesizeKextGOT();
+	void						synthesizeStubs(const std::vector<class ObjectFile::Atom*>& existingAtoms,
+													std::vector<class ObjectFile::Atom*>& newAtoms);
+	void						synthesizeKextGOT(const std::vector<class ObjectFile::Atom*>& existingAtoms,
+									std::vector<class ObjectFile::Atom*>& newAtoms);
 	void						createSplitSegContent();
 	void						synthesizeUnwindInfoTable();
 	void						insertDummyStubs();
 	void						partitionIntoSections();
 	bool						addBranchIslands();
-	bool						addPPCBranchIslands();
-	bool						isBranch24Reference(uint8_t kind);
+	bool						createBranchIslands();
+	bool						isBranchThatMightNeedIsland(uint8_t kind);
+	uint32_t					textSizeWhenMightNeedBranchIslands();
+	uint32_t					maxDistanceBetweenIslands(); 
 	void						adjustLoadCommandsAndPadding();
 	void						createDynamicLinkerCommand();
 	void						createDylibCommands();
@@ -422,6 +430,7 @@ private:
 	friend class LazyPointerAtom<A>;
 	friend class NonLazyPointerAtom<A>;
 	friend class DylibLoadCommandsAtom<A>;
+	friend class BranchIslandAtom<A>;
 
 	const char*										fFilePath;
 	Options&										fOptions;
@@ -493,6 +502,7 @@ private:
 	uint32_t										fSymbolTableImportCount;
 	uint32_t										fSymbolTableImportStartIndex;
 	uint32_t										fLargestAtomSize;
+	uint32_t										fDylibSymbolCountUpperBound;
 	bool											fEmitVirtualSections;
 	bool											fHasWeakExports;
 	bool											fReferencesWeakImports;
@@ -501,6 +511,7 @@ private:
 	bool											fNoReExportedDylibs;
 	bool											fBiggerThanTwoGigs;
 	bool											fSlideable;
+	bool											fHasThumbBranches;
 	std::map<const ObjectFile::Atom*,bool>			fWeakImportMap;
 	std::set<const ObjectFile::Reader*>				fDylibReadersWithNonWeakImports;
 	std::set<const ObjectFile::Reader*>				fDylibReadersWithWeakImports;
@@ -1456,17 +1467,25 @@ template <typename A>
 class BranchIslandAtom : public WriterAtom<A>
 {
 public:
-											BranchIslandAtom(Writer<A>& writer, const char* name, int islandRegion, ObjectFile::Atom& target, uint32_t targetOffset);
+											BranchIslandAtom(Writer<A>& writer, const char* name, int islandRegion, ObjectFile::Atom& target, 
+																		ObjectFile::Atom& finalTarget, uint32_t finalTargetOffset);
 	virtual const char*						getName() const				{ return fName; }
 	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
 	virtual uint64_t						getSize() const;
+	virtual bool							isThumb() const				{ return (fIslandKind == kBranchIslandToThumb2); }
+	virtual ObjectFile::Atom::ContentType	getContentType() const		{ return ObjectFile::Atom::kBranchIsland; }
+	virtual ObjectFile::Atom::SymbolTableInclusion	getSymbolTableInclusion() const	{ return ObjectFile::Atom::kSymbolTableIn; }
 	virtual const char*						getSectionName() const		{ return "__text"; }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
+	uint64_t								getFinalTargetAdress() const { return fFinalTarget.getAddress() + fFinalTargetOffset; }
 private:
 	using WriterAtom<A>::fWriter;
+	enum IslandKind { kBranchIslandToARM, kBranchIslandToThumb2, kBranchIslandToThumb1 };
 	const char*								fName;
 	ObjectFile::Atom&						fTarget;
-	uint32_t								fTargetOffset;
+	ObjectFile::Atom&						fFinalTarget;
+	uint32_t								fFinalTargetOffset;
+	IslandKind								fIslandKind;
 };
 
 template <typename A>
@@ -1476,20 +1495,26 @@ public:
 											StubAtom(Writer<A>& writer, ObjectFile::Atom& target, bool forLazyDylib);
 	virtual const char*						getName() const				{ return fName; }
 	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
+	virtual ObjectFile::Atom::ContentType	getContentType() const		{ return ObjectFile::Atom::kStub; }
 	virtual uint64_t						getSize() const;
 	virtual ObjectFile::Alignment			getAlignment() const;
 	virtual const char*						getSectionName() const		{ return "__symbol_stub1"; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 	ObjectFile::Atom*						getTarget()					{ return &fTarget; }
+	virtual uint32_t						getOrdinal() const			{ return fSortingOrdinal; }
+	void									setSortingOrdinal(uint32_t o) { fSortingOrdinal = o; }
 private:
 	static const char*						stubName(const char* importName);
-	bool									pic() const					{ return fWriter.fSlideable; }
+	friend class LazyPointerAtom<A>;
 	using WriterAtom<A>::fWriter;
+	enum StubKind { kStubPIC, kStubNoPIC, kStubShort, kJumpTable };
 	const char*								fName;
 	ObjectFile::Atom&						fTarget;
 	std::vector<ObjectFile::Reference*>		fReferences;
 	bool									fForLazyDylib;
+	StubKind								fKind;
+	uint32_t								fSortingOrdinal;
 };
 
 
@@ -1501,11 +1526,13 @@ public:
 	virtual const char*								getName() const					{ return " stub helpers"; }  // name sorts to start of helpers
 	virtual ObjectFile::Atom::SymbolTableInclusion	getSymbolTableInclusion() const	{ return ObjectFile::Atom::kSymbolTableIn; }
 	virtual ObjectFile::Atom::Scope					getScope() const				{ return ObjectFile::Atom::scopeLinkageUnit; }
+	virtual ObjectFile::Atom::ContentType			getContentType() const			{ return ObjectFile::Atom::kStubHelper; }
 	virtual uint64_t								getSize() const;
 	virtual const char*								getSectionName() const			{ return "__stub_helper"; }
 	virtual std::vector<ObjectFile::Reference*>&	getReferences() const			{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual void									copyRawContent(uint8_t buffer[]) const;
 	virtual ObjectFile::Alignment					getAlignment() const			{ return ObjectFile::Alignment(0); }
+	virtual uint32_t								getOrdinal() const				{ return 0; }
 protected:
 	using WriterAtom<A>::fWriter;
 	std::vector<ObjectFile::Reference*>		fReferences;
@@ -1519,11 +1546,13 @@ public:
 	virtual const char*								getName() const					{ return " stub helpers"; }  // name sorts to start of helpers
 	virtual ObjectFile::Atom::SymbolTableInclusion	getSymbolTableInclusion() const	{ return ObjectFile::Atom::kSymbolTableIn; }
 	virtual ObjectFile::Atom::Scope					getScope() const				{ return ObjectFile::Atom::scopeLinkageUnit; }
+	virtual ObjectFile::Atom::ContentType			getContentType() const			{ return ObjectFile::Atom::kStubHelper; }
 	virtual uint64_t								getSize() const;
 	virtual const char*								getSectionName() const			{ return "__stub_helper"; }
 	virtual std::vector<ObjectFile::Reference*>&	getReferences() const			{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual void									copyRawContent(uint8_t buffer[]) const;
 	virtual ObjectFile::Alignment					getAlignment() const			{ return ObjectFile::Alignment(0); }
+	virtual uint32_t								getOrdinal() const				{ return 0; }
 protected:
 	using WriterAtom<A>::fWriter;
 	std::vector<ObjectFile::Reference*>		fReferences;
@@ -1542,10 +1571,12 @@ public:
 
 	virtual const char*						getName() const				{ return fName; }
 	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
+	virtual ObjectFile::Atom::ContentType	getContentType() const		{ return ObjectFile::Atom::kStubHelper; }
 	virtual const char*						getSectionName() const		{ return "__stub_helper"; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const	{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	ObjectFile::Atom*						getTarget()					{ return &fTarget; }
 	virtual ObjectFile::Alignment			getAlignment() const		{ return ObjectFile::Alignment(0); }
+	virtual uint32_t						getOrdinal() const			{ return 1; }
 protected:
 	static const char*						stubName(const char* importName);
 	using WriterAtom<A>::fWriter;
@@ -1601,14 +1632,17 @@ public:
 											LazyPointerAtom(Writer<A>& writer, ObjectFile::Atom& target, 
 															StubAtom<A>& stub, bool forLazyDylib);
 	virtual const char*						getName() const				{ return fName; }
-	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
+	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeTranslationUnit; }
+	virtual ObjectFile::Atom::ContentType	getContentType() const		{ return fForLazyDylib ? ObjectFile::Atom::kLazyDylibPointer : ObjectFile::Atom::kLazyPointer; }
 	virtual uint64_t						getSize() const				{ return sizeof(typename A::P::uint_t); }
-	virtual const char*						getSectionName() const		{ return fForLazyDylib ? "__ld_symbol_ptr" : "__la_symbol_ptr"; }
+	virtual const char*						getSectionName() const;
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 	ObjectFile::Atom*						getTarget()					{ return &fExternalTarget; }
 	void									setLazyBindingInfoOffset(uint32_t off) { fLazyBindingOffset = off; }
 	uint32_t								getLazyBindingInfoOffset()	{ return fLazyBindingOffset; }
+	virtual uint32_t						getOrdinal() const			{ return fSortingOrdinal; }
+	void									setSortingOrdinal(uint32_t o) { fSortingOrdinal = o; }
 private:
 	using WriterAtom<A>::fWriter;
 	static const char*						lazyPointerName(const char* importName);
@@ -1617,7 +1651,9 @@ private:
 	ObjectFile::Atom&						fExternalTarget;
 	std::vector<ObjectFile::Reference*>		fReferences;
 	bool									fForLazyDylib;
+	bool									fCloseStub;
 	uint32_t								fLazyBindingOffset;
+	uint32_t								fSortingOrdinal;
 };
 
 
@@ -1630,17 +1666,21 @@ public:
 											NonLazyPointerAtom(Writer<A>& writer);
 	virtual const char*						getName() const				{ return fName; }
 	virtual ObjectFile::Atom::Scope			getScope() const			{ return ObjectFile::Atom::scopeLinkageUnit; }
+	virtual ObjectFile::Atom::ContentType	getContentType() const		{ return ObjectFile::Atom::kNonLazyPointer; }
 	virtual uint64_t						getSize() const				{ return sizeof(typename A::P::uint_t); }
 	virtual const char*						getSectionName() const		{ return (fWriter.fOptions.outputKind() == Options::kKextBundle) ? "__got" : "__nl_symbol_ptr"; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const		{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
 	virtual void							copyRawContent(uint8_t buffer[]) const;
 	ObjectFile::Atom*						getTarget()					{ return fTarget; }
+	virtual uint32_t						getOrdinal() const			{ return fSortingOrdinal; }
+	void									setSortingOrdinal(uint32_t o) { fSortingOrdinal = o; }
 private:
 	using WriterAtom<A>::fWriter;
 	static const char*						nonlazyPointerName(const char* importName);
 	const char*								fName;
 	ObjectFile::Atom*						fTarget;
 	std::vector<ObjectFile::Reference*>		fReferences;
+	uint32_t								fSortingOrdinal;
 };
 
 
@@ -1958,13 +1998,76 @@ void FastStubHelperHelperAtom<x86>::copyRawContent(uint8_t buffer[]) const
 	buffer[2]  = 0x00;
 	buffer[3]  = 0x00;
 	buffer[4]  = 0x00;
-	buffer[5]  = 0xFF;		// jmp *_fast_lazy_bind(%rip)
+	buffer[5]  = 0xFF;		// jmp *_fast_lazy_bind
 	buffer[6]  = 0x25;
 	buffer[7]  = 0x00;
 	buffer[8]  = 0x00;
 	buffer[9]  = 0x00;
 	buffer[10] = 0x00;
 	buffer[11] = 0x90;		// nop
+}
+
+
+template <>
+FastStubHelperHelperAtom<arm>::FastStubHelperHelperAtom(Writer<arm>& writer)
+	: WriterAtom<arm>(writer, Segment::fgTextSegment)
+{
+	fReferences.push_back(new WriterReference<arm>(28, arm::kPointerDiff, new NonLazyPointerAtom<arm>(writer), 0, this, 16));
+	fReferences.push_back(new WriterReference<arm>(32, arm::kPointerDiff, writer.fFastStubGOTAtom, 0, this, 28));
+}
+
+template <>
+uint64_t FastStubHelperHelperAtom<arm>::getSize() const
+{
+	return 36;
+}
+
+template <>
+void FastStubHelperHelperAtom<arm>::copyRawContent(uint8_t buffer[]) const
+{
+	// push lazy-info-offset
+	OSWriteLittleInt32(&buffer[ 0], 0, 0xe52dc004); // str ip, [sp, #-4]!
+	// push address of dyld_mageLoaderCache
+	OSWriteLittleInt32(&buffer[ 4], 0, 0xe59fc010); // ldr	ip, L1
+	OSWriteLittleInt32(&buffer[ 8], 0, 0xe08fc00c); // add	ip, pc, ip
+	OSWriteLittleInt32(&buffer[12], 0, 0xe52dc004); // str ip, [sp, #-4]!
+	// jump through _fast_lazy_bind
+	OSWriteLittleInt32(&buffer[16], 0, 0xe59fc008); // ldr	ip, L2
+	OSWriteLittleInt32(&buffer[20], 0, 0xe08fc00c); // add	ip, pc, ip
+	OSWriteLittleInt32(&buffer[24], 0, 0xe59cf000); // ldr	pc, [ip]
+	OSWriteLittleInt32(&buffer[28], 0, 0x00000000); // L1: .long fFastStubGOTAtom - (helperhelper+16)
+	OSWriteLittleInt32(&buffer[32], 0, 0x00000000); // L2: .long _fast_lazy_bind - (helperhelper+28)
+}
+
+template <>
+ObjectFile::Alignment StubHelperAtom<arm>::getAlignment() const		{ return ObjectFile::Alignment(2); }
+
+template <>
+FastStubHelperAtom<arm>::FastStubHelperAtom(Writer<arm>& writer, ObjectFile::Atom& target, 
+											class LazyPointerAtom<arm>& lazyPointer, bool forLazyDylib)
+	: StubHelperAtom<arm>(writer, target, lazyPointer, forLazyDylib)
+{
+	if ( fgHelperHelperAtom == NULL ) {
+		fgHelperHelperAtom = new FastStubHelperHelperAtom<arm>::FastStubHelperHelperAtom(fWriter);
+		fWriter.fAllSynthesizedStubHelpers.push_back(fgHelperHelperAtom);
+	}
+	fReferences.push_back(new WriterReference<arm>(4, arm::kBranch24, fgHelperHelperAtom));
+}
+
+template <>
+uint64_t FastStubHelperAtom<arm>::getSize() const
+{
+	return 12;
+}
+
+template <>
+void FastStubHelperAtom<arm>::copyRawContent(uint8_t buffer[]) const
+{
+	OSWriteLittleInt32(&buffer[0], 0, 0xe59fc000); // ldr  ip, [pc, #0]
+	OSWriteLittleInt32(&buffer[4], 0, 0xea000000); // b	_helperhelper
+	// the lazy binding info is created later than this helper atom, so there
+	// is no Reference to update.  Instead we blast the offset here.
+	OSWriteLittleInt32(&buffer[8], 0, fLazyPointerAtom.getLazyBindingInfoOffset());
 }
 
 
@@ -2156,13 +2259,22 @@ void FastStubHelperAtom<x86>::copyRawContent(uint8_t buffer[]) const
 	memcpy(&buffer[1], &offset, 4);
 }
 
-
+template <typename A>
+const char* LazyPointerAtom<A>::getSectionName() const
+{
+	if ( fCloseStub )
+		return "__lazy_symbol";
+	else if ( fForLazyDylib )
+		return "__ld_symbol_ptr";
+	else
+		return "__la_symbol_ptr"; 
+}
 
 // specialize lazy pointer for x86_64 to initially pointer to stub helper
 template <>
 LazyPointerAtom<x86_64>::LazyPointerAtom(Writer<x86_64>& writer, ObjectFile::Atom& target, StubAtom<x86_64>& stub, bool forLazyDylib)
  : WriterAtom<x86_64>(writer, Segment::fgDataSegment), fName(lazyPointerName(target.getName())), fTarget(target), 
-	fExternalTarget(*stub.getTarget()), fForLazyDylib(forLazyDylib), fLazyBindingOffset(0)
+	fExternalTarget(*stub.getTarget()), fForLazyDylib(forLazyDylib), fCloseStub(false), fLazyBindingOffset(0)
 {
 	if ( forLazyDylib ) 
 		writer.fAllSynthesizedLazyDylibPointers.push_back(this);
@@ -2195,7 +2307,7 @@ LazyPointerAtom<x86_64>::LazyPointerAtom(Writer<x86_64>& writer, ObjectFile::Ato
 template <>
 LazyPointerAtom<x86>::LazyPointerAtom(Writer<x86>& writer, ObjectFile::Atom& target, StubAtom<x86>& stub, bool forLazyDylib)
  : WriterAtom<x86>(writer, Segment::fgDataSegment), fName(lazyPointerName(target.getName())), fTarget(target), 
-	fExternalTarget(*stub.getTarget()), fForLazyDylib(forLazyDylib)
+	fExternalTarget(*stub.getTarget()), fForLazyDylib(forLazyDylib), fCloseStub(false), fLazyBindingOffset(0)
 {
 	if ( forLazyDylib ) 
 		writer.fAllSynthesizedLazyDylibPointers.push_back(this);
@@ -2224,10 +2336,45 @@ LazyPointerAtom<x86>::LazyPointerAtom(Writer<x86>& writer, ObjectFile::Atom& tar
 	fReferences.push_back(new WriterReference<x86>(0, x86::kPointer, helper));
 }
 
+// specialize lazy pointer for arm to initially pointer to stub helper
+template <>
+LazyPointerAtom<arm>::LazyPointerAtom(Writer<arm>& writer, ObjectFile::Atom& target, StubAtom<arm>& stub, bool forLazyDylib)
+ : WriterAtom<arm>(writer, Segment::fgDataSegment), fName(lazyPointerName(target.getName())), fTarget(target), 
+	fExternalTarget(*stub.getTarget()), fForLazyDylib(forLazyDylib), fCloseStub(false), fLazyBindingOffset(0)
+{
+	if ( forLazyDylib ) 
+		writer.fAllSynthesizedLazyDylibPointers.push_back(this);
+	else
+		writer.fAllSynthesizedLazyPointers.push_back(this);
+
+	// The one instruction stubs must be close to the lazy pointers
+	if ( stub.fKind == StubAtom<arm>::kStubShort )
+		fCloseStub = true;
+
+	ObjectFile::Atom* helper;
+	if ( forLazyDylib ) {
+		if ( writer.fDyldLazyDylibHelper == NULL )
+			throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in lazydylib1.o)";
+		helper = writer.fDyldLazyDylibHelper;
+	}
+	else if ( writer.fOptions.makeCompressedDyldInfo() ) {
+		if ( target.getDefinitionKind() == ObjectFile::Atom::kWeakDefinition ) 
+			helper = &target;
+		else
+			helper = new FastStubHelperAtom<arm>(writer, target, *this, forLazyDylib);
+	}
+	else {
+		if ( writer.fDyldClassicHelperAtom == NULL )
+			throw "symbol dyld_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
+		helper = writer.fDyldClassicHelperAtom;
+	}
+	fReferences.push_back(new WriterReference<arm>(0, arm::kPointer, helper));
+}
+
 template <typename A>
 LazyPointerAtom<A>::LazyPointerAtom(Writer<A>& writer, ObjectFile::Atom& target, StubAtom<A>& stub, bool forLazyDylib)
  : WriterAtom<A>(writer, Segment::fgDataSegment), fName(lazyPointerName(target.getName())), fTarget(target), 
-	fExternalTarget(*stub.getTarget()), fForLazyDylib(forLazyDylib)
+	fExternalTarget(*stub.getTarget()), fForLazyDylib(forLazyDylib), fCloseStub(false), fLazyBindingOffset(0)
 {
 	if ( forLazyDylib ) 
 		writer.fAllSynthesizedLazyDylibPointers.push_back(this);
@@ -2293,20 +2440,6 @@ void NonLazyPointerAtom<A>::copyRawContent(uint8_t buffer[]) const
 
 
 
-template <>
-bool StubAtom<ppc64>::pic() const
-{
-	// no-pic stubs for ppc64 don't work if lazy pointer is above low 2GB.
-	// Usually that only happens if page zero is very large
-	return ( fWriter.fSlideable || ((fWriter.fPageZeroAtom != NULL) && (fWriter.fPageZeroAtom->getSize() > 4096)) );
-}
-
-
-template <>
-bool StubAtom<arm>::pic() const
-{
-	return fWriter.fSlideable;
-}
 
 template <>
 ObjectFile::Alignment StubAtom<ppc>::getAlignment() const
@@ -2351,7 +2484,8 @@ StubAtom<ppc>::StubAtom(Writer<ppc>& writer, ObjectFile::Atom& target, bool forL
 			lp = new LazyPointerAtom<ppc>(writer, *writer.fDyldClassicHelperAtom, *this, forLazyDylib);
 		}
 	}
-	if ( pic() ) {
+	fKind = ( fWriter.fSlideable ? kStubPIC : kStubNoPIC );
+	if ( fKind == kStubPIC ) {
 		// picbase is 8 bytes into atom
 		fReferences.push_back(new WriterReference<ppc>(12, ppc::kPICBaseHigh16, lp, 0, this, 8));
 		fReferences.push_back(new WriterReference<ppc>(20, ppc::kPICBaseLow16, lp, 0, this, 8));
@@ -2380,7 +2514,11 @@ StubAtom<ppc64>::StubAtom(Writer<ppc64>& writer, ObjectFile::Atom& target, bool 
 			throw "symbol dyld_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
 		lp = new LazyPointerAtom<ppc64>(writer, *writer.fDyldClassicHelperAtom, *this, forLazyDylib);
 	}
-	if ( pic() ) {
+	if ( fWriter.fSlideable || ((fWriter.fPageZeroAtom != NULL) && (fWriter.fPageZeroAtom->getSize() > 4096)) )
+		fKind = kStubPIC;
+	else
+		fKind = kStubNoPIC;
+	if ( fKind == kStubPIC ) {
 		// picbase is 8 bytes into atom
 		fReferences.push_back(new WriterReference<ppc64>(12, ppc64::kPICBaseHigh16, lp, 0, this, 8));
 		fReferences.push_back(new WriterReference<ppc64>(20, ppc64::kPICBaseLow14, lp, 0, this, 8));
@@ -2397,14 +2535,16 @@ StubAtom<x86>::StubAtom(Writer<x86>& writer, ObjectFile::Atom& target, bool forL
 					fName(NULL), fTarget(target), fForLazyDylib(forLazyDylib)
 {
 	if ( writer.fOptions.makeCompressedDyldInfo() || forLazyDylib ) {
+		fKind = kStubNoPIC;
 		fName = stubName(target.getName());
 		LazyPointerAtom<x86>* lp = new LazyPointerAtom<x86>(writer, target, *this, forLazyDylib);
 		fReferences.push_back(new WriterReference<x86>(2, x86::kAbsolute32, lp));
 		writer.fAllSynthesizedStubs.push_back(this);
 	}
 	else {
+		fKind = kJumpTable;
 		if ( &target == NULL ) 
-			fName = "cache-line-crossing-stub";
+			asprintf((char**)&fName, "cache-line-crossing-stub %p", this);
 		else {
 			fName = stubName(target.getName());
 			writer.fAllSynthesizedStubs.push_back(this);
@@ -2428,33 +2568,37 @@ StubAtom<arm>::StubAtom(Writer<arm>& writer, ObjectFile::Atom& target, bool forL
  : WriterAtom<arm>(writer, Segment::fgTextSegment), fName(stubName(target.getName())), fTarget(target)
 {
 	writer.fAllSynthesizedStubs.push_back(this);
-
-	LazyPointerAtom<arm>* lp;
-	if (  fWriter.fOptions.prebind() && !forLazyDylib ) {
-		// for prebound arm, lazy pointer starts out pointing to target symbol's address
-		// if target is a weak definition within this linkage unit or zero if in some dylib
-		lp = new LazyPointerAtom<arm>(writer, target, *this, forLazyDylib);
+	if ( (writer.fDylibSymbolCountUpperBound < 900) 
+		&& writer.fOptions.makeCompressedDyldInfo() 
+		&& (writer.fOptions.outputKind() != Options::kDynamicLibrary) 
+		&& !forLazyDylib ) {
+		// dylibs might have __TEXT and __DATA pulled apart to live in shared region
+		// if > 1000 stubs, the displacement to the lazy pointer my be > 12 bits.
+		fKind = kStubShort;
+	}
+	else if ( fWriter.fSlideable ) {
+		fKind = kStubPIC;
 	}
 	else {
-		// for non-prebound arm, lazy pointer starts out pointing to dyld_stub_binding_helper glue code
-		ObjectFile::Atom* helper;
-		if ( forLazyDylib ) {
-			if ( writer.fDyldLazyDylibHelper == NULL )
-				throw "symbol dyld_lazy_dylib_stub_binding_helper not defined (usually in lazydylib1.o)";
-			helper = writer.fDyldLazyDylibHelper;
-		}
-		else {
-			if ( writer.fDyldClassicHelperAtom == NULL )
-				throw "symbol dyld_stub_binding_helper not defined (usually in crt1.o/dylib1.o/bundle1.o)";
-			helper = writer.fDyldClassicHelperAtom;
-		}
-		lp = new LazyPointerAtom<arm>(writer, *helper, *this, forLazyDylib);
+		fKind = kStubNoPIC;
 	}
-	if ( pic() )
-		fReferences.push_back(new WriterReference<arm>(12, arm::kPointerDiff, lp, 0, this, 12));
-	else
-		fReferences.push_back(new WriterReference<arm>(8, arm::kPointer, lp));
+	LazyPointerAtom<arm>* lp = new LazyPointerAtom<arm>(writer, target, *this, forLazyDylib);
+	switch ( fKind ) {
+		case kStubPIC:
+			fReferences.push_back(new WriterReference<arm>(12, arm::kPointerDiff, lp, 0, this, 12));
+			break;
+		case kStubNoPIC:
+			fReferences.push_back(new WriterReference<arm>(8, arm::kReadOnlyPointer, lp));
+			break;
+		case kStubShort:
+			fReferences.push_back(new WriterReference<arm>(0, arm::kPointerDiff12, lp, 0, this, 8));
+			break;
+		default:
+			throw "internal error";
+	}
 }
+
+ 
 
 template <typename A>
 const char* StubAtom<A>::stubName(const char* name)
@@ -2467,29 +2611,43 @@ const char* StubAtom<A>::stubName(const char* name)
 template <>
 uint64_t StubAtom<ppc>::getSize() const
 {
-	return ( pic() ? 32 : 16 );
+
+	return ( (fKind == kStubPIC) ? 32 : 16 );
 }
 
 template <>
 uint64_t StubAtom<ppc64>::getSize() const
 {
-	return ( pic() ? 32 : 16 );
+	return ( (fKind == kStubPIC)  ? 32 : 16 );
 }
 
 
 template <>
 uint64_t StubAtom<arm>::getSize() const
 {
-	return ( pic() ? 16 : 12 );
+	switch ( fKind ) {
+		case kStubPIC:
+			return 16;
+		case kStubNoPIC:
+			return 12;
+		case kStubShort:
+			return 4;
+		default:
+			throw "internal error";
+	}
 }
 
 template <>
 uint64_t StubAtom<x86>::getSize() const
 {
-	if ( fWriter.fOptions.makeCompressedDyldInfo() || fForLazyDylib )
-		return 6;
-	else
-		return 5;
+	switch ( fKind ) {
+		case kStubNoPIC:
+			return 6;
+		case kJumpTable:
+			return 5;
+		default:
+			throw "internal error";
+	}
 }
 
 template <>
@@ -2501,16 +2659,20 @@ uint64_t StubAtom<x86_64>::getSize() const
 template <>
 ObjectFile::Alignment StubAtom<x86>::getAlignment() const
 {
-	if ( fWriter.fOptions.makeCompressedDyldInfo() || fForLazyDylib )
-		return 1;
-	else
-		return 0; // special case x86 self-modifying stubs to be byte aligned
+	switch ( fKind ) {
+		case kStubNoPIC:
+			return 1;
+		case kJumpTable:
+			return 0; // special case x86 self-modifying stubs to be byte aligned
+		default:
+			throw "internal error";
+	}
 }
 
 template <>
 void StubAtom<ppc64>::copyRawContent(uint8_t buffer[]) const
 {
-	if ( pic() ) {
+	if ( fKind == kStubPIC ) {
 		OSWriteBigInt32(&buffer [0], 0, 0x7c0802a6);	// 	mflr r0
 		OSWriteBigInt32(&buffer[ 4], 0, 0x429f0005);	//  bcl 20,31,Lpicbase
 		OSWriteBigInt32(&buffer[ 8], 0, 0x7d6802a6);	// Lpicbase: mflr r11
@@ -2531,7 +2693,7 @@ void StubAtom<ppc64>::copyRawContent(uint8_t buffer[]) const
 template <>
 void StubAtom<ppc>::copyRawContent(uint8_t buffer[]) const
 {
-	if ( pic() ) {
+	if ( fKind == kStubPIC ) {
 		OSWriteBigInt32(&buffer[ 0], 0, 0x7c0802a6);	// 	mflr r0
 		OSWriteBigInt32(&buffer[ 4], 0, 0x429f0005);	//  bcl 20,31,Lpicbase
 		OSWriteBigInt32(&buffer[ 8], 0, 0x7d6802a6);	// Lpicbase: mflr r11
@@ -2552,31 +2714,35 @@ void StubAtom<ppc>::copyRawContent(uint8_t buffer[]) const
 template <>
 void StubAtom<x86>::copyRawContent(uint8_t buffer[]) const
 {
-	if ( fWriter.fOptions.makeCompressedDyldInfo() || fForLazyDylib ) {
-		buffer[0] = 0xFF;		// jmp *foo$lazy_pointer
-		buffer[1] = 0x25;
-		buffer[2] = 0x00;
-		buffer[3] = 0x00;
-		buffer[4] = 0x00;
-		buffer[5] = 0x00;
-	}
-	else {
-		if ( fWriter.fOptions.prebind() ) {
-			uint32_t address = this->getAddress();
-			int32_t rel32 = 0 - (address+5); 
-			buffer[0] = 0xE9;
-			buffer[1] = rel32 & 0xFF;
-			buffer[2] = (rel32 >> 8) & 0xFF;
-			buffer[3] = (rel32 >> 16) & 0xFF;
-			buffer[4] = (rel32 >> 24) & 0xFF;
-		}
-		else {
-			buffer[0] = 0xF4;
-			buffer[1] = 0xF4;
-			buffer[2] = 0xF4;
-			buffer[3] = 0xF4;
-			buffer[4] = 0xF4;
-		}
+	switch ( fKind ) {
+		case kStubNoPIC:
+			buffer[0] = 0xFF;		// jmp *foo$lazy_pointer
+			buffer[1] = 0x25;
+			buffer[2] = 0x00;
+			buffer[3] = 0x00;
+			buffer[4] = 0x00;
+			buffer[5] = 0x00;
+			break;
+		case kJumpTable:
+			if ( fWriter.fOptions.prebind() ) {
+				uint32_t address = this->getAddress();
+				int32_t rel32 = 0 - (address+5); 
+				buffer[0] = 0xE9;
+				buffer[1] = rel32 & 0xFF;
+				buffer[2] = (rel32 >> 8) & 0xFF;
+				buffer[3] = (rel32 >> 16) & 0xFF;
+				buffer[4] = (rel32 >> 24) & 0xFF;
+			}
+			else {
+				buffer[0] = 0xF4;
+				buffer[1] = 0xF4;
+				buffer[2] = 0xF4;
+				buffer[3] = 0xF4;
+				buffer[4] = 0xF4;
+			}
+			break;
+		default:
+			throw "internal error";
 	}
 }
 
@@ -2594,16 +2760,23 @@ void StubAtom<x86_64>::copyRawContent(uint8_t buffer[]) const
 template <>
 void StubAtom<arm>::copyRawContent(uint8_t buffer[]) const
 {
-	if ( pic() ) {
-		OSWriteLittleInt32(&buffer[ 0], 0, 0xe59fc004);	// 	ldr ip, pc + 12
-		OSWriteLittleInt32(&buffer[ 4], 0, 0xe08fc00c);	// 	add ip, pc, ip
-		OSWriteLittleInt32(&buffer[ 8], 0, 0xe59cf000);	// 	ldr pc, [ip]
-		OSWriteLittleInt32(&buffer[12], 0, 0x00000000);	// 	.long L_foo$lazy_ptr - (L1$scv + 8)
-	}
-	else {
-		OSWriteLittleInt32(&buffer[ 0], 0, 0xe59fc000);	// 	ldr ip, [pc, #0]
-		OSWriteLittleInt32(&buffer[ 4], 0, 0xe59cf000);	// 	ldr pc, [ip]
-		OSWriteLittleInt32(&buffer[ 8], 0, 0x00000000);	// 	.long   L_foo$lazy_ptr
+	switch ( fKind ) {
+		case kStubPIC:
+			OSWriteLittleInt32(&buffer[ 0], 0, 0xe59fc004);	// 	ldr ip, pc + 12
+			OSWriteLittleInt32(&buffer[ 4], 0, 0xe08fc00c);	// 	add ip, pc, ip
+			OSWriteLittleInt32(&buffer[ 8], 0, 0xe59cf000);	// 	ldr pc, [ip]
+			OSWriteLittleInt32(&buffer[12], 0, 0x00000000);	// 	.long L_foo$lazy_ptr - (L1$scv + 8)
+			break;
+		case kStubNoPIC:
+			OSWriteLittleInt32(&buffer[ 0], 0, 0xe59fc000);	// 	ldr ip, [pc, #0]
+			OSWriteLittleInt32(&buffer[ 4], 0, 0xe59cf000);	// 	ldr pc, [ip]
+			OSWriteLittleInt32(&buffer[ 8], 0, 0x00000000);	// 	.long   L_foo$lazy_ptr
+			break;
+		case kStubShort:
+			OSWriteLittleInt32(&buffer[ 0], 0, 0xE59FF000);// 	ldr	pc, [pc, #foo$lazy_ptr]
+			break;
+		default:
+			throw "internal error";
 	}
 }
 
@@ -2617,28 +2790,41 @@ ObjectFile::Alignment StubAtom<x86_64>::getAlignment() const
 template <>
 const char*	StubAtom<ppc>::getSectionName() const
 {
-	return ( pic() ? "__picsymbolstub1" : "__symbol_stub1");
+	return ( (fKind == kStubPIC) ? "__picsymbolstub1" : "__symbol_stub1");
 }
 
 template <>
 const char*	StubAtom<ppc64>::getSectionName() const
 {
-	return ( pic() ? "__picsymbolstub1" : "__symbol_stub1");
+	return ( (fKind == kStubPIC) ? "__picsymbolstub1" : "__symbol_stub1");
 }
 
 template <>
 const char*	StubAtom<arm>::getSectionName() const
 {
-	return ( pic() ? "__picsymbolstub4" : "__symbol_stub4");
+	switch ( fKind ) {
+		case kStubPIC:
+			return "__picsymbolstub4";
+		case kStubNoPIC:
+			return "__symbol_stub4";
+		case kStubShort:
+			return "__symbolstub1";
+		default:
+			throw "internal error";
+	}
 }
 
 template <>
 const char*	StubAtom<x86>::getSectionName() const
 {
-	if ( fWriter.fOptions.makeCompressedDyldInfo() || fForLazyDylib ) 
-		return "__symbol_stub";
-	else
-		return "__jump_table";
+	switch ( fKind ) {
+		case kStubNoPIC:
+			return "__symbol_stub";
+		case kJumpTable:
+			return "__jump_table";
+		default:
+			throw "internal error";
+	}
 }
 
 
@@ -2683,7 +2869,7 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 	  fLargestAtomSize(1), 
 	  fEmitVirtualSections(false), fHasWeakExports(false), fReferencesWeakImports(false), 
 	  fCanScatter(false), fWritableSegmentPastFirst4GB(false), fNoReExportedDylibs(false), 
-	  fBiggerThanTwoGigs(false), fSlideable(false), 
+	  fBiggerThanTwoGigs(false), fSlideable(false), fHasThumbBranches(false),
 	  fFirstWritableSegment(NULL), fAnonNameIndex(1000)
 {
 	switch ( fOptions.outputKind() ) {
@@ -2874,7 +3060,7 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 							fLibraryToLoadCommand[dylibInfo.reader] = dyliblc;
 							fWriterSynthesizedAtoms.push_back(dyliblc);
 							if ( dylibInfo.options.fReExport 
-								&& (fOptions.macosxVersionMin() < ObjectFile::ReaderOptions::k10_5)
+								&& !fOptions.useSimplifiedDylibReExports() 
 								&& (fOptions.outputKind() == Options::kDynamicLibrary) ) {
 								// see if child has sub-framework that is this
 								bool isSubFramework = false;
@@ -3078,28 +3264,39 @@ ObjectFile::Atom& Writer<A>::makeObjcInfoAtom(ObjectFile::Reader::ObjcConstraint
 	return *(new ObjCInfoAtom<A>(*this, objcContraint, objcReplacementClasses));
 }
 
+template <typename A>
+void Writer<A>::addSynthesizedAtoms(const std::vector<class ObjectFile::Atom*>& existingAtoms,
+								  class ObjectFile::Atom* dyldClassicHelperAtom,
+								  class ObjectFile::Atom* dyldCompressedHelperAtom,
+								  class ObjectFile::Atom* dyldLazyDylibHelperAtom,
+								  bool biggerThanTwoGigs,
+									uint32_t dylibSymbolCount,
+									std::vector<class ObjectFile::Atom*>& newAtoms)
+{
+	fDyldClassicHelperAtom = dyldClassicHelperAtom;
+	fDyldCompressedHelperAtom = dyldCompressedHelperAtom;
+	fDyldLazyDylibHelper = dyldLazyDylibHelperAtom;
+	fBiggerThanTwoGigs = biggerThanTwoGigs;
+	fDylibSymbolCountUpperBound = dylibSymbolCount;
+
+	// create inter-library stubs
+	synthesizeStubs(existingAtoms, newAtoms);
+}
+
 
 template <typename A>
 uint64_t Writer<A>::write(std::vector<class ObjectFile::Atom*>& atoms,
 						  std::vector<class ObjectFile::Reader::Stab>& stabs,
 						  class ObjectFile::Atom* entryPointAtom, 
-						  class ObjectFile::Atom* dyldClassicHelperAtom,
-						  class ObjectFile::Atom* dyldCompressedHelperAtom,
-						  class ObjectFile::Atom* dyldLazyDylibHelperAtom,
 						  bool createUUID, bool canScatter, ObjectFile::Reader::CpuConstraint cpuConstraint,
-						  bool biggerThanTwoGigs, 
 						  std::set<const class ObjectFile::Atom*>& atomsThatOverrideWeak,
 						  bool hasExternalWeakDefinitions)
 {
 	fAllAtoms =  &atoms;
 	fStabs =  &stabs;
 	fEntryPoint = entryPointAtom;
-	fDyldClassicHelperAtom = dyldClassicHelperAtom;
-	fDyldCompressedHelperAtom = dyldCompressedHelperAtom;
-	fDyldLazyDylibHelper = dyldLazyDylibHelperAtom;
 	fCanScatter = canScatter;
 	fCpuConstraint = cpuConstraint;
-	fBiggerThanTwoGigs = biggerThanTwoGigs;
 	fHasWeakExports = hasExternalWeakDefinitions; // dyld needs to search this image as if it had weak exports
 	fRegularDefAtomsThatOverrideADylibsWeakDef = &atomsThatOverrideWeak;
 	
@@ -3114,9 +3311,6 @@ uint64_t Writer<A>::write(std::vector<class ObjectFile::Atom*>& atoms,
 
 		// check for mdynamic-no-pic codegen
 		scanForAbsoluteReferences();
-
-		// create inter-library stubs
-		synthesizeStubs();
 
 		// create table of unwind info
 		synthesizeUnwindInfoTable();
@@ -3552,62 +3746,69 @@ void Writer<A>::collectExportedAndImportedAndLocalAtoms()
 	fImportedAtoms.reserve(100);
 	fExportedAtoms.reserve(atomCount/2);
 	fLocalSymbolAtoms.reserve(atomCount);
-	for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-		ObjectFile::Atom* atom = *it;
-		// only named atoms go in symbol table
-		if ( atom->getName() != NULL ) {
-			// put atom into correct bucket: imports, exports, locals
-			//fprintf(stderr, "collectExportedAndImportedAndLocalAtoms() name=%s\n", atom->getDisplayName());
-			switch ( atom->getDefinitionKind() ) {
-				case ObjectFile::Atom::kExternalDefinition:
-				case ObjectFile::Atom::kExternalWeakDefinition:
-					fImportedAtoms.push_back(atom);
-					break;
-				case ObjectFile::Atom::kTentativeDefinition:
-					if ( (fOptions.outputKind() == Options::kObjectFile) && !fOptions.readerOptions().fMakeTentativeDefinitionsReal ) {
-						fImportedAtoms.push_back(atom);
-						break;
+	
+	for (std::vector<SegmentInfo*>::iterator segit = fSegmentInfos.begin(); segit != fSegmentInfos.end(); ++segit) {
+		std::vector<SectionInfo*>& sectionInfos = (*segit)->fSections;
+		for (std::vector<SectionInfo*>::iterator secit = sectionInfos.begin(); secit != sectionInfos.end(); ++secit) {
+			std::vector<ObjectFile::Atom*>& sectionAtoms = (*secit)->fAtoms;
+			for (std::vector<ObjectFile::Atom*>::iterator ait = sectionAtoms.begin(); ait != sectionAtoms.end(); ++ait) {
+				ObjectFile::Atom* atom = *ait;
+				// only named atoms go in symbol table
+				if ( atom->getName() != NULL ) {
+					// put atom into correct bucket: imports, exports, locals
+					//fprintf(stderr, "collectExportedAndImportedAndLocalAtoms() name=%s\n", atom->getDisplayName());
+					switch ( atom->getDefinitionKind() ) {
+						case ObjectFile::Atom::kExternalDefinition:
+						case ObjectFile::Atom::kExternalWeakDefinition:
+							fImportedAtoms.push_back(atom);
+							break;
+						case ObjectFile::Atom::kTentativeDefinition:
+							if ( (fOptions.outputKind() == Options::kObjectFile) && !fOptions.readerOptions().fMakeTentativeDefinitionsReal ) {
+								fImportedAtoms.push_back(atom);
+								break;
+							}
+							// else fall into
+						case ObjectFile::Atom::kWeakDefinition:
+							if ( stringsNeedLabelsInObjects() 
+									&& (fOptions.outputKind() == Options::kObjectFile)	
+									&& (atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableIn) 
+									&& (atom->getScope() == ObjectFile::Atom::scopeLinkageUnit) 
+									&& (atom->getContentType() == ObjectFile::Atom::kCStringType) ) {
+								fLocalSymbolAtoms.push_back(atom);
+								break;
+							}
+							// else fall into
+						case ObjectFile::Atom::kRegularDefinition:
+						case ObjectFile::Atom::kAbsoluteSymbol:
+							if ( this->shouldExport(*atom) )
+								fExportedAtoms.push_back(atom);
+							else if ( (atom->getSymbolTableInclusion() != ObjectFile::Atom::kSymbolTableNotIn)
+								&& ((fOptions.outputKind() == Options::kObjectFile) || fOptions.keepLocalSymbol(atom->getName())) )
+								fLocalSymbolAtoms.push_back(atom);
+							break;
 					}
-					// else fall into
-				case ObjectFile::Atom::kWeakDefinition:
-					if ( stringsNeedLabelsInObjects() 
-							&& (fOptions.outputKind() == Options::kObjectFile)	
-							&& (atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableIn) 
-							&& (atom->getScope() == ObjectFile::Atom::scopeLinkageUnit) 
-							&& (atom->getContentType() == ObjectFile::Atom::kCStringType) ) {
-						fLocalSymbolAtoms.push_back(atom);
-						break;
-					}
-					// else fall into
-				case ObjectFile::Atom::kRegularDefinition:
-				case ObjectFile::Atom::kAbsoluteSymbol:
-					if ( this->shouldExport(*atom) )
-						fExportedAtoms.push_back(atom);
-					else if ( (atom->getSymbolTableInclusion() != ObjectFile::Atom::kSymbolTableNotIn)
-						&& ((fOptions.outputKind() == Options::kObjectFile) || fOptions.keepLocalSymbol(atom->getName())) )
-						fLocalSymbolAtoms.push_back(atom);
-					break;
-			}
-		}
-		// when geneating a .o file, dtrace static probes become local labels
-		if ( (fOptions.outputKind() == Options::kObjectFile) && !fOptions.readerOptions().fForStatic ) {
-			std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
-			for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
-				ObjectFile::Reference* ref = *rit;
-				if ( ref->getKind() == A::kDtraceProbe ) {
-					// dtrace probe points to be add back into generated .o file
-					this->addLocalLabel(*atom, ref->getFixUpOffset(), ref->getTargetName());
 				}
-			}
-		}
-		// when linking kernel, old style dtrace static probes become global labels
-		else if ( fOptions.readerOptions().fForStatic ) {
-			std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
-			for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
-				ObjectFile::Reference* ref = *rit;
-				if ( ref->getKind() == A::kDtraceProbe ) {
-					// dtrace probe points to be add back into generated .o file
-					this->addGlobalLabel(*atom, ref->getFixUpOffset(), ref->getTargetName());
+				// when geneating a .o file, dtrace static probes become local labels
+				if ( (fOptions.outputKind() == Options::kObjectFile) && !fOptions.readerOptions().fForStatic ) {
+					std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
+					for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
+						ObjectFile::Reference* ref = *rit;
+						if ( ref->getKind() == A::kDtraceProbe ) {
+							// dtrace probe points to be add back into generated .o file
+							this->addLocalLabel(*atom, ref->getFixUpOffset(), ref->getTargetName());
+						}
+					}
+				}
+				// when linking kernel, old style dtrace static probes become global labels
+				else if ( fOptions.readerOptions().fForStatic ) {
+					std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
+					for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
+						ObjectFile::Reference* ref = *rit;
+						if ( ref->getKind() == A::kDtraceProbe ) {
+							// dtrace probe points to be add back into generated .o file
+							this->addGlobalLabel(*atom, ref->getFixUpOffset(), ref->getTargetName());
+						}
+					}
 				}
 			}
 		}
@@ -4191,6 +4392,9 @@ uint32_t Writer<arm>::addObjectRelocs(ObjectFile::Atom* atom, ObjectFile::Refere
 			fSectionRelocs.push_back(reloc1);
 			return 1;
 
+		case arm::kPointerDiff12:
+			throw "internal error.  no reloc for 12-bit pointer diffs";
+
 		case arm::kDtraceTypeReference:
 		case arm::kDtraceProbe:
 			// generates no relocs
@@ -4759,6 +4963,14 @@ bool Writer<x86_64>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference&
 template <>
 bool Writer<arm>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& ref)
 {
+	switch ( fOptions.outputKind()) {
+		case Options::kStaticExecutable:
+		case Options::kPreload:
+			// all relocations allowed in static executables
+			return false;
+		default:
+			break;
+	}
 	if ( ref.getKind() == arm::kReadOnlyPointer ) {
 		switch ( ref.getTarget().getDefinitionKind() ) {
 			case ObjectFile::Atom::kTentativeDefinition:
@@ -4772,7 +4984,7 @@ bool Writer<arm>::illegalRelocInFinalLinkedImage(const ObjectFile::Reference& re
 				return true;
 			case ObjectFile::Atom::kAbsoluteSymbol:
 				// absolute symbbols only allowed in static executables
-				return ( fOptions.outputKind() != Options::kStaticExecutable);
+				return true;
 		}
 	}
 	return false;
@@ -4902,6 +5114,9 @@ bool Writer<arm>::generatesLocalTextReloc(const ObjectFile::Reference& ref, cons
 					reloc.set_r_type(GENERIC_RELOC_VANILLA);
 					fInternalRelocs.push_back(reloc);
 					atomSection->fHasTextLocalRelocs = true;
+					if ( fOptions.makeCompressedDyldInfo() ) {
+						fRebaseInfo.push_back(RebaseInfo(REBASE_TYPE_TEXT_ABSOLUTE32, atom.getAddress() + ref.getFixUpOffset()));
+					}
 					return true;
 				}
 				return false;
@@ -5882,7 +6097,7 @@ uint64_t Writer<A>::writeAtoms()
 							uint64_t atomSize = atom->getSize();
 							if ( streaming ) {
 								if ( atomSize > fLargestAtomSize ) 
-									throwf("ld64 internal error: atom \"%s\"is larger than expected 0x%X > 0x%llX", 
+									throwf("ld64 internal error: atom \"%s\"is larger than expected 0x%llX > 0x%X", 
 												atom->getDisplayName(), atomSize, fLargestAtomSize);
 							}
 							else {
@@ -6073,6 +6288,13 @@ void Writer<arm>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 							break;
 					}
 				} 
+				else if ( !fOptions.makeClassicDyldInfo() 
+								&& (ref->getTarget().getDefinitionKind() == ObjectFile::Atom::kWeakDefinition) ) {
+					// when using only compressed dyld info, pointer is initially set to point directly to weak definition
+					if ( ref->getTarget().isThumb() )
+						targetAddr |= 1;
+					LittleEndian::set32(*fixUp, targetAddr);
+				}
 				else {
 					// external relocation ==> pointer contains addend
 					LittleEndian::set32(*fixUp, ref->getTargetOffset());
@@ -6113,15 +6335,25 @@ void Writer<arm>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 		case arm::kBranch24WeakImport:
 		case arm::kBranch24:
 			displacement = targetAddr - (inAtom->getAddress() + ref->getFixUpOffset());
+			// check if this is a branch to a branch island that can be skipped
+			if ( ref->getTarget().getContentType() == ObjectFile::Atom::kBranchIsland ) {
+				uint64_t finalTargetAddress = ((BranchIslandAtom<arm>*)(&(ref->getTarget())))->getFinalTargetAdress();
+				int64_t altDisplacment = finalTargetAddress - (inAtom->getAddress() + ref->getFixUpOffset());
+				if ( (altDisplacment < 33554428LL) && (altDisplacment > (-33554432LL)) ) {
+					//fprintf(stderr, "using altDisplacment = %lld\n", altDisplacment);
+					// yes, we can skip the branch island
+					displacement = altDisplacment;
+				}
+			}
 			// The pc added will be +8 from the pc
 			displacement -= 8;
-			// fprintf(stderr, "bl/blx fixup to %s at 0x%08llX, displacement = 0x%08llX\n", ref->getTarget().getDisplayName(), ref->getTarget().getAddress(), displacement);
+			//fprintf(stderr, "bl/blx fixup to %s at 0x%08llX, displacement = 0x%08llX\n", ref->getTarget().getDisplayName(), ref->getTarget().getAddress(), displacement);
 			// max positive displacement is 0x007FFFFF << 2
 			// max negative displacement is 0xFF800000 << 2
 			if ( (displacement > 33554428LL) || (displacement < (-33554432LL)) ) {
-				throwf("b/bl/blx out of range (%lld max is +/-32M) from %s in %s to %s in %s",
-							displacement, inAtom->getDisplayName(), inAtom->getFile()->getPath(),
-							ref->getTarget().getDisplayName(), ref->getTarget().getFile()->getPath());
+				throwf("b/bl/blx out of range (%lld max is +/-32M) from 0x%08llX %s in %s to 0x%08llX %s in %s",
+							displacement, inAtom->getAddress(), inAtom->getDisplayName(), inAtom->getFile()->getPath(),
+							ref->getTarget().getAddress(), ref->getTarget().getDisplayName(), ref->getTarget().getFile()->getPath());
 			}
 			instruction = LittleEndian::get32(*fixUp);
 			// Make sure we are calling arm with bl, thumb with blx
@@ -6268,8 +6500,22 @@ void Writer<arm>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const Ob
 		case arm::kDtraceProbe:
 			// nothing to fix up
 			break;
-		default:
-			throw "boom shaka laka";
+		case arm::kPointerDiff12:
+			displacement = (ref->getTarget().getAddress() + ref->getTargetOffset()) - (ref->getFromTarget().getAddress() + ref->getFromTargetOffset());
+			if ( (displacement > 4092LL) || (displacement <-4092LL) ) {
+				throwf("ldr 12-bit displacement out of range (%lld max +/-4096) in %s", displacement, inAtom->getDisplayName());
+			}
+			instruction = LittleEndian::get32(*fixUp);
+			if ( displacement >= 0 ) {
+				instruction &= 0xFFFFF000;
+				instruction |= ((uint32_t)displacement & 0xFFF);
+			}
+			else {
+				instruction &= 0xFF7FF000;
+				instruction |= ((uint32_t)(-displacement) & 0xFFF);
+			}
+			LittleEndian::set32(*fixUp, instruction);
+			break;
 	}
 }
 
@@ -6501,6 +6747,8 @@ void Writer<arm>::fixUpReferenceRelocatable(const ObjectFile::Reference* ref, co
 		case arm::kDtraceTypeReference:
 			// nothing to fix up
 			break;
+		case arm::kPointerDiff12:
+			throw "internal error.  no reloc for 12-bit pointer diffs";
 	}
 }
 
@@ -6949,7 +7197,7 @@ void Writer<x86_64>::fixUpReferenceFinal(const ObjectFile::Reference* ref, const
 			}
 			else {
 				if ( (displacement > twoGigLimit) || (displacement < (-twoGigLimit)) ) {
-					fprintf(stderr, "call out of range from %s (%llX) in %s to %s (%llX) in %s\n", 
+					fprintf(stderr, "reference out of range from %s (%llX) in %s to %s (%llX) in %s\n", 
 						inAtom->getDisplayName(), inAtom->getAddress(), inAtom->getFile()->getPath(), ref->getTarget().getDisplayName(), ref->getTarget().getAddress(), ref->getTarget().getFile()->getPath());
 					throw "rel32 out of range";
 				}
@@ -7490,8 +7738,10 @@ bool Writer<arm>::stubableReference(const ObjectFile::Atom* inAtom, const Object
 	switch ( (arm::ReferenceKinds)kind ) {
 		case arm::kBranch24:
 		case arm::kBranch24WeakImport:
+			return true;
 		case arm::kThumbBranch22:
 		case arm::kThumbBranch22WeakImport:
+			fHasThumbBranches = true;
 			return true;
 		case arm::kNoFixUp:
 		case arm::kFollowOn:
@@ -7504,6 +7754,7 @@ bool Writer<arm>::stubableReference(const ObjectFile::Atom* inAtom, const Object
 		case arm::kDtraceProbeSite:
 		case arm::kDtraceIsEnabledSite:
 		case arm::kDtraceTypeReference:
+		case arm::kPointerDiff12:
 			return false;
 	}
 	return false;
@@ -7761,6 +8012,10 @@ void  Writer<x86>::scanForAbsoluteReferences()
 	if ( fOptions.positionIndependentExecutable() && !fOptions.allowTextRelocs() ) {
 		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
 			ObjectFile::Atom* atom = *it;
+			if ( atom->getContentType() == ObjectFile::Atom::kStub )
+				continue;
+			if ( atom->getContentType() == ObjectFile::Atom::kStubHelper )
+				continue;
 			std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
 			for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
 				ObjectFile::Reference* ref = *rit;
@@ -7856,11 +8111,12 @@ void Writer<x86>::insertDummyStubs()
 
 
 template <typename A>
-void Writer<A>::synthesizeKextGOT()
+void Writer<A>::synthesizeKextGOT(const std::vector<class ObjectFile::Atom*>& existingAtoms,
+									std::vector<class ObjectFile::Atom*>& newAtoms)
 {
 	// walk every atom and reference
-	for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-		ObjectFile::Atom* atom = *it;
+	for (std::vector<ObjectFile::Atom*>::const_iterator it=existingAtoms.begin(); it != existingAtoms.end(); it++) {
+		const ObjectFile::Atom* atom = *it;
 		std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
 		for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
 			ObjectFile::Reference* ref = *rit;
@@ -7883,6 +8139,7 @@ void Writer<A>::synthesizeKextGOT()
 							if ( pos == fGOTMap.end() ) {
 								nlp = new NonLazyPointerAtom<A>(*this, target);
 								fGOTMap[&target] = nlp;
+								newAtoms.push_back(nlp);
 							}
 							else {
 								nlp = pos->second;
@@ -7902,36 +8159,12 @@ void Writer<A>::synthesizeKextGOT()
 			}
 		}
 	}
-	
-	// add non-lazy pointers to fAllAtoms
-	if ( fAllSynthesizedNonLazyPointers.size() != 0 ) {
-		ObjectFile::Section* curSection = NULL;
-		ObjectFile::Atom* prevAtom = NULL;
-		bool inserted = false;
-		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-			ObjectFile::Atom* atom = *it;
-			ObjectFile::Section* nextSection = atom->getSection();
-			if ( nextSection != curSection ) {
-				if ( (prevAtom != NULL) && (strcmp(prevAtom->getSectionName(), "__data") == 0) ) {
-					// found end of __data section, insert lazy pointers here
-					fAllAtoms->insert(it, fAllSynthesizedNonLazyPointers.begin(), fAllSynthesizedNonLazyPointers.end());
-					inserted = true;
-					break;
-				}
-				curSection = nextSection;
-			}
-			prevAtom = atom;
-		}
-		if ( !inserted ) {
-			throw "can't insert non-lazy pointers, __data section not found";
-		}
-	}
-
 }
 
 
 template <typename A>
-void Writer<A>::synthesizeStubs()
+void Writer<A>::synthesizeStubs(const std::vector<class ObjectFile::Atom*>& existingAtoms,
+									std::vector<class ObjectFile::Atom*>& newAtoms)
 {
 	switch ( fOptions.outputKind() ) {
 		case Options::kObjectFile:
@@ -7940,7 +8173,7 @@ void Writer<A>::synthesizeStubs()
 			return;
 		case Options::kKextBundle:
 			// new kext need a synthesized GOT only
-			synthesizeKextGOT();
+			synthesizeKextGOT(existingAtoms, newAtoms);
 			return;
 		case Options::kStaticExecutable:
 		case Options::kDyld:
@@ -7952,7 +8185,7 @@ void Writer<A>::synthesizeStubs()
 	}
 
 	// walk every atom and reference
-	for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
+	for (std::vector<ObjectFile::Atom*>::const_iterator it=existingAtoms.begin(); it != existingAtoms.end(); it++) {
 		ObjectFile::Atom* atom = *it;
 		std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
 		for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
@@ -8089,184 +8322,35 @@ void Writer<A>::synthesizeStubs()
 
 	// sort stubs
 	std::sort(fAllSynthesizedStubs.begin(), fAllSynthesizedStubs.end(), AtomByNameSorter());
-	std::sort(fAllSynthesizedStubHelpers.begin(), fAllSynthesizedStubHelpers.end(), AtomByNameSorter());
-
 	// add dummy self-modifying stubs (x86 only)
 	if ( ! fOptions.makeCompressedDyldInfo() )	
 		this->insertDummyStubs();
+	// set ordinals so sorting is preserved
+	uint32_t sortOrder = 0;
+	for (typename std::vector<StubAtom<A>*>::iterator it=fAllSynthesizedStubs.begin(); it != fAllSynthesizedStubs.end(); it++) 
+		(*it)->setSortingOrdinal(sortOrder++);
+	std::sort(fAllSynthesizedStubHelpers.begin(), fAllSynthesizedStubHelpers.end(), AtomByNameSorter());
 
 	// sort lazy pointers
 	std::sort(fAllSynthesizedLazyPointers.begin(), fAllSynthesizedLazyPointers.end(), AtomByNameSorter());
+	sortOrder = 0;
+	for (typename std::vector<LazyPointerAtom<A>*>::iterator it=fAllSynthesizedLazyPointers.begin(); it != fAllSynthesizedLazyPointers.end(); it++) 
+		(*it)->setSortingOrdinal(sortOrder++);
 	std::sort(fAllSynthesizedLazyDylibPointers.begin(), fAllSynthesizedLazyDylibPointers.end(), AtomByNameSorter());
-
-
-	// add stubs to fAllAtoms
-	if ( fAllSynthesizedStubs.size() != 0 ) {
-		std::vector<ObjectFile::Atom*> textStubs;
-		std::vector<ObjectFile::Atom*> importStubs;
-		for (typename std::vector<class StubAtom<A>*>::iterator sit=fAllSynthesizedStubs.begin(); sit != fAllSynthesizedStubs.end(); ++sit) {
-			ObjectFile::Atom* stubAtom = *sit;
-			if ( strcmp(stubAtom->getSegment().getName(), "__TEXT") == 0 )
-				textStubs.push_back(stubAtom);
-			else
-				importStubs.push_back(stubAtom);
-		}
-		// any helper stubs go right after regular stubs
-		if ( fAllSynthesizedStubHelpers.size() != 0 )
-			textStubs.insert(textStubs.end(), fAllSynthesizedStubHelpers.begin(), fAllSynthesizedStubHelpers.end());
-		// insert text stubs right after __text section
-		ObjectFile::Section* curSection = NULL;
-		ObjectFile::Atom* prevAtom = NULL;
-		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-			ObjectFile::Atom* atom = *it;
-			ObjectFile::Section* nextSection = atom->getSection();
-			if ( nextSection != curSection ) {
-				if ( (prevAtom != NULL) && (strcmp(prevAtom->getSectionName(), "__text") == 0) ) {
-					// found end of __text section, insert stubs here
-					fAllAtoms->insert(it, textStubs.begin(), textStubs.end());
-					break;
-				}
-				curSection = nextSection;
-			}
-			prevAtom = atom;
-		}
-		if ( importStubs.size() != 0 ) {
-			// insert __IMPORTS stubs right before __LINKEDIT
-			for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-				ObjectFile::Atom* atom = *it;
-				ObjectFile::Section* nextSection = atom->getSection();
-				if ( nextSection != curSection ) {
-					// for i386 where stubs are not in __TEXT segment
-					if ( ((prevAtom != NULL) && (strcmp(prevAtom->getSegment().getName(), "__IMPORT") == 0))
-						|| (strcmp(atom->getSegment().getName(), "__LINKEDIT") == 0) ) {
-						// insert stubs at end of __IMPORT segment, or before __LINKEDIT
-						fAllAtoms->insert(it, importStubs.begin(), importStubs.end());
-						break;
-					}
-					curSection = nextSection;
-				}
-				prevAtom = atom;
-			}
-		}
-	}
-
-
-	// add non-lazy pointers to fAllAtoms
-	if ( fAllSynthesizedNonLazyPointers.size() != 0 ) {
-		ObjectFile::Section* curSection = NULL;
-		ObjectFile::Atom* prevAtom = NULL;
-		bool inserted = false;
-		// first try to insert at end of __nl_symbol_ptr
-		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-			ObjectFile::Atom* atom = *it;
-			ObjectFile::Section* nextSection = atom->getSection();
-			if ( nextSection != curSection ) {
-				if ( (prevAtom != NULL) && (strcmp(prevAtom->getSectionName(), "__nl_symbol_ptr") == 0) ) {
-					// found end of __nl_symbol_ptr section, insert non-lazy pointers at end of it
-					fAllAtoms->insert(it, fAllSynthesizedNonLazyPointers.begin(), fAllSynthesizedNonLazyPointers.end());
-					inserted = true;
-					break;
-				}
-				curSection = nextSection;
-			}
-			prevAtom = atom;
-		}
-		if ( !inserted ) {
-			// next try to insert after __dyld section
-			for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-				ObjectFile::Atom* atom = *it;
-				ObjectFile::Section* nextSection = atom->getSection();
-				if ( nextSection != curSection ) {
-					if ( strcmp(atom->getSegment().getName(), "__DATA") == 0 ) {
-						const char* prevSectionName = (prevAtom != NULL) ? prevAtom->getSectionName() : "";
-						if (   (strcmp(prevSectionName, "__dyld") != 0)
-							&& (strcmp(prevSectionName, "__program_vars") != 0)
-							&& (strcmp(prevSectionName, "__mod_init_func") != 0) ) {
-							// found end of __dyld section, insert non-lazy pointers here
-							fAllAtoms->insert(it, fAllSynthesizedNonLazyPointers.begin(), fAllSynthesizedNonLazyPointers.end());
-							inserted = true;
-							break;
-						}
-					}
-				}
-				prevAtom = atom;
-			}
-			if ( !inserted ) {
-				// might not be any __DATA sections, insert after end of __TEXT
-				for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-					ObjectFile::Atom* atom = *it;
-					ObjectFile::Section* nextSection = atom->getSection();
-					if ( nextSection != curSection ) {
-						if ( (prevAtom != NULL) && (strcmp(prevAtom->getSegment().getName(), "__TEXT") == 0) && (strcmp(atom->getSegment().getName(), "__TEXT") != 0)) {
-							// found end of __TEXT segment, insert non-lazy pointers at end of it
-							fAllAtoms->insert(it, fAllSynthesizedNonLazyPointers.begin(), fAllSynthesizedNonLazyPointers.end());
-							inserted = true;
-							break;
-						}
-						curSection = nextSection;
-					}
-					prevAtom = atom;
-				}
-			}
-			if ( !inserted ) 
-				throw "can't insert non-lazy pointers, __dyld section not found";
-		}
-	}
-
-	// add lazy dylib pointers to fAllAtoms
-	if ( fAllSynthesizedLazyDylibPointers.size() != 0 ) {
-		ObjectFile::Section* curSection = NULL;
-		ObjectFile::Atom* prevAtom = NULL;
-		bool inserted = false;
-		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-			ObjectFile::Atom* atom = *it;
-			ObjectFile::Section* nextSection = atom->getSection();
-			if ( nextSection != curSection ) {
-				if ( (prevAtom != NULL) && 
-					(   (strcmp(prevAtom->getSectionName(), "__dyld") == 0)
-					 || (strcmp(prevAtom->getSectionName(), "__program_vars") == 0)
-					 || (strcmp(prevAtom->getSectionName(), "__nl_symbol_ptr") == 0) ) ) {
-					// found end of __dyld section, insert lazy pointers here
-					fAllAtoms->insert(it, fAllSynthesizedLazyDylibPointers.begin(), fAllSynthesizedLazyDylibPointers.end());
-					inserted = true;
-					break;
-				}
-				curSection = nextSection;
-			}
-			prevAtom = atom;
-		}
-		if ( !inserted ) {
-			throw "can't insert lazy pointers, __dyld section not found";
-		}
-	}
-
-	// add lazy pointers to fAllAtoms
-	if ( fAllSynthesizedLazyPointers.size() != 0 ) {
-		ObjectFile::Section* curSection = NULL;
-		ObjectFile::Atom* prevAtom = NULL;
-		bool inserted = false;
-		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
-			ObjectFile::Atom* atom = *it;
-			ObjectFile::Section* nextSection = atom->getSection();
-			if ( nextSection != curSection ) {
-				if ( (prevAtom != NULL) && 
-					(   (strcmp(prevAtom->getSectionName(), "__dyld") == 0)
-					 || (strcmp(prevAtom->getSectionName(), "__program_vars") == 0)
-					 || (strcmp(prevAtom->getSectionName(), "__nl_symbol_ptr") == 0) ) ) {
-					// found end of __dyld section, insert lazy pointers here
-					fAllAtoms->insert(it, fAllSynthesizedLazyPointers.begin(), fAllSynthesizedLazyPointers.end());
-					inserted = true;
-					break;
-				}
-				curSection = nextSection;
-			}
-			prevAtom = atom;
-		}
-		if ( !inserted ) {
-			throw "can't insert lazy pointers, __dyld section not found";
-		}
-	}
 	
+	// sort non-lazy pointers
+	std::sort(fAllSynthesizedNonLazyPointers.begin(), fAllSynthesizedNonLazyPointers.end(), AtomByNameSorter());
+	sortOrder = 0;
+	for (typename std::vector<NonLazyPointerAtom<A>*>::iterator it=fAllSynthesizedNonLazyPointers.begin(); it != fAllSynthesizedNonLazyPointers.end(); it++) 
+		(*it)->setSortingOrdinal(sortOrder++);
+	std::sort(fAllSynthesizedNonLazyPointers.begin(), fAllSynthesizedNonLazyPointers.end(), AtomByNameSorter());
+
+	// tell linker about all synthesized atoms
+	newAtoms.insert(newAtoms.end(), fAllSynthesizedStubs.begin(), fAllSynthesizedStubs.end());
+	newAtoms.insert(newAtoms.end(), fAllSynthesizedStubHelpers.begin(), fAllSynthesizedStubHelpers.end());
+	newAtoms.insert(newAtoms.end(), fAllSynthesizedLazyPointers.begin(), fAllSynthesizedLazyPointers.end());
+	newAtoms.insert(newAtoms.end(), fAllSynthesizedLazyDylibPointers.begin(), fAllSynthesizedLazyDylibPointers.end());
+	newAtoms.insert(newAtoms.end(), fAllSynthesizedNonLazyPointers.begin(), fAllSynthesizedNonLazyPointers.end());
 	
 }
 
@@ -8321,7 +8405,6 @@ void Writer<A>::synthesizeUnwindInfoTable()
 		}
 	}
 }
-
 
 
 template <typename A>
@@ -8421,43 +8504,38 @@ void Writer<A>::partitionIntoSections()
 				fLoadCommandsSection = currentSectionInfo;
 				fLoadCommandsSegment = currentSegmentInfo;
 			}
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__DATA") == 0) && (strcmp(currentSectionInfo->fSectionName, "__la_symbol_ptr") == 0) )
-				currentSectionInfo->fAllLazyPointers = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__DATA") == 0) && (strcmp(currentSectionInfo->fSectionName, "__la_sym_ptr2") == 0) )
-				currentSectionInfo->fAllLazyPointers = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__DATA") == 0) && (strcmp(currentSectionInfo->fSectionName, "__ld_symbol_ptr") == 0) )
-				currentSectionInfo->fAllLazyDylibPointers = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__DATA") == 0) && (strcmp(currentSectionInfo->fSectionName, "__nl_symbol_ptr") == 0) )
-				currentSectionInfo->fAllNonLazyPointers = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__IMPORT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__pointers") == 0) )
-				currentSectionInfo->fAllNonLazyPointers = true;
-			if ( (fOptions.outputKind() == Options::kDyld) && (strcmp(currentSectionInfo->fSegmentName, "__DATA") == 0) && (strcmp(currentSectionInfo->fSectionName, "__pointers") == 0) )
-				currentSectionInfo->fAllNonLazyPointers = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__picsymbolstub1") == 0) )
-				currentSectionInfo->fAllStubs = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__symbol_stub1") == 0) )
-				currentSectionInfo->fAllStubs = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__picsymbolstub2") == 0) )
-				currentSectionInfo->fAllStubs = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__symbol_stub") == 0) )
-				currentSectionInfo->fAllStubs = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__picsymbolstub4") == 0) )
-				currentSectionInfo->fAllStubs = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__symbol_stub4") == 0) )
-				currentSectionInfo->fAllStubs = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__IMPORT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__jump_table") == 0) ) {
-				currentSectionInfo->fAllSelfModifyingStubs = true;
-				currentSectionInfo->fAlignment = 6; // force x86 fast stubs to start on 64-byte boundary
-			}
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__stub_helper") == 0) )
-				currentSectionInfo->fAllStubHelpers = true;
-			if ( (strcmp(currentSectionInfo->fSegmentName, "__TEXT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__eh_frame") == 0) )
-				currentSectionInfo->fAlignment = __builtin_ctz(sizeof(pint_t)); // always start CFI info pointer aligned
-			curSection = atom->getSection();
-			if ( currentSectionInfo->fAllNonLazyPointers || currentSectionInfo->fAllLazyPointers || currentSectionInfo->fAllLazyDylibPointers
-				|| currentSectionInfo->fAllStubs || currentSectionInfo->fAllSelfModifyingStubs ) {
+			switch ( atom->getContentType() ) {
+				case ObjectFile::Atom::kLazyPointer:
+					currentSectionInfo->fAllLazyPointers = true;
 					fSymbolTableCommands->needDynamicTable();
+					break;
+				case ObjectFile::Atom::kNonLazyPointer:
+					currentSectionInfo->fAllNonLazyPointers = true;
+					fSymbolTableCommands->needDynamicTable();
+					break;
+				case ObjectFile::Atom::kLazyDylibPointer:
+					currentSectionInfo->fAllLazyDylibPointers = true;
+					break;
+				case ObjectFile::Atom::kStubHelper:
+					currentSectionInfo->fAllStubHelpers = true;
+					break;
+				case ObjectFile::Atom::kCFIType:
+					currentSectionInfo->fAlignment = __builtin_ctz(sizeof(pint_t)); // always start CFI info pointer aligned
+					break;
+				case ObjectFile::Atom::kStub:
+					if ( (strcmp(currentSectionInfo->fSegmentName, "__IMPORT") == 0) && (strcmp(currentSectionInfo->fSectionName, "__jump_table") == 0) ) {
+						currentSectionInfo->fAllSelfModifyingStubs = true;
+						currentSectionInfo->fAlignment = 6; // force x86 fast stubs to start on 64-byte boundary
+					}
+					else {
+						currentSectionInfo->fAllStubs = true;
+					}
+					fSymbolTableCommands->needDynamicTable();
+					break;
+				default:
+					break;
 			}
+			curSection = atom->getSection();
 		}
 		// any non-zero fill atoms make whole section marked not-zero-fill
 		if ( currentSectionInfo->fAllZeroFill && ! atom->isZeroFill() )
@@ -8520,13 +8598,13 @@ public:
 template <>
 bool Writer<ppc>::addBranchIslands()
 {
-	return this->addPPCBranchIslands();
+	return this->createBranchIslands();
 }
 
 template <>
 bool Writer<ppc64>::addBranchIslands()
 {
-	return this->addPPCBranchIslands();
+	return this->createBranchIslands();
 }
 
 template <>
@@ -8546,13 +8624,11 @@ bool Writer<x86_64>::addBranchIslands()
 template <>
 bool Writer<arm>::addBranchIslands()
 {
-	// arm branch islands not (yet) supported
-	// you can instead compile with -mlong-call
-	return false;
+	return this->createBranchIslands();
 }
 
 template <>
-bool Writer<ppc>::isBranch24Reference(uint8_t kind)
+bool Writer<ppc>::isBranchThatMightNeedIsland(uint8_t kind)
 {
 	switch (kind) {
 		case ppc::kBranch24:
@@ -8563,7 +8639,7 @@ bool Writer<ppc>::isBranch24Reference(uint8_t kind)
 }
 
 template <>
-bool Writer<ppc64>::isBranch24Reference(uint8_t kind)
+bool Writer<ppc64>::isBranchThatMightNeedIsland(uint8_t kind)
 {
 	switch (kind) {
 		case ppc64::kBranch24:
@@ -8573,17 +8649,77 @@ bool Writer<ppc64>::isBranch24Reference(uint8_t kind)
 	return false;
 }
 
+template <>
+bool Writer<arm>::isBranchThatMightNeedIsland(uint8_t kind)
+{
+	switch (kind) {
+		case arm::kBranch24:
+		case arm::kBranch24WeakImport:
+		case arm::kThumbBranch22:
+		case arm::kThumbBranch22WeakImport:
+			return true;
+	}
+	return false;
+}
+
+template <> 
+uint32_t Writer<ppc>::textSizeWhenMightNeedBranchIslands() 
+{ 
+	return 16000000;
+}
+
+template <> 
+uint32_t Writer<ppc64>::textSizeWhenMightNeedBranchIslands() 
+{ 
+	return 16000000;
+}
+
+template <> 
+uint32_t Writer<arm>::textSizeWhenMightNeedBranchIslands() 
+{ 
+	if ( fHasThumbBranches == false )
+		return 32000000;  // ARM can branch +/- 32MB
+	else if ( fOptions.preferSubArchitecture() && fOptions.subArchitecture() == CPU_SUBTYPE_ARM_V7 ) 
+		return 16000000;  // thumb2 can branch +/- 16MB
+	else
+		return  4000000;  // thumb1 can branch +/- 4MB
+}
+
+template <> 
+uint32_t Writer<ppc>::maxDistanceBetweenIslands() 
+{ 
+	return 14*1024*1024;
+}
+
+template <> 
+uint32_t Writer<ppc64>::maxDistanceBetweenIslands() 
+{ 
+	return 14*1024*1024;
+}
+
+template <> 
+uint32_t Writer<arm>::maxDistanceBetweenIslands() 
+{ 
+	if ( fHasThumbBranches == false )
+		return 30*1024*1024;
+	else if ( fOptions.preferSubArchitecture() && fOptions.subArchitecture() == CPU_SUBTYPE_ARM_V7 ) 
+		return 14*1024*1024;
+	else
+		return 3500000; 
+}
+
+
 //
 // PowerPC can do PC relative branches as far as +/-16MB.
 // If a branch target is >16MB then we insert one or more
 // "branch islands" between the branch and its target that
-// allows island hoping to the target.
+// allows island hopping to the target.
 //
 // Branch Island Algorithm
 //
 // If the __TEXT segment < 16MB, then no branch islands needed
 // Otherwise, every 14MB into the __TEXT segment a region is
-// added which can contain branch islands.  Every out of range
+// added which can contain branch islands.  Every out-of-range
 // bl instruction is checked.  If it crosses a region, an island
 // is added to that region with the same target and the bl is
 // adjusted to target the island instead.
@@ -8592,18 +8728,18 @@ bool Writer<ppc64>::isBranch24Reference(uint8_t kind)
 // could grow the __TEXT enough that other previously in-range
 // bl branches could be pushed out of range.  We reduce the
 // probability this could happen by placing the ranges every
-// 15MB which means the region would have to be 1MB (256K islands)
+// 14MB which means the region would have to be 2MB (512,000 islands)
 // before any branches could be pushed out of range.
 //
 template <typename A>
-bool Writer<A>::addPPCBranchIslands()
+bool Writer<A>::createBranchIslands()
 {
 	bool log = false;
 	bool result = false;
 	// Can only possibly need branch islands if __TEXT segment > 16M
-	if ( fLoadCommandsSegment->fSize > 16000000 ) {
+	if ( fLoadCommandsSegment->fSize > textSizeWhenMightNeedBranchIslands() ) {
 		if ( log) fprintf(stderr, "ld: checking for branch islands, __TEXT segment size=%llu\n", fLoadCommandsSegment->fSize);
-		const uint32_t kBetweenRegions = 14*1024*1024; // place regions of islands every 14MB in __text section
+		const uint32_t kBetweenRegions = maxDistanceBetweenIslands(); // place regions of islands every 14MB in __text section
 		SectionInfo* textSection = NULL;
 		for (std::vector<SectionInfo*>::iterator it=fLoadCommandsSegment->fSections.begin(); it != fLoadCommandsSegment->fSections.end(); it++) {
 			if ( strcmp((*it)->fSectionName, "__text") == 0 ) {
@@ -8617,7 +8753,7 @@ bool Writer<A>::addPPCBranchIslands()
 		AtomToIsland regionsMap[kIslandRegionsCount];
 		std::vector<ObjectFile::Atom*> regionsIslands[kIslandRegionsCount];
 		unsigned int islandCount = 0;
-		if ( log) fprintf(stderr, "ld: will use %u branch island regions\n", kIslandRegionsCount);
+		if (log) fprintf(stderr, "ld: will use %u branch island regions\n", kIslandRegionsCount);
 
 		// create islands for branch references that are out of range
 		for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms->begin(); it != fAllAtoms->end(); it++) {
@@ -8625,68 +8761,62 @@ bool Writer<A>::addPPCBranchIslands()
 			std::vector<ObjectFile::Reference*>&  references = atom->getReferences();
 			for (std::vector<ObjectFile::Reference*>::iterator rit=references.begin(); rit != references.end(); rit++) {
 				ObjectFile::Reference* ref = *rit;
-				if ( this->isBranch24Reference(ref->getKind()) ) {
+				if ( this->isBranchThatMightNeedIsland(ref->getKind()) ) {
 					ObjectFile::Atom& target = ref->getTarget();
 					int64_t srcAddr = atom->getAddress() + ref->getFixUpOffset();
 					int64_t dstAddr = target.getAddress() + ref->getTargetOffset();
 					int64_t displacement = dstAddr - srcAddr;
 					TargetAndOffset finalTargetAndOffset = { &target, ref->getTargetOffset() };
-					const int64_t kFifteenMegLimit = kBetweenRegions;
-					if ( displacement > kFifteenMegLimit ) {
+					const int64_t kBranchLimit = kBetweenRegions;
+					if ( displacement > kBranchLimit ) {
 						// create forward branch chain
 						ObjectFile::Atom* nextTarget = &target;
-						uint64_t nextTargetOffset = ref->getTargetOffset();
 						for (int i=kIslandRegionsCount-1; i >=0 ; --i) {
 							AtomToIsland* region = &regionsMap[i];
 							int64_t islandRegionAddr = kBetweenRegions * (i+1) + textSection->getBaseAddress();
 							if ( (srcAddr < islandRegionAddr) && (islandRegionAddr <= dstAddr) ) { 
 								AtomToIsland::iterator pos = region->find(finalTargetAndOffset);
 								if ( pos == region->end() ) {
-									BranchIslandAtom<A>* island = new BranchIslandAtom<A>(*this, target.getDisplayName(), i, *nextTarget, nextTargetOffset);
+									BranchIslandAtom<A>* island = new BranchIslandAtom<A>(*this, target.getDisplayName(), i, *nextTarget, *finalTargetAndOffset.atom, finalTargetAndOffset.offset);
 									island->setSection(textSection);
 									(*region)[finalTargetAndOffset] = island;
 									if (log) fprintf(stderr, "added island %s to region %d for %s\n", island->getDisplayName(), i, atom->getDisplayName());
 									regionsIslands[i].push_back(island);
 									++islandCount;
 									nextTarget = island;
-									nextTargetOffset = 0;
 								}
 								else {
 									nextTarget = pos->second;
-									nextTargetOffset = 0;
 								}
 							}
 						}
 						if (log) fprintf(stderr, "using island %s for branch to %s from %s\n", nextTarget->getDisplayName(), target.getDisplayName(), atom->getDisplayName());
-						ref->setTarget(*nextTarget, nextTargetOffset);
+						ref->setTarget(*nextTarget, 0);
 					}
-					else if ( displacement < (-kFifteenMegLimit) ) {
+					else if ( displacement < (-kBranchLimit) ) {
 						// create back branching chain
 						ObjectFile::Atom* prevTarget = &target;
-						uint64_t prevTargetOffset = ref->getTargetOffset();
 						for (int i=0; i < kIslandRegionsCount ; ++i) {
 							AtomToIsland* region = &regionsMap[i];
 							int64_t islandRegionAddr = kBetweenRegions * (i+1);
 							if ( (dstAddr <= islandRegionAddr) && (islandRegionAddr < srcAddr) ) {
 								AtomToIsland::iterator pos = region->find(finalTargetAndOffset);
 								if ( pos == region->end() ) {
-									BranchIslandAtom<A>* island = new BranchIslandAtom<A>(*this, target.getDisplayName(), i, *prevTarget, prevTargetOffset);
+									BranchIslandAtom<A>* island = new BranchIslandAtom<A>(*this, target.getDisplayName(), i, *prevTarget, *finalTargetAndOffset.atom, finalTargetAndOffset.offset);
 									island->setSection(textSection);
 									(*region)[finalTargetAndOffset] = island;
 									if (log) fprintf(stderr, "added back island %s to region %d for %s\n", island->getDisplayName(), i, atom->getDisplayName());
 									regionsIslands[i].push_back(island);
 									++islandCount;
 									prevTarget = island;
-									prevTargetOffset = 0;
 								}
 								else {
 									prevTarget = pos->second;
-									prevTargetOffset = 0;
 								}
 							}
 						}
 						if (log) fprintf(stderr, "using back island %s for %s\n", prevTarget->getDisplayName(), atom->getDisplayName());
-						ref->setTarget(*prevTarget, prevTargetOffset);
+						ref->setTarget(*prevTarget, 0);
 					}
 				}
 			}
@@ -8714,6 +8844,7 @@ bool Writer<A>::addPPCBranchIslands()
 						uint64_t alignment = 1 << (islandAtom->getAlignment().powerOf2);
 						sectionOffset = ( (sectionOffset+alignment-1) & (-alignment) );
 						islandAtom->setSectionOffset(sectionOffset);
+						if ( log ) fprintf(stderr, "assigning  __text offset 0x%08llx to %s\n", sectionOffset, islandAtom->getDisplayName());
 						sectionOffset += islandAtom->getSize();
 					}
 					++regionIndex;
@@ -8735,6 +8866,7 @@ bool Writer<A>::addPPCBranchIslands()
 					uint64_t alignment = 1 << (islandAtom->getAlignment().powerOf2);
 					sectionOffset = ( (sectionOffset+alignment-1) & (-alignment) );
 					islandAtom->setSectionOffset(sectionOffset);
+					if ( log ) fprintf(stderr, "assigning  __text offset 0x%08llx to %s\n", sectionOffset, islandAtom->getDisplayName());
 					sectionOffset += islandAtom->getSize();
 				}
 			}
@@ -8769,6 +8901,7 @@ void Writer<A>::adjustLoadCommandsAndPadding()
 		offset += atomSize;
 		fLoadCommandsSection->fSize = offset;
 	}
+	const uint32_t sizeOfLoadCommandsPlusHeader = offset + sizeof(macho_header<typename A::P>);
 
 	std::vector<SectionInfo*>& sectionInfos = fLoadCommandsSegment->fSections;
 	const int sectionCount = sectionInfos.size();
@@ -8792,11 +8925,6 @@ void Writer<A>::adjustLoadCommandsAndPadding()
 	else if ( fOptions.outputKind() == Options::kPreload ) {
 		// mach-o MH_PRELOAD files need no padding between load commands and first section
 		paddingSize = 0;
-	}
-	else if ( fOptions.makeEncryptable() ) {
-		// want load commands to end on a page boundary, so __text starts on page boundary
-		paddingSize = 4096 - ((totalSizeOfTEXTLessHeaderAndLoadCommands+fOptions.minimumHeaderPad()) % 4096) + fOptions.minimumHeaderPad();
-		fEncryptionLoadCommand->setStartEncryptionOffset(totalSizeOfTEXTLessHeaderAndLoadCommands+paddingSize);
 	}
 	else {
 		// work backwards from end of segment and lay out sections so that extra room goes to padding atom
@@ -8825,6 +8953,19 @@ void Writer<A>::adjustLoadCommandsAndPadding()
 		if ( paddingSize < minPad ) {
 			int extraPages = (minPad - paddingSize + fOptions.segmentAlignment() - 1)/fOptions.segmentAlignment();
 			paddingSize += extraPages * fOptions.segmentAlignment();
+		}
+		
+		if ( fOptions.makeEncryptable() ) {
+			// load commands must be on a separate non-encrypted page
+			int loadCommandsPage = (sizeOfLoadCommandsPlusHeader + minPad)/fOptions.segmentAlignment();
+			int textPage = (sizeOfLoadCommandsPlusHeader + paddingSize)/fOptions.segmentAlignment();
+			if ( loadCommandsPage == textPage ) {
+				paddingSize += fOptions.segmentAlignment();
+				textPage += 1;
+			}
+			
+			//paddingSize = 4096 - ((totalSizeOfTEXTLessHeaderAndLoadCommands+fOptions.minimumHeaderPad()) % 4096) + fOptions.minimumHeaderPad();
+			fEncryptionLoadCommand->setStartEncryptionOffset(textPage*fOptions.segmentAlignment());
 		}
 	}
 
@@ -8931,7 +9072,6 @@ void Writer<A>::assignFileOffsets()
 			else {
 				address = ( (address+alignment-1) & (-alignment) );
 			}
-			
 			// adjust file offset to match address
 			if ( prevSection != NULL ) {
 				if ( virtualSectionOccupyAddressSpace || !prevSection->fVirtualSection )
@@ -9736,7 +9876,7 @@ void DylibLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 		cmd->set_cmd(LC_LAZY_LOAD_DYLIB);
 	else if ( fInfo.options.fWeakImport || autoWeakLoadDylib )
 		cmd->set_cmd(LC_LOAD_WEAK_DYLIB);
-	else if ( fInfo.options.fReExport && (fWriter.fOptions.macosxVersionMin() >= ObjectFile::ReaderOptions::k10_5) )
+	else if ( fInfo.options.fReExport && fWriter.fOptions.useSimplifiedDylibReExports() )
 		cmd->set_cmd(LC_REEXPORT_DYLIB);
 	else
 		cmd->set_cmd(LC_LOAD_DYLIB);
@@ -10788,27 +10928,48 @@ const char* StringsLinkEditAtom<A>::stringForIndex(int32_t index) const
 
 
 template <typename A>
-BranchIslandAtom<A>::BranchIslandAtom(Writer<A>& writer, const char* name, int islandRegion, ObjectFile::Atom& target, uint32_t targetOffset)
- : WriterAtom<A>(writer, Segment::fgTextSegment), fTarget(target), fTargetOffset(targetOffset)
+BranchIslandAtom<A>::BranchIslandAtom(Writer<A>& writer, const char* name, int islandRegion, ObjectFile::Atom& target, 
+											ObjectFile::Atom& finalTarget, uint32_t finalTargetOffset)
+ : WriterAtom<A>(writer, Segment::fgTextSegment), fTarget(target), fFinalTarget(finalTarget), fFinalTargetOffset(finalTargetOffset)
 {
-	char* buf = new char[strlen(name)+32];
-	if ( targetOffset == 0 ) {
+	if ( finalTargetOffset == 0 ) {
 		if ( islandRegion == 0 )
-			sprintf(buf, "%s$island", name);
+			asprintf((char**)&fName, "%s$island", name);
 		else
-			sprintf(buf, "%s$island_%d", name, islandRegion);
+			asprintf((char**)&fName, "%s$island$%d", name, islandRegion+1);
 	}
 	else {
-		sprintf(buf, "%s_plus_%d$island_%d", name, targetOffset, islandRegion);
+		asprintf((char**)&fName, "%s_plus_%d$island$%d", name, finalTargetOffset, islandRegion);
 	}
-	fName = buf;
+	
+	if ( finalTarget.isThumb() ) {
+		if ( writer.fOptions.preferSubArchitecture() && writer.fOptions.subArchitecture() == CPU_SUBTYPE_ARM_V7 ) {
+			fIslandKind = kBranchIslandToThumb2;
+		}
+		else {
+			fIslandKind = kBranchIslandToThumb1;
+		}
+	}
+	else {
+		fIslandKind = kBranchIslandToARM;
+	}
 }
 
 
 template <>
 void BranchIslandAtom<ppc>::copyRawContent(uint8_t buffer[]) const
 {
-	int64_t displacement = fTarget.getAddress() + fTargetOffset - this->getAddress();
+	int64_t displacement;
+	const int64_t bl_sixteenMegLimit = 0x00FFFFFF;
+	if ( fTarget.getContentType() == ObjectFile::Atom::kBranchIsland ) {
+		displacement = getFinalTargetAdress() - this->getAddress();
+		if ( (displacement > bl_sixteenMegLimit) && (displacement < (-bl_sixteenMegLimit)) ) {
+			displacement = fTarget.getAddress() - this->getAddress();
+		}
+	}
+	else {
+		displacement = fTarget.getAddress() + fFinalTargetOffset - this->getAddress();
+	}
 	int32_t branchInstruction = 0x48000000 | ((uint32_t)displacement & 0x03FFFFFC);
 	OSWriteBigInt32(buffer, 0, branchInstruction);
 }
@@ -10816,9 +10977,121 @@ void BranchIslandAtom<ppc>::copyRawContent(uint8_t buffer[]) const
 template <>
 void BranchIslandAtom<ppc64>::copyRawContent(uint8_t buffer[]) const
 {
-	int64_t displacement = fTarget.getAddress() + fTargetOffset - this->getAddress();
+	int64_t displacement;
+	const int64_t bl_sixteenMegLimit = 0x00FFFFFF;
+	if ( fTarget.getContentType() == ObjectFile::Atom::kBranchIsland ) {
+		displacement = getFinalTargetAdress() - this->getAddress();
+		if ( (displacement > bl_sixteenMegLimit) && (displacement < (-bl_sixteenMegLimit)) ) {
+			displacement = fTarget.getAddress() - this->getAddress();
+		}
+	}
+	else {
+		displacement = fTarget.getAddress() + fFinalTargetOffset - this->getAddress();
+	}
 	int32_t branchInstruction = 0x48000000 | ((uint32_t)displacement & 0x03FFFFFC);
 	OSWriteBigInt32(buffer, 0, branchInstruction);
+}
+
+template <>
+void BranchIslandAtom<arm>::copyRawContent(uint8_t buffer[]) const
+{
+	const bool log = false;
+	switch ( fIslandKind ) {
+		case kBranchIslandToARM:
+			{
+			int64_t displacement;
+			// an ARM branch can branch farther than a thumb branch.  The branch
+			// island generation was conservative and put islands every thumb
+			// branch distance apart.  Check to see if this is a an island
+			// hopping branch that could be optimized to go directly to target.
+			if ( fTarget.getContentType() == ObjectFile::Atom::kBranchIsland ) {
+				displacement = getFinalTargetAdress() - this->getAddress() - 8;
+				if ( (displacement < 33554428LL) && (displacement > (-33554432LL)) ) {
+					// can skip branch island and jump straight to target
+					if (log) fprintf(stderr, "%s: optimized jump to final target at 0x%08llX, thisAddr=0x%08llX\n", fName, getFinalTargetAdress(), this->getAddress());
+				}
+				else {
+					// ultimate target is too far, jump to island
+					displacement = fTarget.getAddress() - this->getAddress() - 8;
+					if (log) fprintf(stderr, "%s: jump to branch island at 0x%08llX\n", fName, fTarget.getAddress());
+				}
+			}
+			else {
+				// target of island is ultimate target
+				displacement = fTarget.getAddress() + fFinalTargetOffset - this->getAddress() - 8;
+				if (log) fprintf(stderr, "%s: jump to target at 0x%08llX\n", fName, fTarget.getAddress());
+			}
+			uint32_t imm24 = (displacement >> 2) & 0x00FFFFFF;
+			int32_t branchInstruction = 0xEA000000 | imm24;
+			OSWriteLittleInt32(buffer, 0, branchInstruction);
+			}
+			break;
+		case kBranchIslandToThumb2:
+			{
+			int64_t displacement;
+			// an ARM branch can branch farther than a thumb branch.  The branch
+			// island generation was conservative and put islands every thumb
+			// branch distance apart.  Check to see if this is a an island
+			// hopping branch that could be optimized to go directly to target.
+			if ( fTarget.getContentType() == ObjectFile::Atom::kBranchIsland ) {
+				displacement = getFinalTargetAdress() - this->getAddress() - 4;
+				if ( (displacement < 16777214) && (displacement > (-16777216LL)) ) {
+					// can skip branch island and jump straight to target
+					if (log) fprintf(stderr, "%s: optimized jump to final target at 0x%08llX, thisAddr=0x%08llX\n", fName, getFinalTargetAdress(), this->getAddress());
+				}
+				else {
+					// ultimate target is too far, jump to island
+					displacement = fTarget.getAddress() - this->getAddress() - 4;
+					if (log) fprintf(stderr, "%s: jump to branch island at 0x%08llX\n", fName, fTarget.getAddress());
+				}
+			}
+			else {
+				// target of island is ultimate target
+				displacement = fTarget.getAddress() + fFinalTargetOffset - this->getAddress() - 4;
+				if (log) fprintf(stderr, "%s: jump to target at 0x%08llX\n", fName, fTarget.getAddress());
+			}
+			if ( (displacement > 16777214) || (displacement < (-16777216LL)) ) {
+				throwf("internal branch island error: thumb2 b/bx out of range (%lld max is +/-16M) from %s to %s in %s",
+						displacement, this->getDisplayName(), 
+						fTarget.getDisplayName(), fTarget.getFile()->getPath());
+			}
+			// The instruction is really two instructions:
+			// The lower 16 bits are the first instruction, which contains the high
+			//   11 bits of the displacement.
+			// The upper 16 bits are the second instruction, which contains the low
+			//   11 bits of the displacement, as well as differentiating bl and blx.
+			uint32_t s = (uint32_t)(displacement >> 24) & 0x1;
+			uint32_t i1 = (uint32_t)(displacement >> 23) & 0x1;
+			uint32_t i2 = (uint32_t)(displacement >> 22) & 0x1;
+			uint32_t imm10 = (uint32_t)(displacement >> 12) & 0x3FF;
+			uint32_t imm11 = (uint32_t)(displacement >> 1) & 0x7FF;
+			uint32_t j1 = (i1 == s);
+			uint32_t j2 = (i2 == s);
+			uint32_t opcode = 0x9000F000;
+			uint32_t nextDisp = (j1 << 13) | (j2 << 11) | imm11;
+			uint32_t firstDisp = (s << 10) | imm10;
+			uint32_t newInstruction = opcode | (nextDisp << 16) | firstDisp;
+			//warning("s=%d, j1=%d, j2=%d, imm10=0x%0X, imm11=0x%0X, opcode=0x%08X, first=0x%04X, next=0x%04X, new=0x%08X, disp=0x%llX for %s to %s\n",
+			//	s, j1, j2, imm10, imm11, opcode, firstDisp, nextDisp, newInstruction, displacement, inAtom->getDisplayName(), ref->getTarget().getDisplayName());
+			OSWriteLittleInt32(buffer, 0, newInstruction);
+			}
+			break;
+		case kBranchIslandToThumb1:
+			{
+			// There is no large displacement thumb1 branch instruction.
+			// Instead use ARM instructions that can jump to thumb.
+			// we use a 32-bit displacement, so we can directly jump to target which means no island hopping
+			int64_t displacement = getFinalTargetAdress() - (this->getAddress() + 12);
+			if ( fFinalTarget.isThumb() )
+				displacement |= 1;
+			if (log) fprintf(stderr, "%s: 4 ARM instruction jump to final target at 0x%08llX\n", fName, getFinalTargetAdress());
+			OSWriteLittleInt32(&buffer[ 0], 0, 0xe59fc004);	// 	ldr  ip, pc + 4
+			OSWriteLittleInt32(&buffer[ 4], 0, 0xe08fc00c);	// 	add	 ip, pc, ip
+			OSWriteLittleInt32(&buffer[ 8], 0, 0xe12fff1c);	// 	bx	 ip
+			OSWriteLittleInt32(&buffer[12], 0, displacement);	// 	.long target-this		
+			}
+			break;
+	};
 }
 
 template <>
@@ -10831,6 +11104,20 @@ template <>
 uint64_t BranchIslandAtom<ppc64>::getSize() const
 {
 	return 4;
+}
+
+template <>
+uint64_t BranchIslandAtom<arm>::getSize() const
+{
+	switch ( fIslandKind ) {
+		case kBranchIslandToARM:
+			return 4;
+		case kBranchIslandToThumb1:
+			return 16;
+		case kBranchIslandToThumb2:
+			return 4;
+	};
+	throw "internal error: no ARM branch island kind";
 }
 
 

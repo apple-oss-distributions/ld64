@@ -271,6 +271,10 @@ When targeting Mac OS X 10.6 or later, the format of the exported symbol informa
 make lookups of popular symbols faster.  This option is used to pass a file containing a list of
 the symbols most frequently used by clients of the dynamic library being built. Not all exported symbols
 need to be listed.  
+.It Fl no_zero_fill_sections
+By default the linker moves all zero fill sections to the end of the __DATA segment and configures
+them to use no space on disk.  This option suppresses that optimization, so zero-filled data occupies
+space on disk in a final linked image.
 .El
 .Ss Options when creating a dynamic library (dylib) 
 .Bl -tag

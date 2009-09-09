@@ -1,5 +1,5 @@
 
-#if __ppc__
+#if __ppc__ 
 
     .text
 
@@ -27,13 +27,50 @@ _space2:
 
 #if __arm__
 
+    .text
+_prejunk:
+    mov	r0, #1
+    nop
 
+#if __thumb2__
+	// thumb2 branches are +/- 16MB
 _space1:
-    .space 32*1024*1024 + 2
+    .space 14*1024*1024
+_space2:
+    .space 14*1024*1024
+_space3:
+    .space 14*1024*1024
 
+
+#elif __thumb__
+	// thumb1 branches are +/- 4MB
+_space1:
+    .space 3*1024*1024
+_space2:
+    .space 3*1024*1024
+_space3:
+    .space 3*1024*1024
+    
+#else
+
+	// ARM branches are +/- 32MB
+_space1:
+    .space 14*1024*1024
+_space2:
+    .space 14*1024*1024
+_space3:
+    .space 14*1024*1024
 
 #endif
 
+    .align 5
+_junk:
+    mov	r0, #1
+    nop
+    
+    
+_space4:
+    .space 2*1024*1024
+#endif
 
     .subsections_via_symbols
-    

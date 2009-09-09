@@ -288,6 +288,7 @@ public:
 	virtual uint32_t							getOrdinal() const { return fOrdinal; }
 	virtual void								setOrdinal(uint32_t value) { fOrdinal = value; }
 	virtual const void*							getSectionRecord() const = 0;
+	virtual unsigned int						getSectionIndex() const = 0;
 	virtual bool								isAlias() const { return false; }
 	virtual uint8_t								getLSDAReferenceKind() const { return 0; }
 	virtual uint8_t								getPersonalityReferenceKind() const { return 0; }
@@ -397,21 +398,36 @@ public:
 			else if ( rightAlias ) {
 				return false;
 			}
-			else {
-				// they must be tentative defintions
-				switch ( left->getDefinitionKind() ) {
-					case ObjectFile::Atom::kTentativeDefinition:
-						// sort tentative definitions by name
-						return ( strcmp(left->getName(), right->getName()) < 0 );
-					case ObjectFile::Atom::kAbsoluteSymbol:
-						// sort absolute symbols with same address by name
-						return ( strcmp(left->getName(), right->getName()) < 0 );
-					default:
-						// hack for rdar://problem/5102873
-						if ( !left->isZeroFill() || !right->isZeroFill() )
-							warning("atom sorting error for %s and %s in %s", left->getDisplayName(), right->getDisplayName(), left->getFile()->getPath());
-						break;
-				}
+			// one might be a section start or end label
+			switch ( left->getContentType() ) {
+				case ObjectFile::Atom::kSectionStart:
+					return true;
+				case ObjectFile::Atom::kSectionEnd:
+					return false;
+				default:
+					break;
+			}
+			switch ( right->getContentType() ) {
+				case ObjectFile::Atom::kSectionStart:
+					return false;
+				case ObjectFile::Atom::kSectionEnd:
+					return true;
+				default:
+					break;
+			}
+			// they could be tentative defintions
+			switch ( left->getDefinitionKind() ) {
+				case ObjectFile::Atom::kTentativeDefinition:
+					// sort tentative definitions by name
+					return ( strcmp(left->getName(), right->getName()) < 0 );
+				case ObjectFile::Atom::kAbsoluteSymbol:
+					// sort absolute symbols with same address by name
+					return ( strcmp(left->getName(), right->getName()) < 0 );
+				default:
+					// hack for rdar://problem/5102873
+					if ( !left->isZeroFill() || !right->isZeroFill() )
+						warning("atom sorting error for %s and %s in %s", left->getDisplayName(), right->getDisplayName(), left->getFile()->getPath());
+					break;
 			}
 		}
 		return false;
@@ -439,7 +455,7 @@ public:
 	virtual ObjectFile::Atom::ContentType		getContentType() const			{ return fType; }
 	virtual SymbolTableInclusion				getSymbolTableInclusion() const	{ return fSymbolTableInclusion; }
 	virtual	bool								dontDeadStrip() const;
-	virtual bool								isZeroFill() const				{ return ((fSection->flags() & SECTION_TYPE) == S_ZEROFILL); }
+	virtual bool								isZeroFill() const;
 	virtual bool								isThumb() const					{ return ((fSymbol->n_desc() & N_ARM_THUMB_DEF) != 0); }
 	virtual uint64_t							getSize() const					{ return fSize; }
 	virtual std::vector<ObjectFile::Reference*>&  getReferences() const			{ return (std::vector<ObjectFile::Reference*>&)(fReferences); }
@@ -458,6 +474,7 @@ public:
 	virtual const ObjectFile::ReaderOptions&	getOptions() const				{ return fOwner.fOptions; }
 	virtual uint64_t							getObjectAddress() const 		{ return fAddress; }
 	virtual const void*							getSectionRecord() const		{ return (const void*)fSection; }
+	virtual unsigned int						getSectionIndex() const			{ return 1 + (fSection - fOwner.fSectionsStart); }
 	virtual uint8_t								getLSDAReferenceKind() const;
 	virtual uint8_t								getPersonalityReferenceKind() const;
 	virtual uint32_t							getCompactUnwindEncoding(uint64_t ehAtomAddress);
@@ -590,6 +607,7 @@ SymbolAtom<A>::SymbolAtom(Reader<A>& owner, const macho_nlist<P>* symbol, const 
 		fAlignment.modulus = 0;
 }
 
+
 template <typename A>
 bool SymbolAtom<A>::dontDeadStrip() const
 {
@@ -641,6 +659,12 @@ ObjectFile::Atom& SymbolAtom<A>::getFollowOnAtom() const
 			return ref->getTarget();
 	}
 	return *((ObjectFile::Atom*)NULL);
+}
+
+template <typename A>
+bool SymbolAtom<A>::isZeroFill() const
+{
+	return ( ((fSection->flags() & SECTION_TYPE) == S_ZEROFILL) && fOwner.fOptions.fOptimizeZeroFill );
 }
 
 
@@ -717,6 +741,7 @@ public:
 	virtual const ObjectFile::ReaderOptions&	getOptions() const				{ return fAliasOf.getOptions(); }
 	virtual uint64_t							getObjectAddress() const		{ return fAliasOf.getObjectAddress(); }
 	virtual const void*							getSectionRecord() const		{ return fAliasOf.getSectionRecord(); }
+	virtual unsigned int						getSectionIndex() const			{ return fAliasOf.getSectionIndex(); }
 	virtual bool								isAlias() const					{ return true; }
 
 protected:
@@ -778,7 +803,7 @@ public:
 	virtual const char*							getDisplayName() const			{ return getName(); }
 	virtual ObjectFile::Atom::Scope				getScope() const				{ return fScope; }
 	virtual ObjectFile::Atom::DefinitionKind	getDefinitionKind() const		{ return ObjectFile::Atom::kTentativeDefinition; }
-	virtual bool								isZeroFill() const				{ return true; }
+	virtual bool								isZeroFill() const				{ return fOwner.fOptions.fOptimizeZeroFill; }
 	virtual bool								isThumb() const					{ return false; }
 	virtual SymbolTableInclusion				getSymbolTableInclusion() const	{ return ((fSymbol->n_desc() & REFERENCED_DYNAMICALLY) != 0)
 																						? ObjectFile::Atom::kSymbolTableInAndNeverStrip : ObjectFile::Atom::kSymbolTableIn; }
@@ -800,6 +825,7 @@ public:
 	virtual const ObjectFile::ReaderOptions&	getOptions() const				{ return fOwner.fOptions; }
 	virtual uint64_t							getObjectAddress() const		{ return ULLONG_MAX; }
 	virtual const void*							getSectionRecord() const		{ return NULL; }
+	virtual unsigned int						getSectionIndex() const			{ return 0; }
 
 protected:
 	typedef typename A::P					P;
@@ -916,6 +942,7 @@ public:
 	virtual const ObjectFile::ReaderOptions&	getOptions() const				{ return fOwner.fOptions; }
 	virtual uint64_t							getObjectAddress() const		{ return fAddress; }
 	virtual const void*							getSectionRecord() const		{ return (const void*)fSection; }
+	virtual unsigned int						getSectionIndex() const			{ return fSectionIndex; }
 	BaseAtom*									redirectTo()					{ return fRedirect; }
 	bool										isWeakImportStub()				{ return fWeakImportStub; }
 	void										resolveName();
@@ -952,6 +979,7 @@ protected:
 	ObjectFile::Atom::Scope						fScope;
     ObjectFile::Atom::DefinitionKind            fKind;
 	ObjectFile::Atom::ContentType				fType;
+	unsigned int								fSectionIndex;
 };
 
 template <typename A>
@@ -959,7 +987,7 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
  : fOwner(owner), fSynthesizedName(NULL), fDisplayName(NULL), fSection(section), fAddress(addr), fSize(size), 
 	fSegment(NULL), fDontDeadStrip(true), fWeakImportStub(false), fSymbolTableInclusion(ObjectFile::Atom::kSymbolTableNotIn),
 	fScope(ObjectFile::Atom::scopeTranslationUnit), fKind(ObjectFile::Atom::kRegularDefinition), 
-	fType(ObjectFile::Atom::kUnclassifiedType)
+	fType(ObjectFile::Atom::kUnclassifiedType), fSectionIndex(1 + (section - owner.fSectionsStart))
 {
 	fSegment = new Segment<A>(fSection);
 	fRedirect = this;
@@ -1029,6 +1057,33 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 				owner.fAtomsPendingAName.push_back(this);
 				if ( !fOwner.fOptions.fNoEHLabels ) 
 					fSymbolTableInclusion = ObjectFile::Atom::kSymbolTableIn;
+			}
+			else if ( section == owner.fUTF16Section ) {
+				if ( fOwner.fOptions.fForFinalLinkedImage ) {
+					fDontDeadStrip = false;
+					fScope = ObjectFile::Atom::scopeLinkageUnit;
+					fKind = ObjectFile::Atom::kWeakDefinition;
+					char* name = new char[16+5*size];
+					strcpy(name, "utf16-string=");
+					char* s = &name[13];
+					const uint16_t* words = (uint16_t*)((char*)(owner.fHeader) + section->offset() + addr - section->addr());
+					unsigned int wordCount = size/2;
+					// note, the compiler sometimes puts trailing zeros on the end of the data
+					if ( E::get32(words[wordCount-1]) == 0 )
+						--wordCount;
+					bool needSeperator = false;
+					for(unsigned int i=0; i < wordCount; ++i) {
+						if ( needSeperator )
+							strcpy(s++, ".");
+						sprintf(s, "%04X", E::get32(words[i]));
+						s += 4;
+						needSeperator = true;
+					}
+					fSynthesizedName = name;
+				}
+				else {
+					asprintf((char**)&fSynthesizedName, "lutf16-0x%X", addr);
+				}
 			}
 			break;
 		case S_CSTRING_LITERALS:
@@ -1156,6 +1211,7 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 								// add direct reference to target later, because its atom may not be constructed yet
 								fOwner.fLocalNonLazys.push_back(this);
 								fScope = ObjectFile::Atom::scopeTranslationUnit;
+								fType = ObjectFile::Atom::kNonLazyPointer;
 								return;
 							}
 							else if ( (sym->n_value() < nonLazyPtrValue) && ((closestSym == NULL) || (sym->n_value() > closestSym->n_value())) ) {
@@ -1175,21 +1231,26 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 					}
 					fScope = ObjectFile::Atom::scopeTranslationUnit;
 					fOwner.fLocalNonLazys.push_back(this);
+					fType = ObjectFile::Atom::kNonLazyPointer;
 					return;
 				}
 				const macho_nlist<P>* targetSymbol = &fOwner.fSymbols[symbolIndex];
 				const char* name = &fOwner.fStrings[targetSymbol->n_strx()];
 				char* str = new char[strlen(name)+16];
 				strcpy(str, name);
-				if ( type == S_LAZY_SYMBOL_POINTERS )
+				if ( type == S_LAZY_SYMBOL_POINTERS ) {
 					strcat(str, "$lazy_ptr");
-				else
+					fType = ObjectFile::Atom::kLazyPointer;
+				}
+				else {
 					strcat(str, "$non_lazy_ptr");
+					fType = ObjectFile::Atom::kNonLazyPointer;
+				}
 				fSynthesizedName = str;
 
 				if ( type == S_NON_LAZY_SYMBOL_POINTERS )
 					fKind = ObjectFile::Atom::kWeakDefinition;
-
+				
 				if ( (targetSymbol->n_type() & N_EXT) == 0 ) {
 					// target is translation unit scoped, so add direct reference to target
 					//fOwner.makeReference(A::kPointer, addr, targetSymbol->n_value());
@@ -1204,7 +1265,7 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 			}
 			break;
 		default:
-			throwf("section type %d not supported with address=0x%08X", type, addr);
+			throwf("section type %d not supported with address=0x%08llX", type, (uint64_t)addr);
 	}
 	//fprintf(stderr, "AnonymousAtom(%p) %s \n", this, this->getDisplayName());
 }
@@ -1267,6 +1328,9 @@ void AnonymousAtom<A>::resolveName()
 				if ( (superStr != NULL) && (strncmp(superStr, "cstring=", 8) == 0) ) {
 					asprintf((char**)&fSynthesizedName, "cfstring=%s", &superStr[8]);
 				}
+				else if ( (superStr != NULL) && (strncmp(superStr, "utf16-string=", 13) == 0) ) {
+					asprintf((char**)&fSynthesizedName, "cfstring-utf16=%s", &superStr[13]);
+				}
 				else {
 					// compiled with -fwritable-strings or a non-ASCII string 
 					fKind = ObjectFile::Atom::kRegularDefinition; // these are not coalescable
@@ -1324,7 +1388,7 @@ ObjectFile::Atom::Scope AnonymousAtom<A>::getScope() const
 template <typename A>
 bool AnonymousAtom<A>::isZeroFill() const
 {
-	return ( (fSection->flags() & SECTION_TYPE) == S_ZEROFILL );
+	return ( ((fSection->flags() & SECTION_TYPE) == S_ZEROFILL) && fOwner.fOptions.fOptimizeZeroFill );
 }
 
 
@@ -1434,6 +1498,7 @@ public:
 	virtual uint64_t							getObjectAddress() const		{ return fSymbol->n_value(); }
 	virtual void								setSectionOffset(uint64_t offset) { /* don't let fSectionOffset be altered*/ }
 	virtual const void*							getSectionRecord() const		{ return NULL; }
+	virtual unsigned int						getSectionIndex() const			{ return 0; }
 
 protected:
 	typedef typename A::P					P;
@@ -1471,6 +1536,110 @@ AbsoluteAtom<A>::AbsoluteAtom(Reader<A>& owner, const macho_nlist<P>* symbol)
 	//fprintf(stderr, "AbsoluteAtom(%p) %s\n", this, this->getDisplayName());
 }
 
+
+//
+// An SectionBoundaryAtom represent the start or end of a section
+//
+template <typename A>
+class SectionBoundaryAtom : public BaseAtom
+{
+public:
+	virtual ObjectFile::Reader*					getFile() const					{ return &fOwner; }
+	virtual bool								getTranslationUnitSource(const char** dir, const char** name) const
+																				{ return fOwner.getTranslationUnitSource(dir, name); }
+	virtual const char*							getName() const					{ return fSymbolName; }
+	virtual const char*							getDisplayName() const			{ return fDisplayName; }
+	virtual ObjectFile::Atom::Scope				getScope() const				{ return ObjectFile::Atom::scopeLinkageUnit; }
+	virtual ObjectFile::Atom::DefinitionKind	getDefinitionKind() const		{ return ObjectFile::Atom::kWeakDefinition; }
+	virtual ObjectFile::Atom::ContentType		getContentType() const			{ return fStart ? ObjectFile::Atom::kSectionStart : ObjectFile::Atom::kSectionEnd; }
+	virtual bool								isZeroFill() const				{ return false; }
+	virtual bool								isThumb() const					{ return false; }
+	virtual SymbolTableInclusion				getSymbolTableInclusion() const	{ return ObjectFile::Atom::kSymbolTableNotIn; }
+	virtual	bool								dontDeadStrip() const			{ return false; }
+	virtual uint64_t							getSize() const					{ return 0; }
+	virtual std::vector<ObjectFile::Reference*>&  getReferences() const			{ return fgNoReferences; }
+	virtual bool								mustRemainInSection() const		{ return true; }
+	virtual const char*							getSectionName() const			{ return fSectionName; } 
+	virtual ObjectFile::Segment&				getSegment() const				{ return *fSegment; }
+	virtual ObjectFile::Atom&					getFollowOnAtom() const			{ return *(ObjectFile::Atom*)NULL; }
+	virtual std::vector<ObjectFile::LineInfo>*	getLineInfo() const				{ return NULL; }
+	virtual ObjectFile::Alignment				getAlignment() const			{ return ObjectFile::Alignment(0); }
+	virtual void								copyRawContent(uint8_t buffer[]) const	{ }
+	virtual void								setScope(ObjectFile::Atom::Scope newScope)		{ }
+	virtual void								setSize(uint64_t size)			{ }
+	virtual void								addReference(ObjectFile::Reference* ref) { throw "ld: can't add references"; }
+	virtual void								sortReferences()				{ }
+	virtual void								addLineInfo(const  ObjectFile::LineInfo& info)	{ throw "ld: can't add line info to tentative definition"; }
+	virtual const ObjectFile::ReaderOptions&	getOptions() const				{ return fOwner.fOptions; }
+	virtual uint64_t							getObjectAddress() const		{ return 0; }
+	virtual const void*							getSectionRecord() const		{ return NULL; }
+	virtual unsigned int						getSectionIndex() const			{ return 0; }
+
+protected:
+	typedef typename A::P					P;
+	typedef typename A::P::E				E;
+	typedef typename A::P::uint_t			pint_t;
+	typedef typename A::ReferenceKinds		Kinds;
+	friend class Reader<A>;
+
+
+	class Segment : public ObjectFile::Segment
+	{
+	public:
+									Segment(const char* name, bool r, bool w, bool x): 
+										fName(name), fReadable(r), fWritable(w), fExecutable(x) {}
+										
+		virtual const char*			getName() const						{ return fName; }
+		virtual bool				isContentReadable() const			{ return fReadable; }
+		virtual bool				isContentWritable() const			{ return fWritable; }
+		virtual bool				isContentExecutable() const			{ return fExecutable; }
+	private:
+		const char*					fName;
+		bool						fReadable;
+		bool						fWritable;
+		bool						fExecutable;
+	};
+
+											SectionBoundaryAtom(Reader<A>&, bool start, const char* symbolName, const char* segSectName);
+	virtual									~SectionBoundaryAtom() {}
+
+	Reader<A>&									fOwner;
+	class Segment*								fSegment;
+	const char*									fSymbolName;
+	const char*									fSectionName;
+	const char*									fDisplayName;
+	bool										fStart;
+	static std::vector<ObjectFile::Reference*>	fgNoReferences;
+};
+
+template <typename A>
+std::vector<ObjectFile::Reference*> SectionBoundaryAtom<A>::fgNoReferences;
+
+// examples:
+//			section$start$__DATA$__my
+//			section$end$__DATA$__my
+template <typename A>
+SectionBoundaryAtom<A>::SectionBoundaryAtom(Reader<A>& owner, bool start, const char* symbolName, const char* segSectName)
+ : fOwner(owner), fSymbolName(symbolName), fSectionName(NULL), fStart(start)
+{
+	const char* segSectDividor = strrchr(segSectName, '$');
+	if ( segSectDividor == NULL )
+		throwf("malformed section reference name: %s", symbolName);
+	fSectionName = segSectDividor + 1;
+	int segNameLen = segSectDividor - segSectName;
+	if ( segNameLen > 16 )
+		throwf("malformed section reference name: %s", symbolName);
+	char segName[18];
+	strlcpy(segName, segSectName, segNameLen+1);
+	if ( strcmp(segName, "__TEXT") == 0 )
+		fSegment = new Segment("__TEXT", true, false, true);
+	else if ( strcmp(segName, "__DATA") == 0 ) 
+		fSegment = new Segment("__DATA", true, true, false);
+	else 
+		fSegment = new Segment(strdup(segName), true, true, false);
+
+	asprintf((char**)&fDisplayName, "%s of section '%s' in segment '%s'", (start ? "start" : "end"), fSectionName, segName);
+}
 
 
 
@@ -1664,6 +1833,7 @@ private:
 	friend class AnonymousAtom<A>;
 	friend class TentativeAtom<A>;
 	friend class AbsoluteAtom<A>;
+	friend class SectionBoundaryAtom<A>;
 	friend class SymbolAtom<A>;
 	typedef std::map<pint_t, BaseAtom*>			AddrToAtomMap;
 
@@ -1676,6 +1846,7 @@ private:
 	static bool									skip_form(const uint8_t ** offset, const uint8_t * end, uint64_t form, uint8_t addr_size, bool dwarf64);
 	static const char*							assureFullPath(const char* path);
 	AtomAndOffset								findAtomAndOffset(pint_t addr);
+	AtomAndOffset								findAtomAndOffsetForSection(pint_t addr, unsigned int sectionIndex);
 	AtomAndOffset								findAtomAndOffset(pint_t baseAddr, pint_t realAddr);
 	Reference<A>*								makeReference(Kinds kind, pint_t atAddr, pint_t toAddr);
 	Reference<A>*								makeReference(Kinds kind, pint_t atAddr, pint_t fromAddr, pint_t toAddr);
@@ -1717,6 +1888,7 @@ private:
 	ObjectFile::Reader::DebugInfoKind			fDebugInfo;
 	bool										fHasUUID;
 	const macho_section<P>*						fehFrameSection;
+	const macho_section<P>*						fUTF16Section;
 	std::set<BaseAtom*>							fLSDAAtoms;
 	const macho_section<P>*						fDwarfDebugInfoSect;
 	const macho_section<P>*						fDwarfDebugAbbrevSect;
@@ -1744,7 +1916,7 @@ template <typename A>
 Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, const ObjectFile::ReaderOptions& options, uint32_t ordinalBase)
 	: fPath(strdup(path)), fModTime(modTime), fOrdinalBase(ordinalBase), fOptions(options), fHeader((const macho_header<P>*)fileContent),
 	 fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fSegment(NULL), fIndirectTable(NULL),
-	 fDebugInfo(kDebugInfoNone), fHasUUID(false), fehFrameSection(NULL), 
+	 fDebugInfo(kDebugInfoNone), fHasUUID(false), fehFrameSection(NULL), fUTF16Section(NULL),
 	 fDwarfDebugInfoSect(NULL), fDwarfDebugAbbrevSect(NULL), fDwarfDebugLineSect(NULL),
 	  fDwarfTranslationUnitDir(NULL), fDwarfTranslationUnitFile(NULL), fAppleObjc(false), fHasDTraceProbes(false),
 	  fHaveIndirectSymbols(false), fReplacementClasses(false), fHasLongBranchStubs(false),
@@ -1850,6 +2022,30 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 				}
 			}
 		}
+		else if ( (strcmp(sect->sectname(), "__ustring") == 0) && (strcmp(sect->segname(), "__TEXT") == 0) ) {
+			// if there is a __ustring section parse it into AnonymousAtoms based on labels
+			fUTF16Section = sect;
+			std::vector<pint_t> utf16Addreses;
+			for (int i=fSymbolCount-1; i >= 0 ; --i) {
+				const macho_nlist<P>& sym = fSymbols[i];
+				if ( (sym.n_type() & N_STAB) == 0 ) {
+					uint8_t type =  (sym.n_type() & N_TYPE);
+					if ( type == N_SECT ) {
+						if ( &fSectionsStart[sym.n_sect()-1] == fUTF16Section ) {
+							utf16Addreses.push_back(sym.n_value());
+						}
+					}
+				}
+			}
+			utf16Addreses.push_back(fUTF16Section->addr()+fUTF16Section->size());
+			std::sort(utf16Addreses.begin(), utf16Addreses.end());
+			for(int i=utf16Addreses.size()-2; i >=0 ; --i) {
+				pint_t size = utf16Addreses[i+1] - utf16Addreses[i];
+				AnonymousAtom<A>* strAtom = new AnonymousAtom<A>(*this, fUTF16Section, utf16Addreses[i], size);
+				fAtoms.push_back(strAtom);
+				fAddrToAtom[utf16Addreses[i]] = strAtom;
+			}
+		}
 	}
 
 
@@ -1878,6 +2074,9 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 					}
 					else if ( section == fehFrameSection ) {
 						// ignore labels in __eh_frame section
+					}
+					else if ( section == fUTF16Section ) {
+						// ignore labels in __ustring section
 					}
 					else {
 						// ignore labels for atoms in other sections
@@ -1946,6 +2145,13 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 			}
 			else if ( (type == N_UNDF) && (sym.n_value() != 0) ) {
 				fAtoms.push_back(new TentativeAtom<A>(*this, &sym));
+			}
+			else if ( (type == N_UNDF) && (sym.n_value() == 0) ) {
+				const char* symName = &fStrings[sym.n_strx()];
+				if ( strncmp(symName, "section$start$", 14) == 0) 
+					fAtoms.push_back(new SectionBoundaryAtom<A>(*this, true, symName, &symName[14]));
+				else if ( strncmp(symName, "section$end$", 12) == 0) 
+					fAtoms.push_back(new SectionBoundaryAtom<A>(*this, false, symName, &symName[12]));
 			}
 			else if ( type == N_ABS ) {
 				const char* symName = &fStrings[sym.n_strx()];
@@ -2089,8 +2295,9 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 			for(pint_t sectOffset=0; sectOffset < sect->size(); sectOffset += stringLen) {
 				stringAddr = sect->addr() + sectOffset;
 				stringLen  = strlen((char*)(fHeader) + sect->offset() + sectOffset) + 1;
-				// add if not already an atom at that address
-				if ( fAddrToAtom.find(stringAddr) == fAddrToAtom.end() ) {
+				// add if not already a non-zero length atom at that address
+				typename AddrToAtomMap::iterator pos = fAddrToAtom.find(stringAddr);
+				if ( (pos == fAddrToAtom.end()) || (pos->second->getSize() == 0) ) {
 					BaseAtom* newAtom = new AnonymousAtom<A>(*this, sect, stringAddr, stringLen);
 					if ( stringLen == 1 ) {
 						// because of padding it may look like there are lots of empty strings, keep track of all
@@ -3464,8 +3671,11 @@ Reference<x86_64>* Reader<x86_64>::makeReferenceToSymbol(Kinds kind, pint_t atAd
 	// x86_64 uses external relocations everywhere, so external relocations do not imply by-name references
 	// instead check scope of target
 	const char* symbolName = &fStrings[toSymbol->n_strx()];
-	if ( ((toSymbol->n_type() & N_TYPE) == N_SECT) && (((toSymbol->n_type() & N_EXT) == 0) || (symbolName[0] == 'L')) ) 
-		return new Reference<x86_64>(kind, findAtomAndOffset(atAddr), findAtomAndOffset(toSymbol->n_value(), toSymbol->n_value()+toOffset));
+	if ( ((toSymbol->n_type() & N_TYPE) == N_SECT) && (((toSymbol->n_type() & N_EXT) == 0) || (symbolName[0] == 'L')) ) {
+		AtomAndOffset targetAO = findAtomAndOffsetForSection(toSymbol->n_value(), toSymbol->n_sect());
+		targetAO.offset = toOffset;
+		return new Reference<x86_64>(kind, findAtomAndOffset(atAddr), targetAO);
+	}
 	else
 		return new Reference<x86_64>(kind, findAtomAndOffset(atAddr), symbolName, toOffset);
 }
@@ -3492,6 +3702,29 @@ BaseAtom* Reader<x86_64>::makeReferenceToEH(const char* ehName, pint_t ehAtomAdd
 	return NULL;
 }
 
+template <typename A>
+AtomAndOffset Reader<A>::findAtomAndOffsetForSection(pint_t addr, unsigned int expectedSectionIndex)
+{
+	AtomAndOffset ao = findAtomAndOffset(addr);
+	if ( ao.atom != NULL ) {
+		if ( ((BaseAtom*)(ao.atom))->getSectionIndex() == expectedSectionIndex )
+			return ao;
+	}
+	// The atom found is not in the section expected.
+	// This probably means there was a label at the end of the section.
+	// Do a slow sequential lookup
+	for (std::vector<BaseAtom*>::iterator it=fAtoms.begin(); it != fAtoms.end(); ++it) {
+		BaseAtom* atom = *it;
+		if ( atom->getSectionIndex() == expectedSectionIndex ) {
+			pint_t objAddr = atom->getObjectAddress();
+			if ( (objAddr == addr) || ((objAddr < addr) && (objAddr+atom->getSize() > addr)) ) {
+				return AtomAndOffset(atom, addr-atom->getObjectAddress());
+			}
+		}
+	}
+	// no atom found that matched section, fall back to one orginally found
+	return ao;
+}
 
 template <typename A>
 AtomAndOffset Reader<A>::findAtomAndOffset(pint_t addr)
@@ -4123,7 +4356,7 @@ bool Reader<A>::addRelocReference_powerpc(const macho_section<typename A::P>* se
 							makeByNameReference(A::kPointer, srcAddr, targetName, pointerValue);
 					}
 					else {
-						makeReference(A::kPointer, srcAddr, pointerValue);
+						new Reference<A>(A::kPointer, findAtomAndOffset(srcAddr), findAtomAndOffsetForSection(pointerValue, reloc->r_symbolnum()));
 					}
 				}
 				break;
@@ -4411,9 +4644,8 @@ bool Reader<x86>::addRelocReference(const macho_section<x86::P>* sect, const mac
 							makeByNameReference(kind, srcAddr, targetName, pointerValue);
 					}
 					else {
-						// if this is a branch to a stub, we need to see if the stub is for a weak imported symbol
-						ObjectFile::Atom* atom = findAtomAndOffset(pointerValue).atom;
-						const char* targetName = atom->getName();
+						AtomAndOffset targetAO = findAtomAndOffsetForSection(pointerValue, reloc->r_symbolnum());
+						const char* targetName = targetAO.atom->getName();
 						if ( (targetName != NULL) && (strncmp(targetName, "___dtrace_probe$", 16) == 0) ) {
 							makeByNameReference(x86::kDtraceProbeSite, srcAddr, targetName, 0);
 							addDtraceExtraInfos(srcAddr, &targetName[16]);
@@ -4422,11 +4654,12 @@ bool Reader<x86>::addRelocReference(const macho_section<x86::P>* sect, const mac
 							makeByNameReference(x86::kDtraceIsEnabledSite, srcAddr, targetName, 0);
 							addDtraceExtraInfos(srcAddr, &targetName[20]);
 						}
-						else if ( reloc->r_pcrel() && (atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn)
-							&& ((AnonymousAtom<x86>*)atom)->isWeakImportStub() )
-							makeReference(x86::kPCRel32WeakImport, srcAddr, pointerValue);
+						// if this is a reference to a stub, we need to see if the stub is for a weak imported symbol
+						else if ( reloc->r_pcrel() && (targetAO.atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableNotIn)
+							&& ((AnonymousAtom<x86>*)targetAO.atom)->isWeakImportStub() )
+							new Reference<x86>(x86::kPCRel32WeakImport, findAtomAndOffset(srcAddr), targetAO);
 						else if ( reloc->r_symbolnum() != R_ABS )
-							makeReference(kind, srcAddr, pointerValue);
+							new Reference<x86>(kind, findAtomAndOffset(srcAddr), targetAO);
 						else {
 							// find absolute symbol that corresponds to pointerValue
 							AddrToAtomMap::iterator pos = fAddrToAbsoluteAtom.find(pointerValue);
@@ -4986,7 +5219,7 @@ bool Reader<arm>::addRelocReference(const macho_section<arm::P>* sect,
 				}
 				else {
 					AtomAndOffset at = findAtomAndOffset(srcAddr);
-					AtomAndOffset to = findAtomAndOffset(pointerValue);
+					AtomAndOffset to = findAtomAndOffsetForSection(pointerValue, reloc->r_symbolnum());
 					if ( to.atom->isThumb() )
 						to.offset &= -2;
 					new Reference<arm>(kind, at, to);
@@ -4994,7 +5227,7 @@ bool Reader<arm>::addRelocReference(const macho_section<arm::P>* sect,
 				break;
 				
 			case ARM_THUMB_32BIT_BRANCH:
-				// work around for <rdar://problem/6489480>
+				// ignore old unnecessary relocs
 				break;
 				
 			default:
@@ -5594,6 +5827,16 @@ const char* Reference<arm>::getDescription() const
 			const char* targetQuotes = (&(this->getTarget()) == NULL) ? "\"" : "";
 			const char* fromQuotes = (&(this->getFromTarget()) == NULL) ? "\"" : "";
 			sprintf(temp, "offset 0x%04X, 32-bit pointer difference: (&%s%s%s + %d) - (&%s%s%s + %d)",
+				fFixUpOffsetInSrc, targetQuotes, this->getTargetDisplayName(), targetQuotes, fToTarget.offset,
+							   fromQuotes, this->getFromTargetDisplayName(), fromQuotes, fFromTarget.offset );
+			return temp;
+			}
+		case arm::kPointerDiff12:
+			{
+			// by-name references have quoted names
+			const char* targetQuotes = (&(this->getTarget()) == NULL) ? "\"" : "";
+			const char* fromQuotes = (&(this->getFromTarget()) == NULL) ? "\"" : "";
+			sprintf(temp, "offset 0x%04X, 12-bit pointer difference: (&%s%s%s + %d) - (&%s%s%s + %d)",
 				fFixUpOffsetInSrc, targetQuotes, this->getTargetDisplayName(), targetQuotes, fToTarget.offset,
 							   fromQuotes, this->getFromTargetDisplayName(), fromQuotes, fFromTarget.offset );
 			return temp;

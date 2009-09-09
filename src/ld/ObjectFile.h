@@ -71,12 +71,13 @@ public:
 										fRemoveDwarfUnwindIfCompactExists(false),
 										fMakeCompressedDyldInfo(false),
 										fAutoOrderInitializers(true),
+										fOptimizeZeroFill(true),
 										fLogObjectFiles(false), fLogAllFiles(false),
 										fTraceDylibs(false), fTraceIndirectDylibs(false), fTraceArchives(false), 
 										fTraceOutputFile(NULL), fMacVersionMin(kMinMacVersionUnset), fIPhoneVersionMin(kMinIPhoneVersionUnset) {}
 	enum DebugInfoStripping { kDebugInfoNone, kDebugInfoMinimal, kDebugInfoFull };
 	enum MacVersionMin { kMinMacVersionUnset, k10_1, k10_2, k10_3, k10_4, k10_5, k10_6 };
-	enum IPhoneVersionMin { kMinIPhoneVersionUnset, k2_0, k2_1, k2_2, k3_0 };
+	enum IPhoneVersionMin { kMinIPhoneVersionUnset, k2_0, k3_0, k3_1 };
 
 	struct AliasPair {
 		const char*			realName;
@@ -102,6 +103,7 @@ public:
 	bool					fRemoveDwarfUnwindIfCompactExists;
 	bool					fMakeCompressedDyldInfo;
 	bool					fAutoOrderInitializers;
+	bool					fOptimizeZeroFill;
 	bool					fLogObjectFiles;
 	bool					fLogAllFiles;
 	bool					fTraceDylibs;
@@ -280,7 +282,8 @@ class Atom
 public:
 	enum Scope { scopeTranslationUnit, scopeLinkageUnit, scopeGlobal };
 	enum DefinitionKind { kRegularDefinition, kWeakDefinition, kTentativeDefinition, kExternalDefinition, kExternalWeakDefinition, kAbsoluteSymbol };
-	enum ContentType { kUnclassifiedType, kCStringType, kCFIType, kLSDAType };
+	enum ContentType { kUnclassifiedType, kCStringType, kCFIType, kLSDAType, kSectionStart, kSectionEnd, kBranchIsland, 
+					kLazyPointer, kStub, kNonLazyPointer, kLazyDylibPointer, kStubHelper };
 	enum SymbolTableInclusion { kSymbolTableNotIn, kSymbolTableIn, kSymbolTableInAndNeverStrip, kSymbolTableInAsAbsolute };
 
 	virtual Reader*							getFile() const = 0;

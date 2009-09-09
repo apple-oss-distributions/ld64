@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2008 Apple Inc. All rights reserved.
+# Copyright (c) 2009 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -24,8 +24,7 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Check that -mllvm optiions work. Verify --disable-inlining
-# results in foo() not being inlined
+# <rdar://problem/6806033> Link Time Optimization error with 'dead code strip' + hidden symbol
 #
 
 LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
@@ -34,12 +33,9 @@ LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
 run: all
 
 all:
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.c -c -o main.o -fvisibility=hidden
-	${LLVMGCC} ${CCFLAGS} main.o -o main
-	nm main | grep  _foo | ${FAIL_IF_STDIN}
-	${LLVMGCC} ${CCFLAGS} main.o -o main2 -fvisibility=hidden -Wl,-mllvm -Wl,--disable-inlining 
-	nm main2 | grep  _foo | ${FAIL_IF_EMPTY}
-	${PASS_IFF_GOOD_MACHO} main
+	${LLVMGCC} ${CCFLAGS} --emit-llvm bar.c  -c -o bar.o -fvisibility=hidden
+	${LLVMGCC} ${CCFLAGS} -dynamiclib bar.o -o libbar.dylib -dead_strip
+	${PASS_IFF_GOOD_MACHO} libbar.dylib
 	
 clean:
-	rm  main  main.o main2
+	rm  bar.o libbar.dylib

@@ -82,8 +82,9 @@ struct arm
 {
 	typedef Pointer32<LittleEndian>		P;
 	
-	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff, kPointerDiff32=kPointerDiff, kReadOnlyPointer,
-							kBranch24, kBranch24WeakImport, kThumbBranch22, kThumbBranch22WeakImport,
+	enum ReferenceKinds {  kNoFixUp, kFollowOn, kGroupSubordinate, kPointer, kPointerWeakImport, kPointerDiff, 
+							kPointerDiff32=kPointerDiff, kReadOnlyPointer, kPointerDiff12, 
+							kBranch24, kBranch24WeakImport, kThumbBranch22, kThumbBranch22WeakImport, 
 							kDtraceProbe, kDtraceProbeSite, kDtraceIsEnabledSite, kDtraceTypeReference  };
 };
 
