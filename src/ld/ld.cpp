@@ -143,15 +143,16 @@ Section::Section(const char* sectionName, const char* segmentName, bool zeroFill
 			this->fIndex = 11;
 		else if ( strcmp(sectionName, "__symbol_stub1") == 0 ) 
 			this->fIndex = 11;
+		// sort fast arm stubs to end of __TEXT to be close to lazy pointers
+		else if ( strcmp(sectionName, "__symbolstub1") == 0 ) 
+			this->fIndex = INT_MAX;  
 		// sort unwind info to end of segment
 		else if ( strcmp(sectionName, "__eh_frame") == 0 )
-			this->fIndex = INT_MAX;
-		else if ( strcmp(sectionName, "__unwind_info") == 0 ) 
 			this->fIndex = INT_MAX-1;
-		else if ( strcmp(sectionName, "__gcc_except_tab") == 0 ) 
+		else if ( strcmp(sectionName, "__unwind_info") == 0 ) 
 			this->fIndex = INT_MAX-2;
-		else if ( strcmp(sectionName, "__symbolstub1") == 0 ) 
-			this->fIndex = INT_MAX-3;  // sort to end of __TEXT to be close to lazy pointers
+		else if ( strcmp(sectionName, "__gcc_except_tab") == 0 ) 
+			this->fIndex = INT_MAX-3;
 	}
 	else if ( strcmp(segmentName, "__DATA") == 0 ) {
 		// sort arm lazy symbol pointers that must be at start of __DATA
@@ -332,6 +333,7 @@ private:
 	};
 
 	ObjectFile::Reader*	createReader(const Options::FileInfo&);
+	const char*			fileArch(const void* p);
 	void				addAtom(ObjectFile::Atom& atom);
 	void				addAtoms(std::vector<class ObjectFile::Atom*>& atoms);
 	void				buildAtomList();
@@ -359,7 +361,7 @@ private:
 	static const char*	truncateStabString(const char* str);
 	void				collectDebugInfo();
 	void				writeOutput();
-	ObjectFile::Atom*	entryPoint(bool orInit);
+	ObjectFile::Atom*	entryPoint(bool orInit, bool searchArchives=false);
 	ObjectFile::Atom*	dyldClassicHelper();
 	ObjectFile::Atom*	dyldCompressedHelper();
 	ObjectFile::Atom*	dyldLazyLibraryHelper();
@@ -541,6 +543,22 @@ Linker::Linker(int argc, const char* argv[])
 			break;
 		case CPU_TYPE_ARM:
 			fArchitectureName = "arm";
+			if ( fOptions.preferSubArchitecture() ) {
+				switch ( fOptions.subArchitecture() ) {
+					case CPU_SUBTYPE_ARM_V4T:
+						fArchitectureName = "armv4t";
+						break;
+					case CPU_SUBTYPE_ARM_V5TEJ:
+						fArchitectureName = "armv5";
+						break;
+					case CPU_SUBTYPE_ARM_V6:
+						fArchitectureName = "armv6";
+						break;
+					case CPU_SUBTYPE_ARM_V7:
+						fArchitectureName = "armv7";
+						break;
+				}
+			}
 			break;
 		default:
 			fArchitectureName = "unknown architecture";
@@ -746,6 +764,7 @@ void Linker::optimize()
 			// LTO may optimize away some atoms, so dead stripping must be redone
 			fLiveAtoms.clear();
 			this->deadStripResolve();
+			this->checkUndefines();
 		}
 		else {
 			// LTO may require new library symbols to be loaded, so redo
@@ -1218,10 +1237,44 @@ void Linker::checkUndefines()
 					}
 				}
 				// scan command line options
-				if  ( !foundAtomReference && fOptions.hasExportRestrictList() && fOptions.shouldExport(name) ) {
-					fprintf(stderr, "     -exported_symbols_list command line option\n");
+				if  ( !foundAtomReference ) {
+					// might be from -init command line option
+					if ( (fOptions.initFunctionName() != NULL) && (strcmp(name, fOptions.initFunctionName()) == 0) ) {
+						fprintf(stderr, "     -init command line option\n");
+					}
+					// or might be from exported symbol option
+					else if ( fOptions.hasExportMaskList() && fOptions.shouldExport(name) ) {
+						fprintf(stderr, "     -exported_symbol[s_list] command line option\n");
+					}
+					else {
+						bool isInitialUndefine = false;
+						std::vector<const char*>& clundefs = fOptions.initialUndefines();
+						for (std::vector<const char*>::iterator uit = clundefs.begin(); uit != clundefs.end(); ++uit) {
+							if ( strcmp(*uit, name) == 0 ) {
+								isInitialUndefine = true;
+								break;
+							}
+						}
+						if ( isInitialUndefine )
+							fprintf(stderr, "     -u command line option\n");
+					}
 					++unresolvableExportsCount;
 				}
+				// be helpful and check for typos
+				bool printedStart = false;
+				for (SymbolTable::Mapper::iterator sit=fGlobalSymbolTable.begin(); sit != fGlobalSymbolTable.end(); ++sit) {
+					if ( (sit->second != NULL) && (strstr(sit->first, name) != NULL) ) {
+						if ( ! printedStart ) {
+							fprintf(stderr, "     (maybe you meant: %s", sit->first);
+							printedStart = true;
+						}
+						else {
+							fprintf(stderr, ", %s ", sit->first);
+						}
+					}
+				}
+				if ( printedStart )
+					fprintf(stderr, ")\n");
 			}
 		}
 		if ( doError ) 
@@ -1593,7 +1646,7 @@ void Linker::moveToFrontOfSection(ObjectFile::Atom* atom)
 void Linker::deadStripResolve()
 {
 	// add main() to live roots
-	ObjectFile::Atom* entryPoint = this->entryPoint(false);
+	ObjectFile::Atom* entryPoint = this->entryPoint(false, true);
 	if ( entryPoint != NULL )
 		fLiveRootAtoms.insert(entryPoint);
 
@@ -2460,7 +2513,7 @@ void Linker::writeDotOutput()
 	}
 }
 
-ObjectFile::Atom* Linker::entryPoint(bool orInit)
+ObjectFile::Atom* Linker::entryPoint(bool orInit, bool searchArchives)
 {
 	// if main executable, find entry point atom
 	ObjectFile::Atom* entryPoint = NULL;
@@ -2470,6 +2523,11 @@ ObjectFile::Atom* Linker::entryPoint(bool orInit)
 		case Options::kDyld:
 		case Options::kPreload:
 			entryPoint = fGlobalSymbolTable.find(fOptions.entryName());
+			if ( (entryPoint == NULL) && searchArchives ) {
+				// <rdar://problem/7043256> ld64 can not find a -e entry point from an archive				
+				this->addJustInTimeAtoms(fOptions.entryName(), false, true, false);
+				entryPoint = fGlobalSymbolTable.find(fOptions.entryName());
+			}
 			if ( entryPoint == NULL ) {
 				throwf("could not find entry point \"%s\" (perhaps missing crt1.o)", fOptions.entryName());
 			}
@@ -3175,6 +3233,12 @@ void Linker::collectDebugInfo()
 
 void Linker::writeOutput()
 {
+	// <rdar://problem/6933931> ld -r of empty .o file should preserve sub-type
+	// <rdar://problem/7049478> empty dylib should have subtype from command line
+	if ( fOptions.preferSubArchitecture() && (fOptions.architecture() == CPU_TYPE_ARM) ) {
+		fCurrentCpuConstraint = (ObjectFile::Reader::CpuConstraint)fOptions.subArchitecture();
+	}
+
 	if ( fOptions.forceCpuSubtypeAll() )
 		fCurrentCpuConstraint = ObjectFile::Reader::kCpuAny;
 
@@ -3185,6 +3249,33 @@ void Linker::writeOutput()
 											fCurrentCpuConstraint,
 											fRegularDefAtomsThatOverrideADylibsWeakDef,  
 											fGlobalSymbolTable.hasExternalWeakDefinitions());
+}
+
+const char* Linker::fileArch(const void* p)
+{
+	const uint8_t* bytes = (uint8_t*)p;
+	const char* result;
+	result = mach_o::relocatable::Reader<ppc>::fileKind(bytes);
+	if ( result != NULL  )
+		 return result;
+	result = mach_o::relocatable::Reader<ppc64>::fileKind(bytes);
+	if ( result != NULL  )
+		 return result;
+	result = mach_o::relocatable::Reader<x86>::fileKind(bytes);
+	if ( result != NULL  )
+		 return result;
+	result = mach_o::relocatable::Reader<x86_64>::fileKind(bytes);
+	if ( result != NULL  )
+		 return result;
+	result = mach_o::relocatable::Reader<arm>::fileKind(bytes);
+	if ( result != NULL  )
+		 return result;
+		 
+	result = lto::Reader::fileKind(bytes);
+	if ( result != NULL  )
+		 return result;
+	
+	return "unsupported file format";	 
 }
 
 ObjectFile::Reader* Linker::createReader(const Options::FileInfo& info)
@@ -3203,8 +3294,10 @@ ObjectFile::Reader* Linker::createReader(const Options::FileInfo& info)
 
 	// if fat file, skip to architecture we want
 	// Note: fat header is always big-endian
+	bool isFatFile = false;
 	const fat_header* fh = (fat_header*)p;
 	if ( fh->magic == OSSwapBigToHostInt32(FAT_MAGIC) ) {
+		isFatFile = true;
 		const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
 		uint32_t sliceToUse;
 		bool sliceFound = false;
@@ -3295,8 +3388,28 @@ ObjectFile::Reader* Linker::createReader(const Options::FileInfo& info)
 	if ( lto::Reader::validFile(p, len, fArchitecture) ) {
 		return this->addObject(new lto::Reader(p, len, info.path, info.modTime, fOptions.readerOptions(), fArchitecture), info, len);
 	}
-	else if ( !lto::Reader::loaded() && (p[0] == 'B') && (p[1] == 'C')  ) {
-		throw "could not process object file.  Looks like an llvm bitcode object file, but libLTO.dylib could not be loaded";
+	else if ( lto::Reader::fileKind((uint8_t*)p) != NULL ) {
+		if ( lto::Reader::loaded() ) {
+			throwf("file was built for %s which is not the architecture being linked (%s)", fileArch(p), fArchitectureName);
+		}
+		else {
+			const char* libLTO = "libLTO.dylib";
+			char ldPath[PATH_MAX];
+			char tmpPath[PATH_MAX];
+			char libLTOPath[PATH_MAX];
+			uint32_t bufSize = PATH_MAX;
+			if ( _NSGetExecutablePath(ldPath, &bufSize) != -1 ) {
+				if ( realpath(ldPath, tmpPath) != NULL ) {
+					char* lastSlash = strrchr(tmpPath, '/');
+					if ( lastSlash != NULL )
+						strcpy(lastSlash, "/../lib/libLTO.dylib");
+					libLTO = tmpPath;
+					if ( realpath(tmpPath, libLTOPath) != NULL ) 
+						libLTO = libLTOPath;
+				}
+			}
+			throwf("could not process llvm bitcode object file, because %s could not be loaded", libLTO);
+		}
 	}
 #endif
 	// error handling
@@ -3304,7 +3417,10 @@ ObjectFile::Reader* Linker::createReader(const Options::FileInfo& info)
 		throwf("missing required architecture %s in file", fArchitectureName);
 	}
 	else {
-		throw "file is not of required architecture";
+		if ( isFatFile )
+			throwf("file is universal but does not contain a(n) %s slice", fArchitectureName);
+		else
+			throwf("file was built for %s which is not the architecture being linked (%s)", fileArch(p), fArchitectureName);
 	}
 }
 
@@ -4107,6 +4223,12 @@ bool Linker::AtomSorter::operator()(const ObjectFile::Atom* left, const ObjectFi
 		}
 	}
 
+	// magic section$end symbol always sorts to the end of its section
+	if ( left->getContentType() == ObjectFile::Atom::kSectionEnd )
+		return false;
+	if ( right->getContentType() == ObjectFile::Atom::kSectionEnd )
+		return true;
+
 	// the __common section can have real or tentative definitions
 	// we want the real ones to sort before tentative ones
 	bool leftIsTent  =  (left->getDefinitionKind() == ObjectFile::Atom::kTentativeDefinition);
@@ -4114,12 +4236,6 @@ bool Linker::AtomSorter::operator()(const ObjectFile::Atom* left, const ObjectFi
 	if ( leftIsTent != rightIsTent )
 		return rightIsTent; 
 	
-	// magic section$end symbol always sorts to the end of its section
-	if ( left->getContentType() == ObjectFile::Atom::kSectionEnd )
-		return false;
-	if ( right->getContentType() == ObjectFile::Atom::kSectionEnd )
-		return true;
-
 	// initializers are auto sorted to start of section
 	if ( !fInitializerSet.empty() ) {
 		bool leftFirst  = (fInitializerSet.count(left) != 0);

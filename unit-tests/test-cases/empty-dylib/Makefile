@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2009 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -24,23 +24,16 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# The point of this test is a sanity check that .o files
-# can be found in archives.
+# Check that the n_sect number for __mh_dylib_header is valid when there is no __text section
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} foo.c -c -o foo-${ARCH}.o 
-	${FAIL_IF_BAD_OBJ} foo-${ARCH}.o
-	${CC} ${CCFLAGS} bar.c -c -o bar-${ARCH}.o 
-	${FAIL_IF_BAD_OBJ} bar-${ARCH}.o
-	libtool -static foo-${ARCH}.o  bar-${ARCH}.o -o libfoobar-${ARCH}.a
-	${CC} ${CCFLAGS} main.c -lfoobar-${ARCH} -L. -o main-${ARCH} 
-	${FAIL_IF_BAD_MACHO} main-${ARCH}
-	nm main-${ARCH} | grep "_bar" | ${PASS_IFF_EMPTY}
-	${CC} ${CCFLAGS} main.c -Wl,-force_load,libfoobar-${ARCH}.a -o main-${ARCH} 
-	${FAIL_IF_BAD_MACHO} main-${ARCH}
+	${CC} ${CCFLAGS} -dynamiclib justdata.c -o libjustdata.dylib -Wl,-no_compact_unwind
+	${PASS_IFF_GOOD_MACHO} libjustdata.dylib
+	${CC} ${CCFLAGS} -dynamiclib empty.c -o libempty.dylib -Wl,-no_compact_unwind
+	${PASS_IFF_GOOD_MACHO} libempty.dylib
 
 clean:
-	rm -rf main-* *.o *.a
+	rm -rf libempty.dylib libjustdata.dylib

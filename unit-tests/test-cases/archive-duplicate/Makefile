@@ -36,9 +36,9 @@ all:
 	${CC} ${CCFLAGS} foo.c -c -o foo-${ARCH}.o 
 	${CC} ${CCFLAGS} bar.c -c -o bar-${ARCH}.o 
 	libtool -static foo-${ARCH}.o  bar-${ARCH}.o -o libfoobar-${ARCH}.a
-	${CC} ${CCFLAGS} main.c -lfoobar-${ARCH} -lfoobar-${ARCH} -L. -o main-${ARCH} -all_load
+	${CC} ${CCFLAGS} main.c -Wl,-force_load,libfoobar-${ARCH}.a -lfoobar-${ARCH} -L. -o main-${ARCH} 
 	${FAIL_IF_BAD_MACHO} main-${ARCH}
-	${CC} ${CCFLAGS} main.c ./libfoobar-${ARCH}.a ./libfoobar-${ARCH}.a -L. -o main-${ARCH} -all_load
+	${CC} ${CCFLAGS} main.c -Wl,-force_load,libfoobar-${ARCH}.a ./libfoobar-${ARCH}.a -L. -o main-${ARCH}
 	${PASS_IFF_GOOD_MACHO} main-${ARCH}
 
 clean:

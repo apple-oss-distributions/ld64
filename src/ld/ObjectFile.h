@@ -77,7 +77,7 @@ public:
 										fTraceOutputFile(NULL), fMacVersionMin(kMinMacVersionUnset), fIPhoneVersionMin(kMinIPhoneVersionUnset) {}
 	enum DebugInfoStripping { kDebugInfoNone, kDebugInfoMinimal, kDebugInfoFull };
 	enum MacVersionMin { kMinMacVersionUnset, k10_1, k10_2, k10_3, k10_4, k10_5, k10_6 };
-	enum IPhoneVersionMin { kMinIPhoneVersionUnset, k2_0, k3_0, k3_1 };
+	enum IPhoneVersionMin { kMinIPhoneVersionUnset, k2_0, k2_1, k2_2, k3_0, k3_1, k3_2, k4_0 };
 
 	struct AliasPair {
 		const char*			realName;

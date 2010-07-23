@@ -106,6 +106,7 @@ private:
 	bool										fWriteableSegmentWithAddrOver4G;
 	const macho_segment_command<P>*				fFirstSegment;
 	const macho_segment_command<P>*				fFirstWritableSegment;
+	uint32_t									fSectionCount;
 };
 
 
@@ -210,7 +211,7 @@ template <typename A>
 MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, const char* path)
  : fHeader(NULL), fLength(fileLength), fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fDynamicSymbolTable(NULL), fIndirectTableCount(0),
  fLocalRelocations(NULL),  fLocalRelocationsCount(0),  fExternalRelocations(NULL),  fExternalRelocationsCount(0),
- fWriteableSegmentWithAddrOver4G(false), fFirstSegment(NULL), fFirstWritableSegment(NULL)
+ fWriteableSegmentWithAddrOver4G(false), fFirstSegment(NULL), fFirstWritableSegment(NULL), fSectionCount(0)
 {
 	// sanity check
 	if ( ! validFile(fileContent) )
@@ -387,6 +388,7 @@ void MachOChecker<A>::checkLoadCommands()
 						throwf("section %s file offset not within segment", sect->sectname());
 				}	
 				checkSection(segCmd, sect);
+				++fSectionCount;
 			}
 		}
 		cmd = (const macho_load_command<P>*)(((uint8_t*)cmd)+cmd->cmdsize());
@@ -605,6 +607,15 @@ void MachOChecker<A>::checkSymbolTable()
 				throw "string index out of range";
 			if ( externalNames.find(symName) != externalNames.end() )
 				throwf("undefine with same name as external symbol: %s", symName);
+		}
+		// verify all N_SECT values are valid
+		for(const macho_nlist<P>* p = fSymbols; p < &fSymbols[fSymbolCount]; ++p) {
+			uint8_t type = p->n_type();
+			if ( ((type & N_STAB) == 0) && ((type & N_TYPE) == N_SECT) ) {
+				if ( p->n_sect() > fSectionCount ) {
+					throwf("symbol '%s' has n_sect=%d which is too large", &fStrings[p->n_strx()], p->n_sect());
+				}
+			}
 		}
 	}
 }

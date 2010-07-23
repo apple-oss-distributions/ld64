@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2009 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -24,23 +24,17 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# The point of this test is a sanity check that .o files
-# can be found in archives.
+# <rdar://problem/7043256> ld64 can not find a -e entry point from an archive
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} foo.c -c -o foo-${ARCH}.o 
-	${FAIL_IF_BAD_OBJ} foo-${ARCH}.o
-	${CC} ${CCFLAGS} bar.c -c -o bar-${ARCH}.o 
-	${FAIL_IF_BAD_OBJ} bar-${ARCH}.o
-	libtool -static foo-${ARCH}.o  bar-${ARCH}.o -o libfoobar-${ARCH}.a
-	${CC} ${CCFLAGS} main.c -lfoobar-${ARCH} -L. -o main-${ARCH} 
-	${FAIL_IF_BAD_MACHO} main-${ARCH}
-	nm main-${ARCH} | grep "_bar" | ${PASS_IFF_EMPTY}
-	${CC} ${CCFLAGS} main.c -Wl,-force_load,libfoobar-${ARCH}.a -o main-${ARCH} 
-	${FAIL_IF_BAD_MACHO} main-${ARCH}
+	${CC} ${CCFLAGS} foo.c -c -o foo.o
+	libtool -static foo.o -o libfoo.a
+	${FAIL_IF_ERROR} ${CC} ${CCFLAGS}  bar.c -Os libfoo.a -dead_strip -o foo -Wl,-e,_foo 
+	${PASS_IFF_GOOD_MACHO} foo
 
 clean:
-	rm -rf main-* *.o *.a
+	rm -rf foo libfoo.a foo.o
+

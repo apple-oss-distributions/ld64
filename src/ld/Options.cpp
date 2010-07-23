@@ -1269,14 +1269,20 @@ void Options::setIPhoneVersionMin(const char* version)
 	if ( ! isdigit(version[2]) )
 		throw "-iphoneos_version_min argument is not a number";
 
-	if ( version[0] == '2' )
+		 if ( (version[0] == '2') && (version[2] == '0') )
 		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k2_0;
+	else if ( (version[0] == '2') && (version[2] == '1') )
+		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k2_1;
+	else if ( (version[0] == '2') && (version[2] >= '2') )
+		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k2_2;
 	else if ( (version[0] == '3') && (version[2] == '0') )
-		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k2_0;
-	else if ( (version[0] == '3') && (version[2] >= '1') )
+		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k3_0;
+	else if ( (version[0] == '3') && (version[2] == '1') )
 		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k3_1;
+	else if ( (version[0] == '3') && (version[2] >= '2') )
+		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k3_2;
 	else if ( (version[0] >= '4')  )
-		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k3_1;
+		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k4_0;
 	else {
 		fReaderOptions.fIPhoneVersionMin = ObjectFile::ReaderOptions::k2_0;
 		warning("unknown option to -iphoneos_version_min, not 2.x, 3.x, or 4.x");
@@ -2537,10 +2543,36 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 	frameworkPaths.reserve(10);
 	// scan through argv looking for -L, -F, -Z, and -syslibroot options
 	for(int i=0; i < argc; ++i) {
-		if ( (argv[i][0] == '-') && (argv[i][1] == 'L') )
-			libraryPaths.push_back(&argv[i][2]);
-		else if ( (argv[i][0] == '-') && (argv[i][1] == 'F') )
-			frameworkPaths.push_back(&argv[i][2]);
+		if ( (argv[i][0] == '-') && (argv[i][1] == 'L') ) {
+			const char* libSearchDir = &argv[i][2];
+			if ( libSearchDir[0] == '\0' ) 
+				throw "-L must be immediately followed by a directory path (no space)";
+			struct stat statbuf;
+			if ( stat(libSearchDir, &statbuf) == 0 ) {
+				if ( statbuf.st_mode & S_IFDIR )
+					libraryPaths.push_back(libSearchDir);
+				else
+					warning("path '%s' following -L not a directory", libSearchDir);
+			}
+			else {
+				warning("directory '%s' following -L not found", libSearchDir);
+			}
+		}
+		else if ( (argv[i][0] == '-') && (argv[i][1] == 'F') ) {
+			const char* frameworkSearchDir = &argv[i][2];
+			if ( frameworkSearchDir[0] == '\0' ) 
+				throw "-F must be immediately followed by a directory path (no space)";
+			struct stat statbuf;
+			if ( stat(frameworkSearchDir, &statbuf) == 0 ) {
+				if ( statbuf.st_mode & S_IFDIR )
+					frameworkPaths.push_back(frameworkSearchDir);
+				else
+					warning("path '%s' following -F not a directory", frameworkSearchDir);
+			}
+			else {
+				warning("directory '%s' following -F not found", frameworkSearchDir);
+			}
+		}
 		else if ( strcmp(argv[i], "-Z") == 0 )
 			addStandardLibraryDirectories = false;
 		else if ( strcmp(argv[i], "-v") == 0 ) {

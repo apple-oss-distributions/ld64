@@ -267,6 +267,7 @@ class Reader : public ObjectFile::Reader
 {
 public:
 	static bool										validFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t architecture);
+	static const char*								fileKind(const uint8_t* fileContent);
 	static bool										loaded() { return (::lto_get_version() != NULL); }
 													Reader(const uint8_t* fileContent, uint64_t fileLength, 
 																const char* path, time_t modTime, 
@@ -358,6 +359,7 @@ Reader::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* path
 				kind = ObjectFile::Atom::kWeakDefinition;
 				break;
 			case LTO_SYMBOL_DEFINITION_UNDEFINED:
+			case LTO_SYMBOL_DEFINITION_WEAKUNDEF:
 				kind = ObjectFile::Atom::kExternalDefinition;
 				break;
 			default:
@@ -414,6 +416,25 @@ const char* Reader::tripletPrefixForArch(cpu_type_t arch)
 bool Reader::validFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t architecture)
 {
 	return ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, tripletPrefixForArch(architecture));
+}
+
+const char* Reader::fileKind(const uint8_t* p)
+{
+	if ( (p[0] == 0xDE) && (p[1] == 0xC0) && (p[2] == 0x17) && (p[3] == 0x0B) ) {
+		uint32_t arch = LittleEndian::get32(*((uint32_t*)(&p[16])));
+		switch (arch) {
+			case CPU_TYPE_POWERPC:
+				return "ppc";
+			case CPU_TYPE_I386:
+				return "i386";
+			case CPU_TYPE_X86_64:
+				return "x86_64";
+			case CPU_TYPE_ARM:
+				return "arm";
+		}
+		return "unknown bitcode architecture";
+	}
+	return NULL;
 }
 
 bool Reader::optimize(const std::vector<ObjectFile::Atom *>& allAtoms, std::vector<ObjectFile::Atom*>& newAtoms, 

@@ -307,7 +307,8 @@ private:
 	bool										fLazyLoaded;
 	ObjectFile::Reader::ObjcConstraint			fObjcContraint;
 	std::vector<ObjectFile::Reader*>   			fReExportedChildren;
-	const ObjectFile::ReaderOptions::MacVersionMin	fDeploymentVersionMin;
+	const ObjectFile::ReaderOptions::MacVersionMin		fMacDeploymentVersionMin;
+	const ObjectFile::ReaderOptions::IPhoneVersionMin	fIPhoneDeploymentVersionMin;
 	std::vector<class ObjectFile::Atom*>		fFlatImports;
 
 	static bool									fgLogHashtable;
@@ -330,7 +331,8 @@ Reader<A>::Reader(const uint8_t* fileContent, uint64_t fileLength, const char* p
 	fExplicitlyLinked(false), fImplicitlyLinked(false), fProvidedAtom(false), 
 	fImplicitlyLinkPublicDylibs(options.fImplicitlyLinkPublicDylibs), fLazyLoaded(dylibOptions.fLazyLoad),
 	fObjcContraint(ObjectFile::Reader::kObjcNone),
-	fDeploymentVersionMin(options.fMacVersionMin)
+	fMacDeploymentVersionMin(options.fMacVersionMin),
+	fIPhoneDeploymentVersionMin(options.fIPhoneVersionMin)
 {
 	// sanity check
 	if ( ! validFile(fileContent, dylibOptions.fBundleLoader) )
@@ -593,6 +595,13 @@ void Reader<x86>::addDyldFastStub()
 	addSymbol("dyld_stub_binder", false);
 }
 
+// hack for bring up of iPhoneOS builds on SnowLeopard
+template <>
+void Reader<arm>::addDyldFastStub()
+{
+	addSymbol("dyld_stub_binder", false);
+}
+
 template <typename A>
 void Reader<A>::addDyldFastStub()
 {
@@ -610,53 +619,100 @@ void Reader<A>::addSymbol(const char* name, bool weakDef)
 		const char* symAction = &name[4];
 		const char* symCond = strchr(symAction, '$');
 		if ( symCond != NULL ) {
-			ObjectFile::ReaderOptions::MacVersionMin symVersionCondition = ObjectFile::ReaderOptions::kMinMacVersionUnset;
-			if ( (strncmp(symCond, "$os10.", 6) == 0) && isdigit(symCond[6]) && (symCond[7] == '$') ) {
-				switch ( symCond[6] - '0' ) {
-					case 0:
-					case 1:
-						symVersionCondition = ObjectFile::ReaderOptions::k10_1;
-						break;
-					case 2:
-						symVersionCondition = ObjectFile::ReaderOptions::k10_2;
-						break;
-					case 3:
-						symVersionCondition = ObjectFile::ReaderOptions::k10_3;
-						break;
-					case 4:
-						symVersionCondition = ObjectFile::ReaderOptions::k10_4;
-						break;
-					case 5:
-						symVersionCondition = ObjectFile::ReaderOptions::k10_5;
-						break;
-					case 6:
-						symVersionCondition = ObjectFile::ReaderOptions::k10_6;
-						break;
-				}
-				const char* symName = strchr(&symCond[1], '$');
-				if ( symName != NULL ) {
-					++symName;
-					if ( fDeploymentVersionMin == symVersionCondition ) {
-						if ( strncmp(symAction, "hide$", 5) == 0 ) {
-							if ( fgLogHashtable ) fprintf(stderr, "  adding %s to ignore set for %s\n", symName, this->getPath());
-							fIgnoreExports.insert(strdup(symName));
-							return;
+			if ( fMacDeploymentVersionMin != ObjectFile::ReaderOptions::kMinMacVersionUnset ) {
+				ObjectFile::ReaderOptions::MacVersionMin symVersionCondition = ObjectFile::ReaderOptions::kMinMacVersionUnset;
+				// ex:  $ld$add$os10.6$_foo
+				if ( (strncmp(symCond, "$os10.", 6) == 0) && isdigit(symCond[6]) && (symCond[7] == '$') ) {
+					switch ( symCond[6] - '0' ) {
+						case 0:
+						case 1:
+							symVersionCondition = ObjectFile::ReaderOptions::k10_1;
+							break;
+						case 2:
+							symVersionCondition = ObjectFile::ReaderOptions::k10_2;
+							break;
+						case 3:
+							symVersionCondition = ObjectFile::ReaderOptions::k10_3;
+							break;
+						case 4:
+							symVersionCondition = ObjectFile::ReaderOptions::k10_4;
+							break;
+						case 5:
+							symVersionCondition = ObjectFile::ReaderOptions::k10_5;
+							break;
+						case 6:
+							symVersionCondition = ObjectFile::ReaderOptions::k10_6;
+							break;
+					}
+					const char* symName = strchr(&symCond[1], '$');
+					if ( symName != NULL ) {
+						++symName;
+						if ( fMacDeploymentVersionMin == symVersionCondition ) {
+							if ( strncmp(symAction, "hide$", 5) == 0 ) {
+								if ( fgLogHashtable ) fprintf(stderr, "  adding %s to ignore set for %s\n", symName, this->getPath());
+								fIgnoreExports.insert(strdup(symName));
+								return;
+							}
+							else if ( strncmp(symAction, "add$", 4) == 0 ) {
+								this->addSymbol(symName, weakDef);
+								return;
+							}
+							else {
+								warning("bad symbol action: %s in dylib %s", name, this->getPath());
+							}
 						}
-						else if ( strncmp(symAction, "add$", 4) == 0 ) {
-							this->addSymbol(symName, weakDef);
-							return;
-						}
-						else {
-							warning("bad symbol action: %s in dylib %s", name, this->getPath());
-						}
+					}
+					else {
+						warning("bad symbol name: %s in dylib %s", name, this->getPath());
 					}
 				}
 				else {
-					warning("bad symbol name: %s in dylib %s", name, this->getPath());
+					warning("bad symbol version: %s in dylib %s", name, this->getPath());
 				}
 			}
-			else {
-				warning("bad symbol version: %s in dylib %s", name, this->getPath());
+			else if ( fIPhoneDeploymentVersionMin != ObjectFile::ReaderOptions::kMinIPhoneVersionUnset ) {
+				ObjectFile::ReaderOptions::IPhoneVersionMin symVersionCondition = ObjectFile::ReaderOptions::kMinIPhoneVersionUnset;
+				// ex:  $ld$add$os3.1$_foo
+				if ( (strncmp(symCond, "$os", 3) == 0) && isdigit(symCond[3]) && (symCond[4] == '.') ) {
+					if ( (symCond[3] == '2') && (symCond[5] == '0') )
+						symVersionCondition = ObjectFile::ReaderOptions::k2_0;
+					else if ( (symCond[3] == '2') && (symCond[5] == '1') )
+						symVersionCondition = ObjectFile::ReaderOptions::k2_1;
+					else if ( (symCond[3] == '2') && (symCond[5] >= '2') )
+						symVersionCondition = ObjectFile::ReaderOptions::k2_2;
+					else if ( (symCond[3] == '3') && (symCond[5] == '0') )
+						symVersionCondition = ObjectFile::ReaderOptions::k3_0;
+					else if ( (symCond[3] == '3') && (symCond[5] == '1') )
+						symVersionCondition = ObjectFile::ReaderOptions::k3_1;
+					else if ( (symCond[3] == '3') && (symCond[5] >= '2') )
+						symVersionCondition = ObjectFile::ReaderOptions::k3_2;
+					else if ( (symCond[3] >= '4')  )
+						symVersionCondition = ObjectFile::ReaderOptions::k4_0;
+					const char* symName = strchr(&symCond[1], '$');
+					if ( symName != NULL ) {
+						++symName;
+						if ( fIPhoneDeploymentVersionMin == symVersionCondition ) {
+							if ( strncmp(symAction, "hide$", 5) == 0 ) {
+								if ( fgLogHashtable ) fprintf(stderr, "  adding %s to ignore set for %s\n", symName, this->getPath());
+								fIgnoreExports.insert(strdup(symName));
+								return;
+							}
+							else if ( strncmp(symAction, "add$", 4) == 0 ) {
+								this->addSymbol(symName, weakDef);
+								return;
+							}
+							else {
+								warning("bad symbol action: %s in dylib %s", name, this->getPath());
+							}
+						}
+					}
+					else {
+						warning("bad symbol name: %s in dylib %s", name, this->getPath());
+					}
+				}
+				else {
+					warning("bad symbol version: %s in dylib %s, symCond=%s", name, this->getPath(), symCond);
+				}
 			}
 		}	
 		else {

@@ -968,6 +968,23 @@ private:
 };
 
 template <typename A>
+class MinimalTextAtom : public WriterAtom<A>
+{
+public:
+											MinimalTextAtom(Writer<A>& writer)
+													: WriterAtom<A>(writer, headerSegment(writer)) {}
+	virtual const char*						getDisplayName() const	{ return "minimal text"; }
+	virtual uint64_t						getSize() const			{ return 0; }
+	virtual const char*						getSectionName() const	{ return "__text"; }
+	virtual void							copyRawContent(uint8_t buffer[]) const { }
+	virtual ObjectFile::Atom::SymbolTableInclusion	getSymbolTableInclusion() const { return ObjectFile::Atom::kSymbolTableNotIn; }
+	
+private:
+	using WriterAtom<A>::fWriter;
+};
+
+
+template <typename A>
 class UnwindInfoAtom : public WriterAtom<A>
 {
 public:
@@ -1480,7 +1497,7 @@ public:
 	uint64_t								getFinalTargetAdress() const { return fFinalTarget.getAddress() + fFinalTargetOffset; }
 private:
 	using WriterAtom<A>::fWriter;
-	enum IslandKind { kBranchIslandToARM, kBranchIslandToThumb2, kBranchIslandToThumb1 };
+	enum IslandKind { kBranchIslandToARM, kBranchIslandToThumb2, kBranchIslandToThumb1, kBranchIslandNoPicToThumb1 };
 	const char*								fName;
 	ObjectFile::Atom&						fTarget;
 	ObjectFile::Atom&						fFinalTarget;
@@ -2869,7 +2886,7 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 	  fLargestAtomSize(1), 
 	  fEmitVirtualSections(false), fHasWeakExports(false), fReferencesWeakImports(false), 
 	  fCanScatter(false), fWritableSegmentPastFirst4GB(false), fNoReExportedDylibs(false), 
-	  fBiggerThanTwoGigs(false), fSlideable(false), fHasThumbBranches(false),
+	  fBiggerThanTwoGigs(false), fSlideable(false), fHasThumbBranches(false), 
 	  fFirstWritableSegment(NULL), fAnonNameIndex(1000)
 {
 	switch ( fOptions.outputKind() ) {
@@ -2891,6 +2908,7 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 			if ( fOptions.hasCustomStack() )
 				fWriterSynthesizedAtoms.push_back(new CustomStackAtom<A>(*this));
 			fWriterSynthesizedAtoms.push_back(fHeaderPadding = new LoadCommandsPaddingAtom<A>(*this));
+			fWriterSynthesizedAtoms.push_back(new MinimalTextAtom<A>(*this));
 			if ( fOptions.needsUnwindInfoSection() )
 				fWriterSynthesizedAtoms.push_back(fUnwindInfoAtom = new UnwindInfoAtom<A>(*this));
 			fWriterSynthesizedAtoms.push_back(fSectionRelocationsAtom = new SectionRelocationsLinkEditAtom<A>(*this));
@@ -2941,6 +2959,7 @@ Writer<A>::Writer(const char* path, Options& options, std::vector<ExecutableFile
 			if ( fOptions.sharedRegionEligible() )
 				fWriterSynthesizedAtoms.push_back(new SegmentSplitInfoLoadCommandsAtom<A>(*this));
 			fWriterSynthesizedAtoms.push_back(fHeaderPadding = new LoadCommandsPaddingAtom<A>(*this));
+			fWriterSynthesizedAtoms.push_back(new MinimalTextAtom<A>(*this));
 			if ( fOptions.needsUnwindInfoSection() )
 				fWriterSynthesizedAtoms.push_back(fUnwindInfoAtom = new UnwindInfoAtom<A>(*this));
 			fWriterSynthesizedAtoms.push_back(fSectionRelocationsAtom = new SectionRelocationsLinkEditAtom<A>(*this));
@@ -5273,7 +5292,10 @@ typename Writer<A>::RelocKind Writer<A>::relocationNeededInFinalLinkedImage(cons
 			else
 				return kRelocNone;
 		case ObjectFile::Atom::kWeakDefinition:
-			// all calls to global weak definitions get indirected
+			// in static executables, references to weak definitions are not indirected
+			if ( fOptions.outputKind() == Options::kStaticExecutable)
+				return kRelocNone;
+			// in dynamic code, all calls to global weak definitions get indirected
 			if ( this->shouldExport(target) )
 				return kRelocExternal;
 			else if ( fSlideable )
@@ -10947,7 +10969,10 @@ BranchIslandAtom<A>::BranchIslandAtom(Writer<A>& writer, const char* name, int i
 			fIslandKind = kBranchIslandToThumb2;
 		}
 		else {
-			fIslandKind = kBranchIslandToThumb1;
+			if ( writer.fSlideable )
+				fIslandKind = kBranchIslandToThumb1;
+			else
+				fIslandKind = kBranchIslandNoPicToThumb1;
 		}
 	}
 	else {
@@ -11091,6 +11116,19 @@ void BranchIslandAtom<arm>::copyRawContent(uint8_t buffer[]) const
 			OSWriteLittleInt32(&buffer[12], 0, displacement);	// 	.long target-this		
 			}
 			break;
+		case kBranchIslandNoPicToThumb1:
+			{
+			// There is no large displacement thumb1 branch instruction.
+			// Instead use ARM instructions that can jump to thumb.
+			// we use a 32-bit displacement, so we can directly jump to target which means no island hopping
+			uint32_t targetAddr = getFinalTargetAdress();
+			if ( fFinalTarget.isThumb() )
+				targetAddr |= 1;
+			if (log) fprintf(stderr, "%s: 2 ARM instruction jump to final target at 0x%08llX\n", fName, getFinalTargetAdress());
+			OSWriteLittleInt32(&buffer[0], 0, 0xe51ff004);	// 	ldr	pc, [pc, #-4]
+			OSWriteLittleInt32(&buffer[4], 0, targetAddr);	// 	.long target-this		
+			}
+			break;	
 	};
 }
 
@@ -11116,6 +11154,8 @@ uint64_t BranchIslandAtom<arm>::getSize() const
 			return 16;
 		case kBranchIslandToThumb2:
 			return 4;
+		case kBranchIslandNoPicToThumb1:
+			return 8;
 	};
 	throw "internal error: no ARM branch island kind";
 }

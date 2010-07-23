@@ -40,7 +40,8 @@ static bool			sDumpContent= true;
 static bool			sDumpStabs	= false;
 static bool			sSort		= true;
 static bool			sNMmode		= false;
-static cpu_type_t	sPreferredArch = CPU_TYPE_POWERPC64;
+static cpu_type_t		sPreferredArch = CPU_TYPE_I386;
+static cpu_subtype_t	sPreferredSubArch = 0xFFFFFFFF;
 static const char* sMatchName;
 static int sPrintRestrict;
 static int sPrintAlign;
@@ -405,8 +406,11 @@ static ObjectFile::Reader* createReader(const char* path, const ObjectFile::Read
 		const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
 		for (unsigned long i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
 			if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)sPreferredArch ) {
-				p = p + OSSwapBigToHostInt32(archs[i].offset);
-				mh = (struct mach_header*)p;
+				if ( ((uint32_t)sPreferredSubArch == 0xFFFFFFFF) || ((uint32_t)sPreferredSubArch == OSSwapBigToHostInt32(archs[i].cpusubtype)) ) {
+					p = p + OSSwapBigToHostInt32(archs[i].offset);
+					mh = (struct mach_header*)p;
+					break;
+				}
 			}
 		}
 	}
@@ -480,8 +484,22 @@ int main(int argc, const char* argv[])
 						sPreferredArch = CPU_TYPE_X86_64;
 					else if ( strcmp(arch, "arm") == 0 )
 						sPreferredArch = CPU_TYPE_ARM;
-					else if ( strcmp(arch, "armv6") == 0 )
+					else if ( strcmp(arch, "armv4t") == 0 ) {
 						sPreferredArch = CPU_TYPE_ARM;
+						sPreferredSubArch = CPU_SUBTYPE_ARM_V4T;
+					}
+					else if ( strcmp(arch, "armv5") == 0 ) {
+						sPreferredArch = CPU_TYPE_ARM;
+						sPreferredSubArch = CPU_SUBTYPE_ARM_V5TEJ;
+					}
+					else if ( strcmp(arch, "armv6") == 0 ) {
+						sPreferredArch = CPU_TYPE_ARM;
+						sPreferredSubArch = CPU_SUBTYPE_ARM_V6;
+					}
+					else if ( strcmp(arch, "armv7") == 0 ) {
+						sPreferredArch = CPU_TYPE_ARM;
+						sPreferredSubArch = CPU_SUBTYPE_ARM_V7;
+					}
 					else 
 						throwf("unknown architecture %s", arch);
 				}

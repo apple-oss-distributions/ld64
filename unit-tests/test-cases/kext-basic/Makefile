@@ -18,7 +18,7 @@ run: all
 all:
 	${CC} ${CCFLAGS} -static -fno-common -mkernel -c mykext.c -o mykext.o
 	${CC} ${CCFLAGS} -static -fno-common -mkernel -c mykextinfo.c -o mykextinfo.o
-	${CC} ${CCFLAGS} -Wl,-kext mykext.o mykextinfo.o -nostdlib -lkmodc++ -lkmod -lcc_kext -o mykext
+	unset LD_NO_CLASSIC_LINKER_STATIC && ${CC} ${CCFLAGS} -Wl,-kext mykext.o mykextinfo.o -nostdlib -lkmodc++ -lkmod -lcc_kext -o mykext -Wl,-w
 	otool -hv mykext | grep ${FILE_TYPE} | ${FAIL_IF_EMPTY}
 	nm -nm mykext | grep '(undefined) external _extern_global' | ${FAIL_IF_EMPTY}
 	nm -nm mykext | grep '(__DATA,__data) external _my_global' | ${FAIL_IF_EMPTY}
