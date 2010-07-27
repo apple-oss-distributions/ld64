@@ -1075,9 +1075,6 @@ AnonymousAtom<A>::AnonymousAtom(Reader<A>& owner, const macho_section<P>* sectio
 					char* s = &name[13];
 					const uint16_t* words = (uint16_t*)((char*)(owner.fHeader) + section->offset() + addr - section->addr());
 					unsigned int wordCount = size/2;
-					// note, the compiler sometimes puts trailing zeros on the end of the data
-					if ( E::get32(words[wordCount-1]) == 0 )
-						--wordCount;
 					bool needSeperator = false;
 					for(unsigned int i=0; i < wordCount; ++i) {
 						if ( needSeperator )
@@ -2044,28 +2041,76 @@ Reader<A>::Reader(const uint8_t* fileContent, const char* path, time_t modTime, 
 				}
 			}
 		}
-		else if ( (strcmp(sect->sectname(), "__ustring") == 0) && (strcmp(sect->segname(), "__TEXT") == 0) ) {
-			// if there is a __ustring section parse it into AnonymousAtoms based on labels
+		else if ( (strcmp(sect->sectname(), "__ustring") == 0) && (strcmp(sect->segname(), "__TEXT") == 0) && (sect->size() != 0) ) {
+			// if there is a __ustring section parse it into atoms
 			fUTF16Section = sect;
+			// first find all cleave points 
+			const uint16_t* words = (uint16_t*)((char*)(fHeader) + fUTF16Section->offset());
+			unsigned int wordCount = fUTF16Section->size()/2;
 			std::vector<pint_t> utf16Addreses;
+			bool inString = false;
+			for (unsigned int i=0; i < wordCount; ++i) {
+				if ( inString ) {
+					if ( words[i] == 0x0000 ) {
+						inString = false;
+					}
+				}
+				else {
+					if ( words[i] == 0x0000 ) {
+						// skip over zero padding
+					}
+					else {
+						inString = true;
+						utf16Addreses.push_back(fUTF16Section->addr() + i*2);
+					}
+				}
+			}
+			utf16Addreses.push_back(fUTF16Section->addr() + sect->size());
+			// build map of symbols
+			std::map<pint_t, const macho_nlist<P>* > symbolMap;
 			for (int i=fSymbolCount-1; i >= 0 ; --i) {
 				const macho_nlist<P>& sym = fSymbols[i];
 				if ( (sym.n_type() & N_STAB) == 0 ) {
 					uint8_t type =  (sym.n_type() & N_TYPE);
 					if ( type == N_SECT ) {
 						if ( &fSectionsStart[sym.n_sect()-1] == fUTF16Section ) {
-							utf16Addreses.push_back(sym.n_value());
+							// rdar://problem/7429384 don't coalesce UTF16 strings unless label starts with ___utf16_string
+							if ( strncmp(&fStrings[sym.n_strx()], "___utf16_string", 15) != 0 ) {
+								symbolMap[sym.n_value()] = &sym;
+								// <rdar://problem/7516793> if this symbol is a string of just 0x0000, it may not be in utf16Addreses
+								if ( words[(sym.n_value() - sect->addr())/2] == 0x0000 ) {
+									for(typename std::vector<pint_t>::iterator sit=utf16Addreses.begin(); sit != utf16Addreses.end(); ++sit) {
+										if ( *sit == sym.n_value() ) {
+											// already in utf16Addreses
+											break;
+										}
+										if ( *sit > sym.n_value() ) {
+											// need to insert
+											utf16Addreses.insert(sit, sym.n_value());
+											break;
+										}
+									}
+								}
+							}
 						}
 					}
 				}
 			}
-			utf16Addreses.push_back(fUTF16Section->addr()+fUTF16Section->size());
-			std::sort(utf16Addreses.begin(), utf16Addreses.end());
+			// make atom for each string
 			for(int i=utf16Addreses.size()-2; i >=0 ; --i) {
 				pint_t size = utf16Addreses[i+1] - utf16Addreses[i];
-				AnonymousAtom<A>* strAtom = new AnonymousAtom<A>(*this, fUTF16Section, utf16Addreses[i], size);
-				fAtoms.push_back(strAtom);
-				fAddrToAtom[utf16Addreses[i]] = strAtom;
+				typename std::map<pint_t, const macho_nlist<P>* >::iterator pos = symbolMap.find(utf16Addreses[i]);
+				if ( pos == symbolMap.end() ) {
+					AnonymousAtom<A>* strAtom = new AnonymousAtom<A>(*this, fUTF16Section, utf16Addreses[i], size);
+					fAtoms.push_back(strAtom);
+					fAddrToAtom[utf16Addreses[i]] = strAtom;
+				}
+				else {
+					SymbolAtom<A>* newAtom = new SymbolAtom<A>(*this, pos->second, fUTF16Section);
+					fAtoms.push_back(newAtom);
+					fAddrToAtom[utf16Addreses[i]] = newAtom;
+					newAtom->setSize(size);
+				}
 			}
 		}
 	}
@@ -5322,6 +5367,9 @@ bool Reader<arm>::addRelocReference(const macho_section<arm::P>* sect,
 				if ( weakImport )
 					kind = arm::kPointerWeakImport;
 				if ( reloc->r_extern() ) {
+					const macho_nlist<P>* targetSymbol = &fSymbols[reloc->r_symbolnum()];
+					if ( (targetSymbol->n_desc() &  N_ARM_THUMB_DEF) && (pointerValue == 1) )
+						pointerValue = 0;
 					makeByNameReference(kind, srcAddr, targetName, pointerValue);
 				}
 				else {
@@ -5345,6 +5393,7 @@ bool Reader<arm>::addRelocReference(const macho_section<arm::P>* sect,
 	else {
 		const macho_scattered_relocation_info<P>* sreloc = (macho_scattered_relocation_info<P>*)reloc;
 		const macho_scattered_relocation_info<P>* nextSReloc = &sreloc[1];
+		int32_t addend;
 		srcAddr = sect->addr() + sreloc->r_address();
 		dstAddr = sreloc->r_value();
 		uint32_t betterDstAddr;
@@ -5429,13 +5478,28 @@ bool Reader<arm>::addRelocReference(const macho_section<arm::P>* sect,
 				AtomAndOffset toao   = findAtomAndOffset(dstAddr);
 				// check for addend encoded in the section content
 				pointerValue = LittleEndian::get32(*fixUpPtr);
+				addend = pointerValue - (dstAddr - nextRelocValue);
+				if ( toao.atom->isThumb() && (addend & 1) )
+					addend &= -2; // remove thumb bit 
 				if ( (dstAddr - nextRelocValue) != pointerValue ) {
-					if ( toao.atom == srcao.atom )
-						toao.offset += (pointerValue + nextRelocValue) - dstAddr;
-					else if ( fromao.atom == srcao.atom )
-						toao.offset += (pointerValue + nextRelocValue) - dstAddr;
+					if ( fromao.atom == srcao.atom ) {
+						if ( ((const macho_section<P>*)(((BaseAtom*)(srcao.atom))->getSectionRecord()))->flags() & S_ATTR_PURE_INSTRUCTIONS ) {
+							int pcBaseOffset = srcao.atom->isThumb() ? 4 : 8;
+							if ( addend == -pcBaseOffset ) {
+								fromao.offset -= addend;
+							}
+							else {
+								toao.offset += addend;
+							}
+						}
+						else {
+							toao.offset += addend;
+						}
+					}
+					else if ( toao.atom == srcao.atom )
+						toao.offset += addend;
 					else
-						fromao.offset += (dstAddr - pointerValue) - nextRelocValue;
+						fromao.offset -= addend;
 				}
 				new Reference<arm>(arm::kPointerDiff, srcao, fromao, toao);
 				}

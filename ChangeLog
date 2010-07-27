@@ -1,4 +1,116 @@
 
+----- Tagged ld64-97.14
+
+2010-04-20    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7712869> if last section is zero-fill don't add size to filesize total in -r mode
+
+----- Tagged ld64-97.13
+
+2010-03-17    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7824112> Support for iPhoneSimulator with OBJC 2.0 ABI
+
+
+----- Tagged ld64-97.12
+
+2010-03-17    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7712869> if last section is zero-fill don't add size to filesize total in -r mode
+
+----- Tagged ld64-97.11
+
+2010-01-26    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7622634> Libc-624.1 causes latent ld bug
+	* build linker -no_pie
+	
+
+----- Tagged ld64-97.10
+
+2010-01-26    Nick Kledzik    <kledzik@apple.com>
+	
+	<rdar://problem/7556912> LC_SEGMENT command 0 filesize field greater than vmsize field
+	* Move __DATA to end in -r mode
+	
+
+2010-01-26    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7516793> symboled __ustring strings of just 0x0000 mis-parsed
+	* Parse __ustring section based on content - not just labels
+
+
+----- Tagged ld64-97.9
+
+2010-01-14    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7532743> LC_SEGMENT command 0 filesize field greater than vmsize field
+	* for i386 -r mode sort __IMPORT segment before __DATA segment
+
+
+2010-01-11    Nick Kledzik    <kledzik@apple.com>
+
+	* fix ARM -r -d references to tentative definitions
+
+----- Tagged ld64-97.8
+
+2009-12-08    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7455147> many mach-o images in Barolo have MH_WEAK_DEFINES bit incorrectly set
+	* don't let auto-strip weak symbols set MH_WEAK_DEFINES
+	
+
+----- Tagged ld64-97.7
+
+2009-11-30    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7429384> llvmgcc now puts const short arrays in __ustring section, linker does not handle that
+	* Only auto-coalesce UTF16 strings that are labeled with "___utf16_string*"
+
+
+----- Tagged ld64-97.6
+ 
+2009-11-06    Nick Kledzik    <kledzik@apple.com>
+ 
+ 	<rdar://problem/7332627> make -pie default for x86_64 for 10.7 and later
+
+
+2009-10-28    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7331635> Add a -no_pie flag
+	* support -no_pie and LD_NO_PIE
+
+
+----- Tagged ld64-97.5
+
+2009-10-27     Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7341117> crash when __ustring section has zero length string
+	* stop trying to suppress tailing 0x0000 from synthesized string used to coalese utf16 strings
+	
+
+----- Tagged ld64-97.4
+
+2009-10-21     Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7320293> missing thumb bit when thumb function takes address of itself
+	* move toao.atom == srcao.atom test to after fromao.atom == srcao.atom test
+	
+
+----- Tagged ld64-97.3
+
+2009-10-06     Nick Kledzik    <kledzik@apple.com>
+
+	* Add missing LittleEndian::set32() in arm::kPointerDiff
+
+2009-10-05     Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7268427> ARM: handle pointer-diff to weak thumb that is overridden by non-weak ARM
+	* When parsing ARM relocations, if target is a thumb function, remove one from addend
+	* When writing out content for arm::kPointerDiff, add one if target is thumb
+	* When writing ARM_RELOC_SECTDIFF, use target offsets if they fit in function
+
+
 ----- Tagged ld64-97.2
 
 2009-09-25     Nick Kledzik    <kledzik@apple.com>

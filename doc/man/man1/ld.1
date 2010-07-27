@@ -308,10 +308,12 @@ This option is also called -dylib_current_version for compatibility.
 .Ss Options when creating a main executable
 .Bl -tag
 .It Fl pie
-This makes a special kind of main executable that is position independent (PIE).  On Mac OS X 10.5, the OS
-will load a PIE at a random address each time it is executed.  You cannot create a PIE from .o files compiled 
+This makes a special kind of main executable that is position independent (PIE).  On Mac OS X 10.5 and later, the OS
+the OS will load a PIE at a random address each time it is executed.  You cannot create a PIE from .o files compiled 
 with -mdynamic-no-pic.  That means the codegen is less optimal, but the address randomization adds some 
-security. 
+security. When targeting Mac OS X 10.7 or later PIE is the default for x86_64 main executables.
+.It Fl no_pie
+Do not make a position independent executable (PIE).  This is the default, except for x86_64 for 10.7 or later.
 .It Fl pagezero_size Ar size
 By default the linker creates an unreadable segment starting at address zero named __PAGEZERO.  Its existence
 will cause a bus error if a NULL pointer is dereferenced.  The argument

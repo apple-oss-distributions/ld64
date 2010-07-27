@@ -765,6 +765,7 @@
 				INSTALL_PATH = /usr/bin;
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
 				OTHER_LDFLAGS = (
+					"-Wl,-no_pie",
 					"@$(DERIVED_FILE_DIR)/linker_opts",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);

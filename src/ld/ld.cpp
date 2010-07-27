@@ -87,7 +87,7 @@ class Section : public ObjectFile::Section
 {
 public:
 	static Section*	find(const char* sectionName, const char* segmentName, bool zeroFill, bool untrustedZeroFill, bool createIfNeeded=true);
-	static void		assignIndexes();
+	static void		assignIndexes(bool objfile);
 	const char*		getName() { return fSectionName; }
 private:
 					Section(const char* sectionName, const char* segmentName, bool zeroFill, bool untrustedZeroFill);
@@ -109,11 +109,13 @@ private:
 	static NameToSection			fgMapping;
 	static std::vector<Section*>	fgSections;
 	static NameToOrdinal			fgSegmentDiscoverOrder;
+	static bool						fgMakingObjectFile;
 };
 
 Section::NameToSection	Section::fgMapping;
 std::vector<Section*>	Section::fgSections;
 Section::NameToOrdinal	Section::fgSegmentDiscoverOrder;
+bool					Section::fgMakingObjectFile;
 
 Section::Section(const char* sectionName, const char* segmentName, bool zeroFill, bool untrustedZeroFill)
  : fZeroFill(zeroFill), fUntrustedZeroFill(untrustedZeroFill)
@@ -254,10 +256,10 @@ int Section::Sorter::segmentOrdinal(const char* segName)
 	if ( strcmp(segName, "__TEXT") == 0 )
 		return 2;
 	if ( strcmp(segName, "__DATA") == 0 )
-		return 3;
+		return (fgMakingObjectFile ? 6 : 3); // __DATA is last in .o files and here in FLI
 	if ( strcmp(segName, "__OBJC") == 0 )
 		return 4;
-	if ( strcmp(segName, "__OBJC2") == 0 )
+	if ( strcmp(segName, "__IMPORT") == 0 )
 		return 5;
 	if ( strcmp(segName, "__LINKEDIT") == 0 )
 		return INT_MAX;	// linkedit segment should always sort last
@@ -286,7 +288,7 @@ bool Section::Sorter::operator()(Section* left, Section* right)
 	return left->fIndex < right->fIndex;
 }
 
-void Section::assignIndexes()
+void Section::assignIndexes(bool objfile)
 {	
 	//printf("unsorted sections:\n");
 	//for (std::vector<Section*>::iterator it=fgSections.begin(); it != fgSections.end(); it++) {
@@ -294,6 +296,7 @@ void Section::assignIndexes()
 	//}
 
 	// sort it
+	Section::fgMakingObjectFile = objfile;
 	std::sort(fgSections.begin(), fgSections.end(), Section::Sorter());
 
 	// assign correct section ordering to each Section object
@@ -793,8 +796,10 @@ void Linker::adjustScope()
 						//fprintf(stderr, "demote %s to hidden\n", name);
 					}
 					else if ( atom->getDefinitionKind() == ObjectFile::Atom::kWeakDefinition ) {
-						// we do have an exported weak symbol, turn WEAK_DEFINES back on
-						fGlobalSymbolTable.setHasExternalWeakDefinitions(true);
+						if ( atom->getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableIn ) {
+							// we do have an exported weak symbol, turn WEAK_DEFINES back on
+							fGlobalSymbolTable.setHasExternalWeakDefinitions(true);
+						}
 					}
 				}
 				else if ( scope == ObjectFile::Atom::scopeLinkageUnit ) {
@@ -2152,7 +2157,7 @@ ObjectFile::Atom* Linker::findAtom(const Options::OrderedSymbol& orderedSymbol)
 
 void Linker::sortSections()
 {
-	Section::assignIndexes();
+	Section::assignIndexes(fOptions.outputKind() == Options::kObjectFile);
 }
 
 
@@ -4124,7 +4129,8 @@ bool Linker::SymbolTable::add(ObjectFile::Atom& newAtom)
 					++fRequireCount; // added a tentative definition means loadUndefines() needs to continue
 					break;
 				case ObjectFile::Atom::kWeakDefinition:
-					fHasExternalWeakDefinitions = true;
+					if ( newAtom.getSymbolTableInclusion() == ObjectFile::Atom::kSymbolTableIn )
+						fHasExternalWeakDefinitions = true;
 					break;
 				case ObjectFile::Atom::kExternalDefinition:
 				case ObjectFile::Atom::kExternalWeakDefinition:

@@ -30,31 +30,31 @@
 	.globl _test_loads
 _test_loads:
     @ PIC load of a
-    ldr r0, L6
+    ldr r0, L100
 L0:
     ldr r0, [pc, r0]
 
     @ PIC load of c
-    ldr r0, L6+4
+    ldr r0, L100+4
 L1:
     ldr r0, [pc, r0]
 
 	@ sorta-absolute load of a
-	ldr r0, L6+8
+	ldr r0, L100+8
 	ldr r0, [r0, #0]
 	
 	@ sorta-absolute load of c
-	ldr r0, L6+12
+	ldr r0, L100+12
 	ldr r0, [r0, #0]
 
 	@ sorta-absolute load of external
-	ldr r0, L6+16
+	ldr r0, L100+16
 	ldr r0, [r0, #0]
 
 	@ PIC load of a + addend ??
     bx lr
 
-L6:
+L100:
     .long _a-(L0+8)
     .long _c-(L1+8)
     .long _a
@@ -88,10 +88,12 @@ _test_branches:
 	@ call external + addend
 	bne	_external+16
 
-_pointer_diffs:
 	nop
 	bl	  1f
 1:	nop
+
+	.text
+_pointer_diffs:
 	.long _foo-1b
 	.long _foo+10-1b
 	.long _test_branches-1b
@@ -99,6 +101,98 @@ _pointer_diffs:
 	.long (_test_branches - _test_loads) + -2097152
 	.long (_test_calls - _test_loads) + -2097152 
 
+	.text
+	.code 32
+_arm1: 
+	bx	lr
+_arm2: 
+	bx	lr
+	.weak_definition _arm3
+	.globl _arm3
+	.private_extern _arm3
+_arm3: 
+	bx	lr
+	.weak_definition _arm4
+	.globl _arm4
+	.private_extern _arm4
+_arm4: 
+	bx	lr
+
+	.code 16
+	.thumb_func _thumb1
+_thumb1: 
+	bx	lr
+	.thumb_func _thumb2
+_thumb2: 
+	bx	lr
+	.weak_definition _thumb3
+	.globl _thumb3
+	.private_extern _thumb3
+	.thumb_func _thumb3
+_thumb3: 
+	bx	lr
+	.weak_definition _thumb4
+	.globl _thumb4
+	.private_extern _thumb4
+	.thumb_func _thumb4
+_thumb4: 
+	bx	lr
+
+	.thumb_func _thumb_func_ref_test
+_thumb_func_ref_test: 
+	push	{r7, lr}
+	add	r7, sp, #0
+	ldr	r3, L6
+L2:	add	r3, pc
+	ldr	r3, L7
+L3:	add	r3, pc
+	ldr	r3, L8
+L4:	add	r3, pc
+	ldr	r3, L9
+L5:	add	r3, pc
+	pop	{r7, pc}
+	.align 2
+L6:	.long	_thumb1-(L2+4)
+L7:	.long	_thumb2-(L3+4)
+L7a:.long	_thumb3-(L3+4)
+L7b:.long	_thumb4-(L3+4)
+L8:	.long	_arm1-(L4+4)
+L9:	.long	_arm2-(L5+4)
+L9a:.long	_arm3-(L5+4)
+L9b:.long	_arm4-(L5+4)
+
+	.code 32
+	.align 2
+_arm_func_ref_test: 
+	push	{r7, lr}
+	add	r7, sp, #0
+	ldr	r3, L16
+L12:add	r3, pc
+	ldr	r3, L17
+L13:add	r3, pc
+	ldr	r3, L18
+L14:add	r3, pc
+	ldr	r3, L19
+L15:add	r3, pc
+	pop	{r7, pc}
+	.align 2
+L16:	.long	_thumb1-(L12+8)
+L17:	.long	_thumb2-(L13+8)
+L17a:	.long	_thumb3-(L3+8)
+L17b:	.long	_thumb4-(L3+8)
+L18:	.long	_arm1-(L14+8)
+L19:	.long	_arm2-(L15+8)
+L19a:	.long	_arm3-(L15+8)
+L19b:	.long	_arm4-(L15+8)
+
+	.section	__DATA,__const
+_myVTable:
+		.long	_thumb1
+		.long	_thumb2
+		.long	_thumb3
+		.long	_arm1
+		.long	_arm2
+	
 #endif
 
 #if __ppc__ || __ppc64__
@@ -410,6 +504,8 @@ Llocal2:
 	.long _test_branches - .
 	.long _test_branches - . + 8
 	.long _test_branches - . - 8
+	.long 0
+	.long 0
 #if __ppc64__
 	.quad Llocal2-_test_branches
 #endif
