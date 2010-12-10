@@ -23,7 +23,7 @@
  */
 #include <stdio.h>
 
-// this non-seak func() will have no unwind info and no LSDA
+// this non-weak func() will have no unwind info and no LSDA
 int func() { return 0; }
 
 void foo(int x) {}

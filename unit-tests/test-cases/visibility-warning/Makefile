@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2007 Apple Inc. All rights reserved.
+# Copyright (c) 2007-2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -39,18 +39,24 @@ all:
 	${CC} ${CCFLAGS} -c foo_weak.c -o foo_weak.o
 	${CC} ${CCFLAGS} -c foo.c -o foo.o
 	${CC} ${CCFLAGS} -c foo_hidden.c -o foo_hidden.o
-	# weak default and weak hidden should warn
-	${CC} ${CCFLAGS} foo_weak_hidden.o foo_weak.o -dynamiclib -o libfoo.dylib 2> warnings.log
-	grep visibility warnings.log | ${FAIL_IF_EMPTY}
-	# weak hidden and strong should not warn
-	${CC} ${CCFLAGS} foo_weak_hidden.o foo.o -dynamiclib -o libfoo.dylib  2> warnings.log
-	grep visibility warnings.log | ${FAIL_IF_STDIN}
-	# weak default and strong hidden should not warn
-	${CC} ${CCFLAGS} foo_weak.o foo_hidden.o -dynamiclib -o libfoo.dylib  2> warnings.log
-	grep visibility warnings.log | ${FAIL_IF_STDIN}
-	# weak default and weak hidden but -w should not warn
-	${CC} ${CCFLAGS} foo_weak_hidden.o foo_weak.o -dynamiclib -w -o libfoo.dylib 2> warnings.log
-	cat warnings.log | ${FAIL_IF_STDIN}
+	# weak default and weak hidden should pick default
+	${CC} ${CCFLAGS} foo_weak_hidden.o foo_weak.o -dynamiclib -o libfoo.dylib 
+	nm -m libfoo.dylib | grep _foo | grep "private external" | ${FAIL_IF_STDIN}
+	# weak default and weak hidden should pick default
+	${CC} ${CCFLAGS} foo_weak.o foo_weak_hidden.o -dynamiclib -o libfoo.dylib 
+	nm -m libfoo.dylib | grep _foo | grep "private external" | ${FAIL_IF_STDIN}
+	# weak hidden and strong should not warn and pick strong
+	${CC} ${CCFLAGS} foo_weak_hidden.o foo.o -dynamiclib -o libfoo.dylib  
+	nm -m libfoo.dylib | grep _foo | grep weak | ${FAIL_IF_STDIN}
+	nm -m libfoo.dylib | grep _foo | grep "private external" | ${FAIL_IF_STDIN}
+	# weak default and strong hidden should not warn and pick hidden
+	${CC} ${CCFLAGS} foo_weak.o foo_hidden.o -dynamiclib -o libfoo.dylib 
+	nm -m libfoo.dylib | grep _foo | grep weak | ${FAIL_IF_STDIN}
+	nm -m libfoo.dylib | grep _foo | grep "private external" | ${FAIL_IF_EMPTY}
+	# weak default and strong hidden should not warn and pick hidden
+	${CC} ${CCFLAGS} foo_hidden.o foo_weak.o  -dynamiclib -o libfoo.dylib 
+	nm -m libfoo.dylib | grep _foo | grep weak | ${FAIL_IF_STDIN}
+	nm -m libfoo.dylib | grep _foo | grep "private external" | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} libfoo.dylib
 
 clean:

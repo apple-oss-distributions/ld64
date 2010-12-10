@@ -302,7 +302,6 @@ void Rebaser<A>::setBaseAddress(uint64_t addr)
 template <typename A>
 void Rebaser<A>::adjustLoadCommands()
 {
-	const macho_segment_command<P>* highestSegmentCmd = NULL; 
 	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((uint8_t*)fHeader + sizeof(macho_header<P>));
 	const uint32_t cmd_count = fHeader->ncmds();
 	const macho_load_command<P>* cmd = cmds;
@@ -317,6 +316,8 @@ void Rebaser<A>::adjustLoadCommands()
 				break;
 			case LC_LOAD_DYLIB:
 			case LC_LOAD_WEAK_DYLIB:
+			case LC_REEXPORT_DYLIB:
+			case LC_LOAD_UPWARD_DYLIB:
 				if ( (fHeader->flags() & MH_PREBOUND) != 0 ) {
 					// clear expected timestamps so that this image will load with invalid prebinding 
 					macho_dylib_command<P>* dylib  = (macho_dylib_command<P>*)cmd;
@@ -326,7 +327,7 @@ void Rebaser<A>::adjustLoadCommands()
 			case macho_routines_command<P>::CMD:
 				// update -init command
 				{
-					struct macho_routines_command<P>* routines = (struct macho_routines_command<P>*)cmd;
+					macho_routines_command<P>* routines = (macho_routines_command<P>*)cmd;
 					routines->set_init_address(routines->init_address() + fSlide);
 				}
 				break;
@@ -374,6 +375,7 @@ void Rebaser<A>::adjustSymbolTable()
 {
 	const macho_dysymtab_command<P>* dysymtab = NULL;
 	macho_nlist<P>* symbolTable = NULL;
+	const char* strings = NULL;
 
 	// get symbol table info
 	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((uint8_t*)fHeader + sizeof(macho_header<P>));
@@ -385,7 +387,8 @@ void Rebaser<A>::adjustSymbolTable()
 				{
 					const macho_symtab_command<P>* symtab = (macho_symtab_command<P>*)cmd;
 					symbolTable = (macho_nlist<P>*)(((uint8_t*)fHeader) + symtab->symoff());
-				}
+					strings = (char*)(((uint8_t*)fHeader) + symtab->stroff());
+                }    
 				break;
 			case LC_DYSYMTAB:
 				dysymtab = (macho_dysymtab_command<P>*)cmd;
@@ -404,8 +407,23 @@ void Rebaser<A>::adjustSymbolTable()
 	// walk all local symbols and slide their n_value
 	macho_nlist<P>* lastLocal = &symbolTable[dysymtab->ilocalsym()+dysymtab->nlocalsym()];
 	for (macho_nlist<P>* entry = &symbolTable[dysymtab->ilocalsym()]; entry < lastLocal; ++entry) {
-		if ( entry->n_sect() != NO_SECT )
+		if ( ((entry->n_type() & N_STAB) == 0) && ((entry->n_type() & N_TYPE) == N_SECT) ) {
 			entry->set_n_value(entry->n_value() + fSlide);
+		}
+		else if ( entry->n_type() & N_STAB ) {
+			// some stabs need to be slid too
+			switch ( entry->n_type() ) {
+				case N_FUN:
+					// don't slide end-of-function FUN which is FUN with no string
+					if ( (entry->n_strx() == 0) || (strings[entry->n_strx()] == '\0') )
+						break;
+				case N_BNSYM:
+				case N_STSYM:
+				case N_LCSYM:
+					entry->set_n_value(entry->n_value() + fSlide);
+					break;
+			}
+		}
 	}
 	
 	// FIXME еее adjust dylib_module if it exists
@@ -448,7 +466,7 @@ void Rebaser<A>::rebaseAt(int segIndex, uint64_t offset, uint8_t type)
 				if ( segIndex == segCount ) {
 					const macho_segment_command<P>* seg = (macho_segment_command<P>*)cmd;
 					lastSegMappedStart = (uint8_t*)fHeader + seg->fileoff();
-					lastSegIndex == segCount;
+					lastSegIndex = segCount;
 					break;
 				}
 				++segCount;

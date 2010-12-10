@@ -33,7 +33,7 @@ all:
 	${FAIL_IF_ERROR} ${CC} ${CCFLAGS} -arch ${ARCH} -c -O2 tl_test2.c -o tl_test2-${ARCH}.o
 
 	# verify that the alignment is correct in the .o
-	ObjectDump -only _ai -align -no_content tl_test2-${ARCH}.o|${FAIL_IF_ERROR} grep '\<0 mod 16\>' >/dev/null
+	${OBJECTDUMP} -only _ai -align -no_content tl_test2-${ARCH}.o|${FAIL_IF_ERROR} grep '\<0 mod 16\>' >/dev/null
 
 	# now verify the executable
 	${FAIL_IF_ERROR} ${CC} ${CCFLAGS} -arch ${ARCH} -O2 tl_test2-${ARCH}.o -o tl_test2-${ARCH}

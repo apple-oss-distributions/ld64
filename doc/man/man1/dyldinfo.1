@@ -1,4 +1,4 @@
-.Dd November 20, 2008
+.Dd November 10, 2010
 .Dt dyldinfo 1
 .Os Darwin
 .Sh NAME
@@ -7,12 +7,14 @@
 .Sh SYNOPSIS
 .Nm
 .Op Fl arch Ar arch-name 
+.Op Fl dylibs
 .Op Fl rebase
 .Op Fl bind
 .Op Fl weak_bind
 .Op Fl lazy_bind
 .Op Fl export
 .Op Fl opcodes
+.Op Fl function_starts
 .Ar file(s)
 .Sh DESCRIPTION
 Executables built for Mac OS X 10.6 and later have a new format for the
@@ -23,10 +25,12 @@ The options are as follows:
 .Bl -tag -width indent
 .It Fl arch Ar arch
 Only display the specified architecture.  Other architectures in a universal image are ignored.
+.It Fl dylibs
+Display the table of dylibs on which this image depends.
 .It Fl rebase
 Display the table of rebasing information.  Rebasing is what dyld does when an image is 
 not loaded at its preferred address.  Typically, this involves updating pointers in the __DATA
-segment which are point within the image. 
+segment which point within the image. 
 .It Fl bind
 Display the table of binding information.  These are the symbolic fix ups that dyld must
 do when an image is loaded.
@@ -41,6 +45,8 @@ functions in some external dylib.
 Display the table symbols which this image exports.
 .It Fl opcodes
 Display the low level opcodes used to encode all rebase and binding information.
+.It Fl function_starts
+Decodes the list of function start addresses.
 .El
 .Sh SEE ALSO
 .Xr otool 1

@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -118,6 +118,7 @@ class Pointer32
 {
 public:
 	typedef uint32_t	uint_t;
+	typedef int32_t		sint_t;
 	typedef _E			E;
 	
 	static uint64_t	getP(const uint_t& from)				INLINE { return _E::get32(from); }
@@ -130,6 +131,7 @@ class Pointer64
 {
 public:
 	typedef uint64_t	uint_t;
+	typedef int64_t		sint_t;
 	typedef _E			E;
 	
 	static uint64_t	getP(const uint_t& from)				INLINE { return _E::get64(from); }

@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2007 Apple Inc. All rights reserved.
+# Copyright (c) 2007-2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -32,19 +32,14 @@ SHELL = bash # use bash shell so we can redirect just stderr
 
 run: all
 
-all: libfoo.dylib 
+all: 
+	mkdir -p other
+	${CC} foo.c -dynamiclib -o other/libfoo.dylib -mmacosx-version-min=10.4
+	${CC} bar.c -dynamiclib -o libbar.dylib other/libfoo.dylib -sub_library libfoo -mmacosx-version-min=10.4
+	${CC} foo.c -dynamiclib -o libfoo.dylib libbar.dylib -sub_library libbar -mmacosx-version-min=10.4
 	${CC} main.c libfoo.dylib -o main -L. 2>errmsg || true
 	grep "cycle" errmsg | ${PASS_IFF_STDIN}
 
-libfoo.dylib : foo.c libbar.dylib
-	${CC} foo.c -dynamiclib -o libfoo.dylib libbar.dylib -sub_library libbar -mmacosx-version-min=10.4
-
-libbar.dylib : bar.c other/libfoo.dylib
-	${CC} bar.c -dynamiclib -o libbar.dylib other/libfoo.dylib -sub_library libfoo -mmacosx-version-min=10.4
-
-other/libfoo.dylib : foo.c 
-	mkdir -p other
-	${CC} foo.c -dynamiclib -o other/libfoo.dylib -mmacosx-version-min=10.4
 
 
 

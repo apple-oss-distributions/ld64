@@ -59,8 +59,10 @@ class UnwindPrinter
 {
 public:
 	static bool									validFile(const uint8_t* fileContent);
-	static UnwindPrinter<A>*						make(const uint8_t* fileContent, uint32_t fileLength, const char* path) 
-														{ return new UnwindPrinter<A>(fileContent, fileLength, path); }
+	static UnwindPrinter<A>*						make(const uint8_t* fileContent, uint32_t fileLength, 
+															const char* path, bool showFunctionNames) 
+														{ return new UnwindPrinter<A>(fileContent, fileLength, 
+																						path, showFunctionNames); }
 	virtual										~UnwindPrinter() {}
 
 
@@ -77,9 +79,10 @@ private:
 
 	typedef __gnu_cxx::hash_set<const char*, __gnu_cxx::hash<const char*>, CStringEquals>  StringSet;
 
-												UnwindPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path);
+												UnwindPrinter(const uint8_t* fileContent, uint32_t fileLength, 
+																const char* path, bool showFunctionNames);
 	bool										findUnwindSection();
-	void										printUnwindSection();
+	void										printUnwindSection(bool showFunctionNames);
 	void										getSymbolTableInfo();
 	const char*									functionName(pint_t addr);
 	static const char*							archName();
@@ -195,7 +198,7 @@ bool UnwindPrinter<arm>::validFile(const uint8_t* fileContent)
 
 
 template <typename A>
-UnwindPrinter<A>::UnwindPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path)
+UnwindPrinter<A>::UnwindPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path, bool showFunctionNames)
  : fHeader(NULL), fLength(fileLength), fUnwindSection(NULL),
    fStrings(NULL), fStringsEnd(NULL), fSymbols(NULL), fSymbolCount(0), fMachHeaderAddress(0)
 {
@@ -209,7 +212,7 @@ UnwindPrinter<A>::UnwindPrinter(const uint8_t* fileContent, uint32_t fileLength,
 	getSymbolTableInfo();
 	
 	if ( findUnwindSection() )
-		printUnwindSection();
+		printUnwindSection(showFunctionNames);
 }
 
 
@@ -664,7 +667,7 @@ void UnwindPrinter<A>::decode(uint32_t encoding, const uint8_t* funcStart, char*
 }
 
 template <typename A>
-void UnwindPrinter<A>::printUnwindSection()
+void UnwindPrinter<A>::printUnwindSection(bool showFunctionNames)
 {
 	const uint8_t* sectionContent = (uint8_t*)fHeader + fUnwindSection->offset();
 	macho_unwind_info_section_header<P>* sectionHeader = (macho_unwind_info_section_header<P>*)(sectionContent);
@@ -700,8 +703,8 @@ void UnwindPrinter<A>::printUnwindSection()
 	printf("\tLSDA table: (section offset 0x%08X, count=%u)\n", lsdaIndexArraySectionOffset, lsdaIndexArrayCount);
 	macho_unwind_info_section_header_lsda_index_entry<P>* lindex = (macho_unwind_info_section_header_lsda_index_entry<P>*)&sectionContent[lsdaIndexArraySectionOffset];
 	for (uint32_t i=0; i < lsdaIndexArrayCount; ++i) {
-		printf("\t\t[%3u] funcOffset=0x%08X, lsdaOffset=0x%08X,  %s\n", 
-					i, lindex[i].functionOffset(), lindex[i].lsdaOffset(), functionName(lindex[i].functionOffset()+fMachHeaderAddress));
+		const char* name = showFunctionNames ? functionName(lindex[i].functionOffset()+fMachHeaderAddress) : "";
+		printf("\t\t[%3u] funcOffset=0x%08X, lsdaOffset=0x%08X,  %s\n", i, lindex[i].functionOffset(), lindex[i].lsdaOffset(), name);
 		if ( *(((uint8_t*)fHeader) + lindex[i].lsdaOffset()) != 0xFF )
 			fprintf(stderr, "BAD LSDA entry (does not start with 0xFF) for %s\n", functionName(lindex[i].functionOffset()+fMachHeaderAddress));
 	}
@@ -731,8 +734,9 @@ void UnwindPrinter<A>::printUnwindSection()
 				} 
 				char encodingString[100];
 				decode(entry[j].encoding(), ((const uint8_t*)fHeader)+funcOffset, encodingString);
+				const char* name = showFunctionNames ? functionName(funcOffset+fMachHeaderAddress) : "";
 				printf("\t\t\t[%3u] funcOffset=0x%08X, encoding=0x%08X (%-40s) %s\n", 
-					j, funcOffset, entry[j].encoding(), encodingString, functionName(funcOffset+fMachHeaderAddress));
+					j, funcOffset, entry[j].encoding(), encodingString, name);
 			}
 		}
 		else if ( page->kind() == UNWIND_SECOND_LEVEL_COMPRESSED ) {
@@ -755,7 +759,7 @@ void UnwindPrinter<A>::printUnwindSection()
 				char encodingString[100];
 				uint32_t funcOff = UNWIND_INFO_COMPRESSED_ENTRY_FUNC_OFFSET(entries[j])+baseFunctionOffset;
 				decode(encoding, ((const uint8_t*)fHeader)+funcOff, encodingString);
-				const char* name = functionName(funcOff+fMachHeaderAddress);
+				const char* name = showFunctionNames ? functionName(funcOff+fMachHeaderAddress) : "";
 				if ( encoding & UNWIND_HAS_LSDA ) {
 					// verify there is a corresponding entry in lsda table
 					bool found = false;
@@ -780,7 +784,7 @@ void UnwindPrinter<A>::printUnwindSection()
 
 }
 
-static void dump(const char* path, const std::set<cpu_type_t>& onlyArchs)
+static void dump(const char* path, const std::set<cpu_type_t>& onlyArchs, bool showFunctionNames)
 {
 	struct stat stat_buf;
 	
@@ -807,31 +811,31 @@ static void dump(const char* path, const std::set<cpu_type_t>& onlyArchs)
 					switch(cputype) {
 					case CPU_TYPE_POWERPC:
 						if ( UnwindPrinter<ppc>::validFile(p + offset) )
-							UnwindPrinter<ppc>::make(p + offset, size, path);
+							UnwindPrinter<ppc>::make(p + offset, size, path, showFunctionNames);
 						else
 							throw "in universal file, ppc slice does not contain ppc mach-o";
 						break;
 					case CPU_TYPE_I386:
 						if ( UnwindPrinter<x86>::validFile(p + offset) )
-							UnwindPrinter<x86>::make(p + offset, size, path);
+							UnwindPrinter<x86>::make(p + offset, size, path, showFunctionNames);
 						else
 							throw "in universal file, i386 slice does not contain i386 mach-o";
 						break;
 					case CPU_TYPE_POWERPC64:
 						if ( UnwindPrinter<ppc64>::validFile(p + offset) )
-							UnwindPrinter<ppc64>::make(p + offset, size, path);
+							UnwindPrinter<ppc64>::make(p + offset, size, path, showFunctionNames);
 						else
 							throw "in universal file, ppc64 slice does not contain ppc64 mach-o";
 						break;
 					case CPU_TYPE_X86_64:
 						if ( UnwindPrinter<x86_64>::validFile(p + offset) )
-							UnwindPrinter<x86_64>::make(p + offset, size, path);
+							UnwindPrinter<x86_64>::make(p + offset, size, path, showFunctionNames);
 						else
 							throw "in universal file, x86_64 slice does not contain x86_64 mach-o";
 						break;
 					case CPU_TYPE_ARM:
 						if ( UnwindPrinter<arm>::validFile(p + offset) )
-							UnwindPrinter<arm>::make(p + offset, size, path);
+							UnwindPrinter<arm>::make(p + offset, size, path, showFunctionNames);
 						else
 							throw "in universal file, arm slice does not contain arm mach-o";
 						break;
@@ -842,19 +846,19 @@ static void dump(const char* path, const std::set<cpu_type_t>& onlyArchs)
 			}
 		}
 		else if ( UnwindPrinter<x86>::validFile(p) && onlyArchs.count(CPU_TYPE_I386) ) {
-			UnwindPrinter<x86>::make(p, length, path);
+			UnwindPrinter<x86>::make(p, length, path, showFunctionNames);
 		}
 		else if ( UnwindPrinter<ppc>::validFile(p) && onlyArchs.count(CPU_TYPE_POWERPC) ) {
-			UnwindPrinter<ppc>::make(p, length, path);
+			UnwindPrinter<ppc>::make(p, length, path, showFunctionNames);
 		}
 		else if ( UnwindPrinter<ppc64>::validFile(p) && onlyArchs.count(CPU_TYPE_POWERPC64) ) {
-			UnwindPrinter<ppc64>::make(p, length, path);
+			UnwindPrinter<ppc64>::make(p, length, path, showFunctionNames);
 		}
 		else if ( UnwindPrinter<x86_64>::validFile(p) && onlyArchs.count(CPU_TYPE_X86_64) ) {
-			UnwindPrinter<x86_64>::make(p, length, path);
+			UnwindPrinter<x86_64>::make(p, length, path, showFunctionNames);
 		}
 		else if ( UnwindPrinter<arm>::validFile(p) && onlyArchs.count(CPU_TYPE_ARM) ) {
-			UnwindPrinter<arm>::make(p, length, path);
+			UnwindPrinter<arm>::make(p, length, path, showFunctionNames);
 		}
 		else {
 			throw "not a known file type";
@@ -870,6 +874,7 @@ int main(int argc, const char* argv[])
 {
 	std::set<cpu_type_t> onlyArchs;
 	std::vector<const char*> files;
+	bool showFunctionNames = true;
 	
 	try {
 		for(int i=1; i < argc; ++i) {
@@ -889,6 +894,9 @@ int main(int argc, const char* argv[])
 						onlyArchs.insert(CPU_TYPE_ARM);
 					else 
 						throwf("unknown architecture %s", arch);
+				}
+				else if ( strcmp(arg, "-no_symbols") == 0 ) {
+					showFunctionNames = false;
 				}
 				else {
 					throwf("unknown option: %s\n", arg);
@@ -910,7 +918,7 @@ int main(int argc, const char* argv[])
 		
 		// process each file
 		for(std::vector<const char*>::iterator it=files.begin(); it != files.end(); ++it) {
-			dump(*it, onlyArchs);
+			dump(*it, onlyArchs, showFunctionNames);
 		}
 		
 	}

@@ -41,11 +41,11 @@ all:
 	${CC} ${ASMFLAGS} aliases.s -c -o aliases.tmp.${ARCH}.o
 	${FAIL_IF_BAD_OBJ} aliases.tmp.${ARCH}.o
 
-	${LD} -arch ${ARCH} -r aliases.tmp.${ARCH}.o -alias _foo _fooalt -alias _foo _fooalt2 -o aliases.cmdline.${ARCH}.o
+	${LD} -arch ${ARCH} -r -keep_private_externs aliases.tmp.${ARCH}.o -alias _foo _fooalt -alias _foo _fooalt2 -alias _hidden _glob -o aliases.cmdline.${ARCH}.o
 	${FAIL_IF_ERROR} ${OBJECTDUMP} -no_content -no_sort aliases.cmdline.${ARCH}.o > aliases.cmdline.${ARCH}.o.dump
 	${FAIL_IF_ERROR} diff aliases.source.${ARCH}.o.dump  aliases.cmdline.${ARCH}.o.dump
 
-	${LD} -arch ${ARCH} -r aliases.tmp.${ARCH}.o -alias_list aliases.txt -o aliases.file.${ARCH}.o
+	${LD} -arch ${ARCH} -r -keep_private_externs aliases.tmp.${ARCH}.o -alias_list aliases.txt -o aliases.file.${ARCH}.o
 	${FAIL_IF_ERROR} ${OBJECTDUMP} -no_content -no_sort aliases.file.${ARCH}.o > aliases.file.${ARCH}.o.dump
 	${PASS_IFF} diff aliases.source.${ARCH}.o.dump  aliases.file.${ARCH}.o.dump
 	

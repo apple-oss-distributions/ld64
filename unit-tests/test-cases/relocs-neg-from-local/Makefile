@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2009 Apple Inc. All rights reserved.
+# Copyright (c) 2009-2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -41,10 +41,10 @@ run-other:
 
 run-i386:
 	${CC} ${ASMFLAGS} test.s -c -o test.o
-	${OBJECTDUMP} test.o | grep "__data@0 plus 0xFFFFFFE2" | ${FAIL_IF_EMPTY}
+	${OBJECTDUMP} test.o | grep "direct(anon@__data+0x00000000) + 0xFFFFFFFFFFFFFFE2" | ${FAIL_IF_EMPTY}
 
 	${LD} -arch ${ARCH} -r -keep_private_externs test.o -o test-r.o
-	${OBJECTDUMP} test-r.o | grep "__data@0 plus 0xFFFFFFE2" | ${PASS_IFF_STDIN}
+	${OBJECTDUMP} test-r.o | grep "direct(anon@__data+0x00000000) + 0xFFFFFFFFFFFFFFE2" | ${PASS_IFF_STDIN}
 
 	
 clean:

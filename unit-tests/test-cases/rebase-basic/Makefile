@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2006-2008 Apple Inc. All rights reserved.
+# Copyright (c) 2006-2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -32,10 +32,10 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	${CC} ${CCFLAGS} -c foo.c -o foo.${ARCH}.o
+	${CC} ${CCFLAGS} -c -g foo.c -o foo.${ARCH}.o
 	${FAIL_IF_BAD_OBJ} foo.${ARCH}.o
 
-	${CC} ${CCFLAGS} -c bar.m -o bar.${ARCH}.o
+	${CC} ${CCFLAGS} -c -g bar.m -o bar.${ARCH}.o
 	${FAIL_IF_BAD_OBJ} bar.${ARCH}.o
 
 	${CC} ${CCFLAGS} foo.${ARCH}.o bar.${ARCH}.o -dynamiclib -Wl,-no_uuid -Wl,-no_order_data -o libfoo.${ARCH}.dylib -framework Foundation  -framework CoreFoundation 

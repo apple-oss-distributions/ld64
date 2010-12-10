@@ -15,15 +15,18 @@ extern int bar_data2;
 int* pfoo = &foo_data1;
 int* pbar = &bar_data1;
 
+void* pfoo1;
+void* pbar1;
 
 int main (void)
 {
 	// make non-lazy reference to foo1 and bar1
-	if ( &foo1 == &bar1 ) {
-		// make lazy reference to foo2 and bar2
-		foo2();
-		bar2();
-	}
+	pfoo1 = &foo1;
+	pbar1 = &bar1;
+	
+	// make lazy reference to foo2 and bar2
+	foo2();
+	bar2();
    
    // make non-lazy reference to foo_data2 and bar_data2
    return *pfoo + *pbar + foo_data2 + bar_data2;

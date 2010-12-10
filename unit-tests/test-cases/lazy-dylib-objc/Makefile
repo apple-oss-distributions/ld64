@@ -42,4 +42,4 @@ all:
 	
 	
 clean:
-	rm  libfoo.dylib main rm fail.log
+	rm  -f libfoo.dylib main rm fail.log

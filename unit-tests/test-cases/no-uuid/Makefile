@@ -47,8 +47,8 @@ all:
 	${FAIL_IF_BAD_MACHO} foo
 	${OTOOL} -hlv foo | grep LC_UUID | ${FAIL_IF_STDIN}
 
-# Test ld -r of stabs file has no uuid
-	${CC} ${CCFLAGS} foo.c -c -o foo.o -gfull -gstabs+
+# Test ld -r of stabs file has no uuid (llvm does not support stabs, so use gcc)
+	gcc-4.2 -arch ${ARCH} ${CCFLAGS} foo.c -c -o foo.o -gfull -gstabs+
 	${LD} -arch ${ARCH} foo.o -r -o foo2.o
 	${OTOOL} -hlv foo2.o | grep LC_UUID | ${FAIL_IF_STDIN}
 

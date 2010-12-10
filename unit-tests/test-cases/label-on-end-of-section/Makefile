@@ -31,7 +31,7 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} foo.s -c -o foo.o
-	${OBJECTDUMP} foo.o | grep "pointer to _end" | ${PASS_IFF_STDIN}
+	${OBJECTDUMP} foo.o | grep "address of direct(_end)" | ${PASS_IFF_STDIN}
 
 clean:
 	rm  foo.o

@@ -1,6 +1,6 @@
 
 #include "header.h"
 
-void f() { LOTS_O_PROBES }
+void bar() { LOTS_O_PROBES }
 
 

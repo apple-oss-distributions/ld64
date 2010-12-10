@@ -31,7 +31,7 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all: libfoo.dylib libbar.dylib libbaz.dylib
-	${CC} ${CCFLAGS} main.c -o main -lfoo -lbar -lbaz -L.
+	${CC} ${CCFLAGS} main.c -o main -lfoo -lbar -lbaz -L. -Wl,-w
 	${PASS_IFF_GOOD_MACHO} main
 
 libfoo.dylib : foo.c

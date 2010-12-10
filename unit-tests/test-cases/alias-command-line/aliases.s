@@ -29,13 +29,20 @@ _temp:	nop
 		.globl _foo
 _foo:	nop
 		nop
+		
+		.globl _hidden
+		.private_extern _hidden
+_hidden:	nop
+			nop
 
 #if ALIASES
 		.globl _fooalt
 		.globl _fooalt2
+		.globl _glob
 /* this should make an alias "_fooalt" for "_foo" */
 _fooalt = _foo	
 _fooalt2 = _foo	
+_glob	 = _hidden
 #endif
 
 _bar:	nop

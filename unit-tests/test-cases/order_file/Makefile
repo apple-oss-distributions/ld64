@@ -33,25 +33,29 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	as -arch ${ARCH} -L extra.s -o extra.o
-	${CC} ${CCFLAGS} main.c extra.o -o main1 -Wl,-order_file -Wl,main1.order 
+	${CC} ${CCFLAGS} main.c extra.s -o main1 -Wl,-order_file -Wl,main1.order 
 	${FAIL_IF_BAD_MACHO} main1
 	nm -n -g -j main1 | grep "_main" > main1.nm
 	${PASS_IFF} diff main1.nm main1.expected
 
-	${CC} ${CCFLAGS} main.c extra.o -o main2 -Wl,-order_file -Wl,main2.order 
+	${CC} ${CCFLAGS} main.c extra.s -o main2 -Wl,-order_file -Wl,main2.order 
 	${FAIL_IF_BAD_MACHO} main2
 	nm -n -j main2 | egrep '^_[a-z]+[0-9]$$' > main2.nm
 	${PASS_IFF} diff main2.nm main2.expected
 
-	${CC} -arch ${ARCH} -c main.c -o main.o
-	${CC} ${CCFLAGS} main.o extra.o -o main3 -Wl,-order_file -Wl,main3.order 
+	${CC} ${CCFLAGS} main.c -c -o main.o
+	${CC} ${CCFLAGS} main.o extra.s -o main3 -Wl,-order_file -Wl,main3.order 
 	${FAIL_IF_BAD_MACHO} main3
 	nm -n -g -j main3 | grep "_main" > main3.nm
 	${PASS_IFF} diff main3.nm main3.expected
+
+	${CC} ${CCFLAGS} main.c extra.s -DSUBSECTIONS=1 -o main4 -Wl,-order_file -Wl,main4.order 
+	${FAIL_IF_BAD_MACHO} main4
+	nm -n -g -j main4 | nm -njg main4 | egrep '*[1-9]' > main4.nm
+	${PASS_IFF} diff main4.nm main4.expected
 
 
 
 
 clean:
-	rm -rf main1 *.nm main2 *.o warnings.log main3
+	rm -rf main1 main2 main3 main4 main.o *.nm

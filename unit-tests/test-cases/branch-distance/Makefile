@@ -35,9 +35,9 @@ run: all
 all:
 	${CC} ${CCFLAGS} foo.s -c 
 	${CC} ${CCFLAGS} bar.s -c 
-	${CC} ${CCFLAGS} foo.o bar.o -e _foo -o foobar ${ARCH_FLAGS} -nostdlib 
+	${CC} ${CCFLAGS} foo.o bar.o -e _foo -o foobar ${ARCH_FLAGS} -nostdlib -lSystem
 	${LD} -arch ${ARCH} -r foo.o bar.o -o foobar.o
-	${CC} ${CCFLAGS} foobar.o -e _foo -o foobar2 ${ARCH_FLAGS} -nostdlib 
+	${CC} ${CCFLAGS} foobar.o -e _foo -o foobar2 ${ARCH_FLAGS} -nostdlib -lSystem
 	${PASS_IFF_GOOD_MACHO} foobar
 
 clean:

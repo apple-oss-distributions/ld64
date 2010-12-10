@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2006-2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -30,9 +30,11 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	${CC} main.c -o main-${ARCH} -exported_symbols_list main.exp
-	${FAIL_IF_BAD_MACHO} main-${ARCH}
-	nm -m main-${ARCH} | grep _magicSymbol | grep "referenced dynamically" | ${PASS_IFF_STDIN}
+	${CC} main.c -o main -exported_symbols_list main.exp
+	nm -m main | grep _magicSymbol | grep "referenced dynamically" | ${FAIL_IF_EMPTY}
+	nm -m main | grep _hiddenSymbol | grep "referenced dynamically" | ${FAIL_IF_STDIN}
+	${PASS_IFF_GOOD_MACHO} main
+	
 
 clean:
-	rm  main-*
+	rm  main

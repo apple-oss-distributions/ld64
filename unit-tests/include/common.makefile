@@ -6,7 +6,7 @@ SHELL = /bin/sh
 ARCH ?= $(shell arch)
 
 # set default to be all
-VALID_ARCHS ?= "ppc ppc64 i386 x86_64 armv6"
+VALID_ARCHS ?= "i386 x86_64 armv6"
 
 MYDIR=$(shell cd ../../bin;pwd)
 LD			= ld
@@ -14,6 +14,7 @@ OBJECTDUMP	= ObjectDump
 MACHOCHECK	= machocheck
 OTOOL		= otool
 REBASE		= rebase
+DYLDINFO	= dyldinfo
 
 ifdef BUILT_PRODUCTS_DIR
 	# if run within Xcode, add the just built tools to the command path
@@ -23,17 +24,22 @@ ifdef BUILT_PRODUCTS_DIR
 	OBJECTDUMP	= ${BUILT_PRODUCTS_DIR}/ObjectDump
 	MACHOCHECK	= ${BUILT_PRODUCTS_DIR}/machocheck
 	REBASE		= ${BUILT_PRODUCTS_DIR}/rebase
+	UNWINDDUMP  = ${BUILT_PRODUCTS_DIR}/unwinddump
+	DYLDINFO	= ${BUILT_PRODUCTS_DIR}/dyldinfo
 else
 	ifneq "$(findstring /unit-tests/test-cases/, $(shell pwd))" ""
 		# if run from Terminal inside unit-test directory
 		RELEASEDIR=$(shell cd ../../../build/Release;pwd)
+		RELEASEADIR=$(shell cd ../../../build/Release-assert;pwd)
 		DEBUGDIR=$(shell cd ../../../build/Debug;pwd)
-		PATH := ${RELEASEDIR}:${DEBUGDIR}:${MYDIR}:${PATH}
-		COMPILER_PATH := ${RELEASEDIR}:${DEBUGDIR}:${MYDIR}:${COMPILER_PATH}
-		LD			= ${RELEASEDIR}/ld
-		OBJECTDUMP	= ${RELEASEDIR}/ObjectDump
-		MACHOCHECK	= ${RELEASEDIR}/machocheck
-		REBASE		= ${RELEASEDIR}/rebase
+		PATH := ${RELEASEADIR}:${RELEASEDIR}:${DEBUGDIR}:${MYDIR}:${PATH}
+		COMPILER_PATH := ${RELEASEADIR}:${RELEASEDIR}:${DEBUGDIR}:${MYDIR}:${COMPILER_PATH}
+		LD			= ${DEBUGDIR}/ld
+		OBJECTDUMP	= ${DEBUGDIR}/ObjectDump
+		MACHOCHECK	= ${DEBUGDIR}/machocheck
+		REBASE		= ${DEBUGDIR}/rebase
+		UNWINDDUMP  = ${DEBUGDIR}/unwinddump
+		DYLDINFO	= ${DEBUGDIR}/dyldinfo
 	else
 		PATH := ${MYDIR}:${PATH}:
 		COMPILER_PATH := ${MYDIR}:${COMPILER_PATH}:
@@ -42,12 +48,15 @@ endif
 export PATH
 export COMPILER_PATH
 
+ifeq ($(ARCH),ppc)
+	SDKExtra = -isysroot /Developer/SDKs/MacOSX10.6.sdk
+endif
 
-CC		 = gcc-4.2 -arch ${ARCH} ${SDKExtra}
+CC		 = cc -arch ${ARCH} ${SDKExtra}
 CCFLAGS = -Wall -std=c99
 ASMFLAGS =
 
-CXX		  = g++-4.2 -arch ${ARCH} ${SDKExtra}
+CXX		  = c++ -arch ${ARCH} ${SDKExtra}
 CXXFLAGS = -Wall
 
 ifeq ($(ARCH),armv6)
@@ -88,6 +97,7 @@ ifeq ($(ARCH),thumb2)
 else
   FILEARCH = $(ARCH)
 endif
+
 
 RM      = rm
 RMFLAGS = -rf

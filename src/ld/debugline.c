@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2005-2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2005-2009 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -345,6 +345,8 @@ line_at_eof (struct line_reader_data * lnd)
   return lnd->cpos == lnd->end;
 }
 
+static const bool verbose = false;
+
 static bool
 next_state (struct line_reader_data *lnd)
 {
@@ -373,28 +375,34 @@ next_state (struct line_reader_data *lnd)
 	case DW_LNS_extended_op:
 	  {
 	    uint64_t sz = read_uleb128 (lnd);
-	    const uint8_t * op = lnd->cpos;
+	    const uint8_t * eop = lnd->cpos;
 	    
-	    if ((uint64_t)(lnd->end - op) < sz || sz == 0)
+	    if ((uint64_t)(lnd->end - eop) < sz || sz == 0)
 	      return false;
 	    lnd->cpos += sz;
-	    switch (*op++)
+	    switch (*eop++)
 	      {
 	      case DW_LNE_end_sequence:
+	      if (verbose) fprintf(stderr, "DW_LNE_end_sequence\n");
 		lnd->cur.end_of_sequence = true;
 		return true;
 		
 	      case DW_LNE_set_address:
-		if (sz == 9)
-		  lnd->cur.pc = read_64 (op);
-		else if (sz == 5)
-		  lnd->cur.pc = read_32 (op);
+		if (sz == 9) {
+		  lnd->cur.pc = read_64 (eop);
+	          if (verbose) fprintf(stderr, "DW_LNE_set_address(0x%08llX)\n", lnd->cur.pc);
+		}
+		else if (sz == 5) {
+		  lnd->cur.pc = read_32 (eop);
+	          if (verbose) fprintf(stderr, "DW_LNE_set_address(0x%08llX)\n", lnd->cur.pc);
+		}
 		else
 		  return false;
 		break;
 		
 	      case DW_LNE_define_file:
 		{
+	          if (verbose) fprintf(stderr, "DW_LNE_define_file\n");
 		  const uint8_t * * filenames;
 		  filenames = realloc 
 		    (lnd->filenames, 
@@ -402,9 +410,9 @@ next_state (struct line_reader_data *lnd)
 		  if (! filenames)
 		    return false;
 		  /* Check for zero-termination.  */
-		  if (! memchr (op, 0, lnd->cpos - op))
+		  if (! memchr (eop, 0, lnd->cpos - eop))
 		    return false;
-		  filenames[lnd->numfile++] = op;
+		  filenames[lnd->numfile++] = eop;
 		  lnd->filenames = filenames;
 
 		  /* There's other data here, like file sizes and modification
@@ -414,40 +422,41 @@ next_state (struct line_reader_data *lnd)
 		
 	      default:
 		/* Don't understand it, so skip it.  */
+		if (verbose) fprintf(stderr, "DW_LNS_extended_op unknown\n");
 		break;
 	      }
 	    break;
 	  }
 	  
 	case DW_LNS_copy:
-	//fprintf(stderr, "DW_LNS_copy\n");
+	  if (verbose) fprintf(stderr, "DW_LNS_copy\n");
 	  return true;
 	case DW_LNS_advance_pc:
-	//fprintf(stderr, "DW_LNS_advance_pc\n");
 	  tmp = read_uleb128 (lnd);
 	  if (tmp == (uint64_t) -1)
 	    return false;
 	  lnd->cur.pc += tmp * lnd->minimum_instruction_length;
+	  if (verbose) fprintf(stderr, "DW_LNS_advance_pc(0x%08llX)\n", lnd->cur.pc);
 	  break;
 	case DW_LNS_advance_line:
-	//fprintf(stderr, "DW_LNS_advance_line\n");
 	  lnd->cur.line += read_sleb128 (lnd);
+	  if (verbose) fprintf(stderr, "DW_LNS_advance_line(%lld)\n", lnd->cur.line);
 	  break;
 	case DW_LNS_set_file:
-	//fprintf(stderr, "DW_LNS_set_file\n");
+	  if (verbose) fprintf(stderr, "DW_LNS_set_file\n");
 	  lnd->cur.file = read_uleb128 (lnd);
 	  break;
 	case DW_LNS_set_column:
-	//fprintf(stderr, "DW_LNS_set_column\n");
+	  if (verbose) fprintf(stderr, "DW_LNS_set_column\n");
 	  lnd->cur.col = read_uleb128 (lnd);
 	  break;
 	case DW_LNS_const_add_pc:
-	//fprintf(stderr, "DW_LNS_const_add_pc\n");
+	  if (verbose) fprintf(stderr, "DW_LNS_const_add_pc\n");
 	  lnd->cur.pc += ((255 - lnd->opcode_base) / lnd->line_range
 			  * lnd->minimum_instruction_length);
 	  break;
 	case DW_LNS_fixed_advance_pc:
-	//fprintf(stderr, "DW_LNS_fixed_advance_pc\n");
+	  if (verbose) fprintf(stderr, "DW_LNS_fixed_advance_pc\n");
 	  if (lnd->end - lnd->cpos < 2)
 	    return false;
 	  lnd->cur.pc += read_16 (lnd->cpos);
@@ -456,6 +465,7 @@ next_state (struct line_reader_data *lnd)
 	default:
 	  {
 	    /* Don't know what it is, so skip it.  */
+	    if (verbose) fprintf(stderr, "unknown opcode\n");
 	    int i;
 	    for (i = 0; i < lnd->standard_opcode_lengths[op - 1]; i++)
 	      skip_leb128 (lnd);

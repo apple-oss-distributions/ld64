@@ -33,6 +33,7 @@ run: all
 all:
 	${CC} ${CCFLAGS} main.c custom.s -o main 
 	size -l main | grep __cstring | wc -l | grep 2 | ${FAIL_IF_EMPTY}
+	size -l main | grep -A2 __MYSEG | grep __cstring | grep " 10 " | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:

@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2006-2007 Apple Inc. All rights reserved.
+ * Copyright (c) 2006-2010 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -52,6 +52,26 @@ void throwf(const char* format, ...)
 	throw t;
 }
 
+static uint64_t read_uleb128(const uint8_t*& p, const uint8_t* end)
+{
+	uint64_t result = 0;
+	int		 bit = 0;
+	do {
+		if (p == end)
+			throwf("malformed uleb128");
+
+		uint64_t slice = *p & 0x7f;
+
+		if (bit >= 64 || slice << bit >> bit != slice)
+			throwf("uleb128 too big");
+		else {
+			result |= (slice << bit);
+			bit += 7;
+		}
+	} 
+	while (*p++ & 0x80);
+	return result;
+}
 
 template <typename A>
 class MachOChecker
@@ -88,6 +108,8 @@ private:
 	void										checkLocalReloation(const macho_relocation_info<P>* reloc);
 	pint_t										relocBase();
 	bool										addressInWritableSegment(pint_t address);
+	bool										hasTextRelocInRange(pint_t start, pint_t end);
+	pint_t										segStartAddress(uint8_t segIndex);
 
 	const char*									fPath;
 	const macho_header<P>*						fHeader;
@@ -106,7 +128,9 @@ private:
 	bool										fWriteableSegmentWithAddrOver4G;
 	const macho_segment_command<P>*				fFirstSegment;
 	const macho_segment_command<P>*				fFirstWritableSegment;
+	const macho_dyld_info_command<P>*			fDyldInfo;
 	uint32_t									fSectionCount;
+	std::vector<const macho_segment_command<P>*>fSegments;
 };
 
 
@@ -211,7 +235,7 @@ template <typename A>
 MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, const char* path)
  : fHeader(NULL), fLength(fileLength), fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fDynamicSymbolTable(NULL), fIndirectTableCount(0),
  fLocalRelocations(NULL),  fLocalRelocationsCount(0),  fExternalRelocations(NULL),  fExternalRelocationsCount(0),
- fWriteableSegmentWithAddrOver4G(false), fFirstSegment(NULL), fFirstWritableSegment(NULL), fSectionCount(0)
+ fWriteableSegmentWithAddrOver4G(false), fFirstSegment(NULL), fFirstWritableSegment(NULL), fDyldInfo(NULL), fSectionCount(0)
 {
 	// sanity check
 	if ( ! validFile(fileContent) )
@@ -241,7 +265,7 @@ void MachOChecker<A>::checkMachHeader()
 		throw "sizeofcmds in mach_header is larger than file";
 	
 	uint32_t flags = fHeader->flags();
-	const uint32_t invalidBits = MH_INCRLINK | MH_LAZY_INIT | 0xFFC00000;
+	const uint32_t invalidBits = MH_INCRLINK | MH_LAZY_INIT | 0xFE000000;
 	if ( flags & invalidBits )
 		throw "invalid bits in mach_header flags";
 	if ( (flags & MH_NO_REEXPORTED_DYLIBS) && (fHeader->filetype() != MH_DYLIB) ) 
@@ -287,8 +311,14 @@ void MachOChecker<A>::checkLoadCommands()
 			case LC_REEXPORT_DYLIB:
 			case LC_SEGMENT_SPLIT_INFO:
 			case LC_CODE_SIGNATURE:
+			case LC_LOAD_UPWARD_DYLIB:
+			case LC_VERSION_MIN_MACOSX:
+			case LC_VERSION_MIN_IPHONEOS:
+			case LC_FUNCTION_STARTS:
+				break;
 			case LC_DYLD_INFO:
 			case LC_DYLD_INFO_ONLY:
+				fDyldInfo = (macho_dyld_info_command<P>*)cmd;
 				break;
 			case LC_ENCRYPTION_INFO:
 				encryption_info = (macho_encryption_info_command<P>*)cmd;
@@ -312,6 +342,7 @@ void MachOChecker<A>::checkLoadCommands()
 	for (uint32_t i = 0; i < cmd_count; ++i) {
 		if ( cmd->cmd() == macho_segment_command<P>::CMD ) {
 			const macho_segment_command<P>* segCmd = (const macho_segment_command<P>*)cmd;
+			fSegments.push_back(segCmd);
 			if ( segCmd->cmdsize() != (sizeof(macho_segment_command<P>) + segCmd->nsects() * sizeof(macho_section_content<P>)) )
 				throw "invalid segment load command size";
 				
@@ -381,7 +412,9 @@ void MachOChecker<A>::checkLoadCommands()
 					throwf("section %s vm address not within segment", sect->sectname());
 				if ( (sect->addr()+sect->size()) > endAddr )
 					throwf("section %s vm address not within segment", sect->sectname());
-				if ( ((sect->flags() & SECTION_TYPE) != S_ZEROFILL) && (segCmd->filesize() != 0) ) {
+				if ( ((sect->flags() & SECTION_TYPE) != S_ZEROFILL) 
+					&& ((sect->flags() & SECTION_TYPE) != S_THREAD_LOCAL_ZEROFILL) 
+					&& (segCmd->filesize() != 0) ) {
 					if ( sect->offset() < startOffset )
 						throwf("section %s file offset not within segment", sect->sectname());
 					if ( (sect->offset()+sect->size()) > endOffset )
@@ -470,7 +503,7 @@ void MachOChecker<A>::checkLoadCommands()
 					if ( isStaticExecutable )
 						throw "LC_DYSYMTAB should not be used in static executable";
 					foundDynamicSymTab = true;
-					fDynamicSymbolTable = (struct macho_dysymtab_command<P>*)cmd;
+					fDynamicSymbolTable = (macho_dysymtab_command<P>*)cmd;
 					fIndirectTable = (uint32_t*)((char*)fHeader + fDynamicSymbolTable->indirectsymoff());
 					fIndirectTableCount = fDynamicSymbolTable->nindirectsyms();
 					if ( fIndirectTableCount != 0  ) {
@@ -507,7 +540,7 @@ void MachOChecker<A>::checkLoadCommands()
 				{
 					if ( isStaticExecutable )
 						throw "LC_SEGMENT_SPLIT_INFO should not be used in static executable";
-					const macho_linkedit_data_command<P>* info = (struct macho_linkedit_data_command<P>*)cmd;
+					const macho_linkedit_data_command<P>* info = (macho_linkedit_data_command<P>*)cmd;
 					if ( info->dataoff() < linkEditSegment->fileoff() )
 						throw "split seg info not in __LINKEDIT";
 					if ( (info->dataoff()+info->datasize()) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
@@ -516,6 +549,19 @@ void MachOChecker<A>::checkLoadCommands()
 						throw "split seg info table not pointer aligned";
 					if ( (info->datasize() % sizeof(pint_t)) != 0 )
 						throw "split seg info size not a multiple of pointer size";
+				}
+				break;
+			case LC_FUNCTION_STARTS:
+				{
+					const macho_linkedit_data_command<P>* info = (macho_linkedit_data_command<P>*)cmd;
+					if ( info->dataoff() < linkEditSegment->fileoff() )
+						throw "function starts data not in __LINKEDIT";
+					if ( (info->dataoff()+info->datasize()) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+						throw "function starts data not in __LINKEDIT";
+					if ( (info->dataoff() % sizeof(pint_t)) != 0 )
+						throw "function starts data table not pointer aligned";
+					if ( (info->datasize() % sizeof(pint_t)) != 0 )
+						throw "function starts data size not a multiple of pointer size";
 				}
 				break;
 		}
@@ -543,6 +589,9 @@ void MachOChecker<A>::checkSection(const macho_segment_command<P>* segCmd, const
 template <typename A>
 void MachOChecker<A>::checkIndirectSymbolTable()
 {
+	// static executables don't have indirect symbol table
+	if ( fDynamicSymbolTable == NULL )
+		return;
 	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((uint8_t*)fHeader + sizeof(macho_header<P>));
 	const uint32_t cmd_count = fHeader->ncmds();
 	const macho_load_command<P>* cmd = cmds;
@@ -596,7 +645,11 @@ void MachOChecker<A>::checkSymbolTable()
 			//fprintf(stderr, "sym[%d] = %s\n", i, symName);
 			if ( externalNames.find(symName) != externalNames.end() )
 				throwf("duplicate external symbol: %s", symName);
-			externalNames.insert(symName);
+			if ( (p->n_type() & N_EXT) == 0 )
+				throwf("non-external symbol in external symbol range: %s", symName);
+			// don't add N_INDR to externalNames because there is likely an undefine with same name
+			if ( (p->n_type() & N_INDR) == 0 )
+				externalNames.insert(symName);
 		}
 		// verify no undefines with same name as an external symbol
 		const macho_nlist<P>* const	undefinesStart = &fSymbols[fDynamicSymbolTable->iundefsym()];
@@ -876,8 +929,128 @@ void MachOChecker<A>::checkRelocations()
 	for (const macho_relocation_info<P>* reloc = fLocalRelocations; reloc < localRelocsEnd; ++reloc) {
 		this->checkLocalReloation(reloc);
 	}
+	
+	// verify any section with S_ATTR_LOC_RELOC bits set actually has text relocs
+	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((uint8_t*)fHeader + sizeof(macho_header<P>));
+	const uint32_t cmd_count = fHeader->ncmds();
+	const macho_load_command<P>* cmd = cmds;
+	for (uint32_t i = 0; i < cmd_count; ++i) {
+		if ( cmd->cmd() == macho_segment_command<P>::CMD ) {
+			const macho_segment_command<P>* segCmd = (const macho_segment_command<P>*)cmd;
+			// if segment is writable, we are fine
+			if ( (segCmd->initprot() & VM_PROT_WRITE) != 0 ) 
+				continue;
+			// look at sections that have text reloc bit set
+			const macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+			const macho_section<P>* const sectionsEnd = &sectionsStart[segCmd->nsects()];
+			for(const macho_section<P>* sect = sectionsStart; sect < sectionsEnd; ++sect) {
+				if ( (sect->flags() & S_ATTR_LOC_RELOC) != 0 ) {
+					if ( ! hasTextRelocInRange(sect->addr(), sect->addr()+sect->size()) ) {
+						throwf("section %s has attribute set that it has relocs, but it has none", sect->sectname());
+					}
+				}
+			}
+		}
+		cmd = (const macho_load_command<P>*)(((uint8_t*)cmd)+cmd->cmdsize());
+	}
 }
 
+template <typename A>
+typename A::P::uint_t MachOChecker<A>::segStartAddress(uint8_t segIndex)
+{
+	if ( segIndex > fSegments.size() )
+		throw "segment index out of range";
+	return fSegments[segIndex]->vmaddr();
+}
+
+template <typename A>
+bool MachOChecker<A>::hasTextRelocInRange(pint_t rangeStart, pint_t rangeEnd)
+{
+	// look at local relocs
+	const macho_relocation_info<P>* const localRelocsEnd = &fLocalRelocations[fLocalRelocationsCount];
+	for (const macho_relocation_info<P>* reloc = fLocalRelocations; reloc < localRelocsEnd; ++reloc) {
+		pint_t relocAddress = reloc->r_address() + this->relocBase();
+		if ( (rangeStart <= relocAddress) && (relocAddress < rangeEnd) )
+			return true;
+	}	
+	// look rebase info
+	if ( fDyldInfo != NULL ) {
+		const uint8_t* p = (uint8_t*)fHeader + fDyldInfo->rebase_off();
+		const uint8_t* end = &p[fDyldInfo->rebase_size()];
+		
+		uint8_t type = 0;
+		uint64_t segOffset = 0;
+		uint32_t count;
+		uint32_t skip;
+		int segIndex;
+		pint_t segStartAddr = 0;
+		pint_t addr;
+		bool done = false;
+		while ( !done && (p < end) ) {
+			uint8_t immediate = *p & REBASE_IMMEDIATE_MASK;
+			uint8_t opcode = *p & REBASE_OPCODE_MASK;
+			++p;
+			switch (opcode) {
+				case REBASE_OPCODE_DONE:
+					done = true;
+					break;
+				case REBASE_OPCODE_SET_TYPE_IMM:
+					type = immediate;
+					break;
+				case REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+					segIndex = immediate;
+					segStartAddr = segStartAddress(segIndex);
+					segOffset = read_uleb128(p, end);
+					break;
+				case REBASE_OPCODE_ADD_ADDR_ULEB:
+					segOffset += read_uleb128(p, end);
+					break;
+				case REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
+					segOffset += immediate*sizeof(pint_t);
+					break;
+				case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
+					for (int i=0; i < immediate; ++i) {
+						addr = segStartAddr+segOffset;
+						if ( (rangeStart <= addr) && (addr < rangeEnd) )
+							return true;
+						//printf("%-7s %-16s 0x%08llX  %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName);
+						segOffset += sizeof(pint_t);
+					}
+					break;
+				case REBASE_OPCODE_DO_REBASE_ULEB_TIMES:
+					count = read_uleb128(p, end);
+					for (uint32_t i=0; i < count; ++i) {
+						addr = segStartAddr+segOffset;
+						if ( (rangeStart <= addr) && (addr < rangeEnd) )
+							return true;
+						//printf("%-7s %-16s 0x%08llX  %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName);
+						segOffset += sizeof(pint_t);
+					}
+					break;
+				case REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
+					addr = segStartAddr+segOffset;
+					if ( (rangeStart <= addr) && (addr < rangeEnd) )
+						return true;
+					//printf("%-7s %-16s 0x%08llX  %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName);
+					segOffset += read_uleb128(p, end) + sizeof(pint_t);
+					break;
+				case REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
+					count = read_uleb128(p, end);
+					skip = read_uleb128(p, end);
+					for (uint32_t i=0; i < count; ++i) {
+						addr = segStartAddr+segOffset;
+						if ( (rangeStart <= addr) && (addr < rangeEnd) )
+							return true;
+						//printf("%-7s %-16s 0x%08llX  %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName);
+						segOffset += skip + sizeof(pint_t);
+					}
+					break;
+				default:
+					throwf("bad rebase opcode %d", *p);
+			}
+		}	
+	}
+}
 
 static void check(const char* path)
 {

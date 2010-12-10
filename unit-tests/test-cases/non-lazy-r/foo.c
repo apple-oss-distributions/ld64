@@ -15,3 +15,6 @@ extern int tent;
 
 int gettent() { return tent; }
 
+
+extern void* func;
+void* getfunc() { return func; }

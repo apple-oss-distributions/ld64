@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2008 Apple Inc. All rights reserved.
+# Copyright (c) 2008-2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -35,9 +35,9 @@ run: all
 all:
 	${CC} ${CCFLAGS} foo.c -dynamiclib -o libfoo.dylib
 	${CC} ${CCFLAGS} main.c -Wl,-lazy_library,libfoo.dylib -o main
+	${CC} ${CCFLAGS} main.c -lazy-lfoo -L. -o main
 	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} bad.c -Wl,-lazy_library,libfoo.dylib -o bad  2> fail.log
 	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} bad2.c -Wl,-lazy_library,libfoo.dylib -o bad2  2> fail.log
-	
 	
 	${PASS_IFF_GOOD_MACHO} main
 

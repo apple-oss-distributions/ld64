@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2005-2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -33,27 +33,16 @@ include ${TESTROOT}/include/common.makefile
 
 run: all
 
-all: foobar.o main.o 
-	${CXX} ${CCXXFLAGS} foobar.o main.o -o dwarf-test-${ARCH}
-	${FAIL_IF_BAD_MACHO} dwarf-test-${ARCH}
-	nm -ap dwarf-test-${ARCH} | ./stabs-filter.pl > dwarf-test-${ARCH}.stabs
-	${PASS_IFF} diff dwarf-test-${ARCH}.stabs expected-stabs
-
-foobar.o : foo.o bar.o
+all: 
+	${CXX} ${CCXXFLAGS} -gdwarf-2 foo.cxx -c -o foo.o -mdynamic-no-pic
+	${CXX} ${CCXXFLAGS} -gdwarf-2 bar.cxx -c -o bar.o  -mdynamic-no-pic
 	${LD} -r -arch ${ARCH} foo.o bar.o -o foobar.o
-	${FAIL_IF_BAD_OBJ} foobar.o
-
-foo.o : foo.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 foo.cxx -c -o $@ -mdynamic-no-pic
-	${FAIL_IF_BAD_OBJ} $@
-
-bar.o : bar.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 bar.cxx -c -o $@  -mdynamic-no-pic
-	${FAIL_IF_BAD_OBJ} $@
-
-main.o : main.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 main.cxx -c -o $@ -mdynamic-no-pic
-	${FAIL_IF_BAD_OBJ} $@
+	${CXX} ${CCXXFLAGS} -gdwarf-2 main.cxx -c -o main.o -mdynamic-no-pic
+	${CXX} ${CCXXFLAGS} foobar.o main.o -o main
+	${FAIL_IF_BAD_MACHO} main
+	nm -ap main | ./stabs-filter.pl > main.stabs
+	${PASS_IFF} diff main.stabs expected-stabs
+	
 
 clean:
-	rm -rf dwarf-test-*  *.o *.stabs
+	rm -rf foo.o bar.o main.o foobar.o main main.stabs

@@ -29,7 +29,8 @@ include ${TESTROOT}/include/common.makefile
 
 all:
 	${CC} ${CCFLAGS} test.c -static -o test -e _entry -nostdlib -Wl,-new_linker
+	strip -S test -o test.stripped
 	${PASS_IFF_GOOD_MACHO} test
 
 clean:
-	rm -rf test
+	rm -rf test  test.stripped

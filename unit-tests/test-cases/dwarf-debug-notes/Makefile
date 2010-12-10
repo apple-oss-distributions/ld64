@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2005 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2005-2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -32,19 +32,13 @@ include ${TESTROOT}/include/common.makefile
 
 run: all
 
-all: hello.o other.o 
-	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.o other.o -o dwarf-hello-${ARCH}
-	${FAIL_IF_BAD_MACHO} dwarf-hello-${ARCH}
-	nm -ap dwarf-hello-${ARCH} | ./stabs-filter.pl > dwarf-hello-${ARCH}.stabs
-	${PASS_IFF} diff dwarf-hello-${ARCH}.stabs expected-stabs
-
-hello.o : hello.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.cxx -c -o $@ -mdynamic-no-pic
-	${FAIL_IF_BAD_OBJ} $@
-
-other.o : other.cxx
-	${CXX} ${CCXXFLAGS} -gdwarf-2 other.cxx -c -o $@ -mdynamic-no-pic
-	${FAIL_IF_BAD_OBJ} $@
+all:
+	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.cxx -c -o hello.o -mdynamic-no-pic
+	${CXX} ${CCXXFLAGS} -gdwarf-2 other.cxx -c -o other.o -mdynamic-no-pic
+	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.o other.o -o hello
+	${FAIL_IF_BAD_MACHO} hello
+	nm -ap hello | ./stabs-filter.pl > hello.stabs
+	${PASS_IFF} diff hello.stabs expected-stabs
 
 clean:
-	rm -rf dwarf-hello-* *.o *.stabs
+	rm -rf hello hello.o other.o hello.stabs

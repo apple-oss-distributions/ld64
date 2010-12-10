@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2010 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -35,6 +35,7 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} main.c deadwood.c -dead_strip -o main-${ARCH}
+	size -l main-${ARCH} | grep __PAGEZERO | ${FAIL_IF_EMPTY}
 	${FAIL_IF_BAD_MACHO} main-${ARCH}
 	nm -j main-${ARCH} | egrep 'dead_wood|dead_door' | ${FAIL_IF_STDIN}
 	${CC} ${CCFLAGS} -dynamiclib main.c deadwood.c -dead_strip -exported_symbols_list main.exp -o dylib-${ARCH}

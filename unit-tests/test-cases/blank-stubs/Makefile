@@ -23,7 +23,7 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-ALL_ARCH_OPTIONS = $(patsubst %,-arch %,$(VALID_ARCHS))
+ALL_ARCH_OPTIONS = $(patsubst %,-arch %,$(subst ppc,,$(VALID_ARCHS)) )
 
 #
 # Test that blank stubs are handled properly
@@ -34,7 +34,7 @@ run: all
 all:
 # build example fully fat dylib
 
-	gcc `echo ${ALL_ARCH_OPTIONS}` -dynamiclib foo.c -o libfoo.dylib -install_name libfoo.dylib
+	gcc `echo ${ALL_ARCH_OPTIONS}` -dynamiclib foo.c -o libfoo.dylib -install_name libfoo.dylib 
 	${FAIL_IF_BAD_MACHO} libfoo.dylib
 
 	# handle the case of a native ppc compile--this sets the subtype, which must be passed to lipo

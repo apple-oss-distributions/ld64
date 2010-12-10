@@ -32,15 +32,24 @@ SHELL = bash # use bash shell so we can redirect just stderr
 
 NO_PIC =  
 STATIC =  
+RELOC_FAIL = ${FAIL_IF_SUCCESS}
+LRELOCS_NEEDED = ${FAIL_IF_EMPTY}
+XRELOCS_NEEDED = ${FAIL_IF_EMPTY}
 
 ifeq (${ARCH},i386)
 	NO_PIC =  -mdynamic-no-pic
 	STATIC =  -static
-else 
-	ifeq (${ARCH},ppc)
-		NO_PIC =  -mdynamic-no-pic
-		STATIC =  -mdynamic-no-pic
-	endif
+endif
+ifeq (${ARCH},ppc)
+	NO_PIC =  -mdynamic-no-pic
+	STATIC =  -mdynamic-no-pic
+	XRELOCS_NEEDED =  ${FAIL_IF_STDIN}
+	LRELOCS_NEEDED =  ${FAIL_IF_EMPTY}
+endif
+ifeq (${ARCH},x86_64)
+	RELOC_FAIL =  
+	XRELOCS_NEEDED =  ${FAIL_IF_STDIN}
+	LRELOCS_NEEDED =  ${FAIL_IF_STDIN}
 endif
 
 
@@ -48,16 +57,25 @@ endif
 all:
 	# build libfoo.dylib as regular dylib
 	${CC} ${CCFLAGS} foo.c -dynamiclib -o libfoo.dylib
+	# build libtest.dylib using -mdynamic-no-pic, should fail
+	${CC} ${CCFLAGS} test_rebase.c -c ${NO_PIC}
+	${RELOC_FAIL} ${CC} ${CCFLAGS} test_rebase.o libfoo.dylib -dynamiclib -o libtestrebase.dylib -read_only_relocs error 2>/dev/null
+	${CC} ${CCFLAGS} test_bind.c -c ${NO_PIC}
+	${RELOC_FAIL} ${CC} ${CCFLAGS} test_bind.o libfoo.dylib -dynamiclib -o libtestbind.dylib -read_only_relocs error 2>/dev/null
 	# build libtest.dylib using -mdynamic-no-pic and -read_only_relocs suppress
-	${CC} ${CCFLAGS} test.c -c ${NO_PIC}
-	${CC} ${CCFLAGS} test.o libfoo.dylib -dynamiclib -o libtest.dylib -read_only_relocs suppress -Wl,-w
+	${CC} ${CCFLAGS} test_rebase.c -c ${NO_PIC}
+	${CC} ${CCFLAGS} test_bind.c -c ${NO_PIC}
+	${CC} ${CCFLAGS} test_rebase.o test_bind.o libfoo.dylib -dynamiclib -o libtest-no-pic.dylib -read_only_relocs suppress -Wl,-w
 	# build libtest.dylib using -static and -read_only_relocs suppress
-	${CC} ${CCFLAGS} test.c -c ${STATIC}
-	${CC} ${CCFLAGS} test.o libfoo.dylib -dynamiclib -o libtest.dylib -read_only_relocs suppress -Wl,-w
+	${CC} ${CCFLAGS} test_rebase.c -c ${STATIC}
+	${CC} ${CCFLAGS} test_bind.c -c ${STATIC}
+	${CC} ${CCFLAGS} test_rebase.o test_bind.o libfoo.dylib -dynamiclib -o libtest-static.dylib -read_only_relocs suppress -Wl,-w
+	otool -lv libtest-static.dylib | grep -A9 "sectname __text" | grep attributes | grep EXT_RELOC | ${XRELOCS_NEEDED}
+	otool -lv libtest-static.dylib | grep -A9 "sectname __text" | grep attributes | grep LOC_RELOC | ${LRELOCS_NEEDED}
 	# build main using -static and -read_only_relocs suppress
-	${CC} ${CCFLAGS} test.c -c ${STATIC}
-	${CC} ${CCFLAGS} test.o libfoo.dylib -o foo -read_only_relocs suppress -Wl,-w
-	${PASS_IFF_GOOD_MACHO} foo
+	${CC} ${CCFLAGS} main.c -c ${STATIC}
+	${CC} ${CCFLAGS} main.o libfoo.dylib -o main -read_only_relocs suppress -Wl,-w
+	${PASS_IFF_GOOD_MACHO} main
 
 clean:
-	rm -rf test.o libfoo.dylib libtest.dylib foo
+	rm -rf test_bind.o test_rebase.o libfoo.dylib libtestrebase.dylib libtestbind.dylib libtest-no-pic.dylib libtest-static.dylib main.o main

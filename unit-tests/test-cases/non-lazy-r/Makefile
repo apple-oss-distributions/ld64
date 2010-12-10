@@ -38,6 +38,8 @@ all-i386: hasnl
 
 all-armv6: hasnl
 
+all-armv7: hasnl
+
 all-x86_64: all-true
 
 all-true:
@@ -49,15 +51,18 @@ hasnl:
 	${CC} ${CCFLAGS} -c other.c -o other.o
 	${LD} -r -arch ${ARCH} foo.o other.o -o fooall.o -exported_symbol _foo
 	# make sure there  are two indirect symbols: _foo and LOCAL
-	otool -Iv fooall.o | grep "3 entries" | ${FAIL_IF_EMPTY}
+	otool -Iv fooall.o | grep "4 entries" | ${FAIL_IF_EMPTY}
 	otool -Iv fooall.o | grep _foo   | ${FAIL_IF_EMPTY}
 	otool -Iv fooall.o | grep _tent  | ${FAIL_IF_EMPTY}
 	otool -Iv fooall.o | grep _other | ${FAIL_IF_STDIN}
-	# make sure re-parsed correctly
-	${OBJECTDUMP} fooall.o | grep name: | grep '_foo$$non_lazy_ptr' | ${FAIL_IF_EMPTY} 
-	${OBJECTDUMP} fooall.o | grep name: | grep '_other$$non_lazy_ptr' | ${FAIL_IF_EMPTY}
-	${OBJECTDUMP} fooall.o | grep name: | grep '_tent$$non_lazy_ptr' | ${FAIL_IF_EMPTY}
-	${PASS_IFF} true
+	${OBJECTDUMP} fooall.o | grep name: | grep 'non-lazy-pointer-to:_foo' | ${FAIL_IF_EMPTY} 
+	${OBJECTDUMP} fooall.o | grep name: | grep 'non-lazy-pointer-to-local:_other' | ${FAIL_IF_EMPTY}
+	${OBJECTDUMP} fooall.o | grep name: | grep 'non-lazy-pointer-to:_tent' | ${FAIL_IF_EMPTY}
+	${OBJECTDUMP} fooall.o | grep name: | grep 'non-lazy-pointer-to:_foo' | ${FAIL_IF_EMPTY}
+	${LD} -r -arch ${ARCH} fooall.o -o fooall2.o 
+	${OBJECTDUMP} fooall.o > fooall.dump
+	${OBJECTDUMP} fooall2.o > fooall2.dump
+	${PASS_IFF} diff fooall.dump fooall2.dump
 	
 clean:
-	rm -rf *.o
+	rm -rf *.o fooall.dump fooall2.dump

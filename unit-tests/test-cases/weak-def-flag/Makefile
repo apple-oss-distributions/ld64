@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2008 Apple Inc. All rights reserved.
+# Copyright (c) 2008-2009 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -40,7 +40,9 @@ all:
 	otool -hv main | grep WEAK_DEFINES | ${FAIL_IF_STDIN}
 	${CC} ${CCFLAGS} main.c -o main -Wl,-exported_symbol,_my_weak
 	otool -hv main | grep WEAK_DEFINES | ${FAIL_IF_EMPTY}
+	${CC} ${CCFLAGS} main-strip-weak.c -o main-strip-weak
+	otool -hv main-strip-weak | grep WEAK_DEFINES | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:
-	rm main
+	rm -f main main-strip-weak

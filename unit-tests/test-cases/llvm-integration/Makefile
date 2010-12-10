@@ -251,16 +251,16 @@ seventeen:
 	${LD} -arch ${ARCH} -r a17.o b17.o -o ab17.o
 	file ab17.o | grep "Mach-O" | ${PASS_IFF_EMPTY}
 	# echo "verify ld -r of bitcode and mach-o produces mach-o"
-	${LLVMGCC} ${CCFLAGS} b17.c -c -o b17.o
-	${LD} -arch ${ARCH} -r a17.o b17.o -o ab17.o
-	file ab17.o | grep "Mach-O" | ${PASS_IFF_STDIN}
+	${LLVMGCC} ${CCFLAGS} b17.c -c -o b17m.o
+	${LD} -arch ${ARCH} -r a17.o b17m.o -o ab17m.o
+	file ab17m.o | grep "Mach-O" | ${PASS_IFF_STDIN}
 
 eighteen:
 	#echo verify ld -r -keep_private_externs works
 	${LLVMGCC} ${CCFLAGS} --emit-llvm a18.c -c -o a18.o
 	${LD} -arch ${ARCH} -r -keep_private_externs a18.o -o a18-rkpe.o
-	ObjectDump -nm a18-rkpe.o | grep _common_hidden1 | grep " hidden" | ${FAIL_IF_EMPTY}
-	ObjectDump -nm a18-rkpe.o | grep _func_hidden2 | grep " hidden" | ${FAIL_IF_EMPTY}
+	nm -nm a18-rkpe.o | grep _common_hidden1 | grep "private external" | ${FAIL_IF_EMPTY}
+	nm -nm a18-rkpe.o | grep _func_hidden2 | grep "private external" | ${FAIL_IF_EMPTY}
 	#echo verify ld -r makes hidden symbols internal (except for commons)
 	${LD} -arch ${ARCH} -r a18.o -o a18-r.o
 	#ObjectDump -nm a18-r.o | grep _common_hidden1 | grep " hidden" | ${FAIL_IF_EMPTY}

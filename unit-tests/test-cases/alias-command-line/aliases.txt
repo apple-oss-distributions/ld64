@@ -2,5 +2,6 @@ _foo		_fooalt
 # comment
 _foo	_fooalt2
 
+_hidden	_glob
 
 

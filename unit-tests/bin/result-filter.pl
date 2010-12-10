@@ -93,6 +93,15 @@ sub process_entry
     {
 	printf "%-40s FAIL Makefile failure\n", $test_name;
 	$total_count++;
+	#my $line1;
+	#foreach $line1 (@{$$tbl{stdout}})
+	#{
+	#    printf "stdout: %s\n", $line1;
+	#}
+	#foreach $line1 (@{$$tbl{stderr}})
+	#{
+	#    printf "stderr: %s\n", $line1;
+	#}
 	return;
     }
 
@@ -127,5 +136,14 @@ sub process_entry
     {
 	printf "%-40s AMBIGIOUS missing [X]PASS/[X]FAIL\n", $test_name;
 	$total_count++;
+	#my $line1;
+	#foreach $line1 (@{$$tbl{stdout}})
+	#{
+	#    printf "stdout: %s\n", $line1;
+	#}
+	#foreach $line1 (@{$$tbl{stderr}})
+	#{
+	#    printf "stderr: %s\n", $line1;
+	#}
     }
 }

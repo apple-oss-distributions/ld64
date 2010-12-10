@@ -33,7 +33,7 @@ run: all-${ARCH}
 all-ppc:
 	${PASS_IFF} true
 
-all-arm:
+all-armv6:
 	${PASS_IFF} true
 	
 all-i386: all-real

@@ -30,7 +30,7 @@ include ${TESTROOT}/include/common.makefile
 
 all: run
 
-run: main main-r main-dead_strip libmain.dylib
+run: main main-dead_strip libmain.dylib main-r
 	${FAIL_IF_BAD_MACHO} main
 	${PASS_IFF_GOOD_MACHO} main-r
 

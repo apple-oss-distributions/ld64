@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2005-2008 Apple Inc. All rights reserved.
+ * Copyright (c) 2005-2010 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -40,6 +40,10 @@
 
 
 // stuff that will eventually go away once newer cctools headers are widespread
+#ifndef LC_LOAD_UPWARD_DYLIB
+	#define	LC_LOAD_UPWARD_DYLIB (0x23|LC_REQ_DYLD)	/* load of dylib whose initializers run later */
+#endif
+
 #ifndef CPU_SUBTYPE_ARM_V5TEJ
 	#define CPU_SUBTYPE_ARM_V5TEJ		((cpu_subtype_t) 7)
 #endif
@@ -131,6 +135,79 @@
 	#define EXPORT_SYMBOL_FLAGS_HAS_SPECIALIZATIONS			0x10
 
 #endif 
+
+#ifndef S_THREAD_LOCAL_REGULAR
+	#define S_THREAD_LOCAL_REGULAR                   0x11
+#endif
+
+#ifndef S_THREAD_LOCAL_ZEROFILL
+	#define S_THREAD_LOCAL_ZEROFILL                  0x12
+#endif
+
+#ifndef S_THREAD_LOCAL_VARIABLES
+	#define S_THREAD_LOCAL_VARIABLES                 0x13
+#endif
+
+#ifndef S_THREAD_LOCAL_VARIABLE_POINTERS
+	#define S_THREAD_LOCAL_VARIABLE_POINTERS         0x14
+#endif
+
+#ifndef S_THREAD_LOCAL_INIT_FUNCTION_POINTERS
+	#define S_THREAD_LOCAL_INIT_FUNCTION_POINTERS    0x15
+#endif
+
+#ifndef MH_HAS_TLV_DESCRIPTORS
+	#define MH_HAS_TLV_DESCRIPTORS 0x800000
+#endif
+
+#ifndef X86_64_RELOC_TLV
+	#define X86_64_RELOC_TLV    9
+#endif
+
+#define GENERIC_RLEOC_TLV  5
+
+#ifndef EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER
+	#define EXPORT_SYMBOL_FLAGS_STUB_AND_RESOLVER 0x10
+#endif
+
+#ifndef EXPORT_SYMBOL_FLAGS_REEXPORT
+	#define EXPORT_SYMBOL_FLAGS_REEXPORT 0x08
+#endif
+
+// type internal to linker
+#define BIND_TYPE_OVERRIDE_OF_WEAKDEF_IN_DYLIB 0
+
+#ifndef LC_VERSION_MIN_MACOSX
+	#define	LC_VERSION_MIN_MACOSX 	0x24
+	#define	LC_VERSION_MIN_IPHONEOS 	0x25
+
+	struct version_min_command {
+		uint32_t	cmd;		/* LC_VERSION_MIN_MACOSX or LC_VERSION_MIN_IPHONEOS  */
+		uint32_t	cmdsize;	/* sizeof(struct min_version_command) */
+		uint32_t	version;	/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
+		uint32_t	reserved;	/* zero */
+	};
+#endif
+
+#ifndef N_SYMBOL_RESOLVER
+	#define N_SYMBOL_RESOLVER 0x100
+#endif
+
+#ifndef LC_FUNCTION_STARTS
+	#define	LC_FUNCTION_STARTS 	0x26
+#endif
+
+#ifndef MH_NO_HEAP_EXECUTION
+	#define MH_NO_HEAP_EXECUTION 0x1000000
+#endif
+
+#ifndef LC_DYLD_ENVIRONMENT
+	#define	LC_DYLD_ENVIRONMENT 	0x27
+#endif
+
+// hack until newer <mach-o/arm/reloc.h> everywhere
+#define ARM_RELOC_HALF 8
+#define ARM_RELOC_HALF_SECTDIFF 9
 
 
 //
@@ -471,7 +548,7 @@ public:
 	void			set_cmdsize(uint32_t value)				INLINE { E::set32(fields.cmdsize, value); }
 
 	const uint8_t*	uuid() const							INLINE { return fields.uuid; }
-	void			set_uuid(uint8_t u[16])					INLINE { memcpy(&fields.uuid, u, 16); }
+	void			set_uuid(const uint8_t u[16])			INLINE { memcpy(&fields.uuid, u, 16); }
 			
 	typedef typename P::E		E;
 private:
@@ -1158,6 +1235,29 @@ private:
 	dyld_info_command	fields;
 };
 
+
+//
+// mach-o version load command
+//
+template <typename P>
+class macho_version_min_command {
+public:
+	uint32_t		cmd() const								INLINE { return E::get32(fields.cmd); }
+	void			set_cmd(uint32_t value)					INLINE { E::set32(fields.cmd, value); }
+
+	uint32_t		cmdsize() const							INLINE { return E::get32(fields.cmdsize); }
+	void			set_cmdsize(uint32_t value)				INLINE { E::set32(fields.cmdsize, value); }
+
+	uint32_t		version() const							INLINE { return fields.version; }
+	void			set_version(uint32_t value)				INLINE { E::set32(fields.version, value); }
+
+	uint32_t		reserved() const						INLINE { return fields.reserved; }
+	void			set_reserved(uint32_t value)			INLINE { E::set32(fields.reserved, value); }
+
+	typedef typename P::E		E;
+private:
+	version_min_command	fields;
+};
 
 
 

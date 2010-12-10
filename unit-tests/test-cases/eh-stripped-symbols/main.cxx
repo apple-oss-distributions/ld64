@@ -24,29 +24,48 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-void bar()
-{
-}
+int global = 0;
 
-
-void foo2() 
-{
-	int a = arc4random();
-	int b = arc4random();
-	fprintf(stderr, "hello %d %d\n", a, b);
-}
-
-void foo1() 
+int bar() 
 { 
-	foo2();
-	fprintf(stderr, "world\n");
+	global = 1;
+	throw 10; 
+	
+}
+
+
+void foo() 
+{ 
+	try {
+		bar();
+	}
+	catch(int x) {
+		global = 2;
+		throw x;
+	}
 }
 
 
 
 int main()
 {
-	foo1();
-	bar();
-	return 0;
+	int state = 1;
+	try {
+		state = 2;
+		foo();
+		state = 3;
+	}
+	catch (int x) {
+		if ( state != 2 )
+			return 1;
+		if ( x != 10 )
+			return 1;
+		state = 4;
+	}
+
+	if ( (state == 4) && (global == 2) )
+		return 0;
+	else 
+		return 1;
 }
+

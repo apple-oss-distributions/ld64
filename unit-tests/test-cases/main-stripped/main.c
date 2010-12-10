@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*- 
  *
- * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2006-2010 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -27,6 +27,9 @@
 int  magicSymbol = 1;
 asm(".desc _magicSymbol, 0x10");
 
+// this symbol will be suppressed by .exp file
+int  hiddenSymbol = 1;
+asm(".desc _hiddenSymbol, 0x10");
 
 int main()
 {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+ * Copyright (c) 2006 Apple, Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  * 
@@ -20,6 +20,9 @@
  * 
  * @APPLE_LICENSE_HEADER_END@
  */
+#ifndef __DEBUG_LINE_H__
+#define __DEBUG_LINE_H__
+
 #include <stdint.h>
 #include <stddef.h>
 
@@ -106,4 +109,6 @@ void line_free (struct line_reader_data * lnd);
 #ifdef __cplusplus
 }
 #endif
+
+#endif // __DEBUG_LINE_H__
 
