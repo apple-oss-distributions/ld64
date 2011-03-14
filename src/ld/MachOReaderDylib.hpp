@@ -832,7 +832,7 @@ void Reader<A>::processIndirectLibraries(DylibHander* handler)
 				ObjectFile::Reader* child = handler->findDylib(it->path, this->getPath());
 				if ( isPublicLocation(child->getInstallPath()) ) {
 					// promote this child to be automatically added as a direct dependent if this already is
-					if ( this->explicitlyLinked() || this->implicitlyLinked() ) {
+					if ( (this->explicitlyLinked() || this->implicitlyLinked()) && (strcmp(it->path,child->getInstallPath()) == 0) ) {
 						//fprintf(stderr, "processIndirectLibraries() implicitly linking %s\n", child->getInstallPath());
 						((Reader<A>*)child)->setImplicitlyLinked();
 					}

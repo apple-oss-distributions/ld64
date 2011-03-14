@@ -2025,32 +2025,6 @@ static bool matchesObjectFile(ObjectFile::Atom* atom, const char* objectFileLeaf
 }
 
 
-static bool usesAnonymousNamespace(const char* symbol)
-{
-	return ( (strncmp(symbol, "__Z", 3) == 0) && (strstr(symbol, "_GLOBAL__N_") != NULL) );
-}
-
-
-//
-//  convert:
-//		__ZN20_GLOBAL__N__Z5main2v3barEv					=>  _ZN-3barEv
-//		__ZN37_GLOBAL__N_main.cxx_00000000_493A01A33barEv	=>  _ZN-3barEv
-//
-static void canonicalizeAnonymousName(const char* inSymbol, char outSymbol[])
-{
-	const char* globPtr = strstr(inSymbol, "_GLOBAL__N_");
-	while ( isdigit(*(--globPtr)) )
-		; // loop
-	char* endptr;
-	unsigned long length = strtoul(globPtr+1, &endptr, 10);
-	const char* globEndPtr = endptr + length;
-	int startLen = globPtr-inSymbol+1;
-	memcpy(outSymbol, inSymbol, startLen);
-	outSymbol[startLen] = '-';
-	strcpy(&outSymbol[startLen+1], globEndPtr);
-}
-
-
 ObjectFile::Atom* Linker::findAtom(const Options::OrderedSymbol& orderedSymbol)
 {
 	ObjectFile::Atom* atom = fGlobalSymbolTable.find(orderedSymbol.symbolName);
@@ -2061,7 +2035,6 @@ ObjectFile::Atom* Linker::findAtom(const Options::OrderedSymbol& orderedSymbol)
 	else {
 		// slow case.  The requested symbol is not in symbol table, so might be static function
 		static SymbolTable::Mapper hashTableOfTranslationUnitScopedSymbols;
-		static SymbolTable::Mapper hashTableOfSymbolsWithAnonymousNamespace;
 		static bool built = false;
 		// build a hash_map the first time
 		if ( !built ) {
@@ -2069,18 +2042,7 @@ ObjectFile::Atom* Linker::findAtom(const Options::OrderedSymbol& orderedSymbol)
 				atom = *it;
 				const char* name = atom->getName();
 				if ( name != NULL) {
-					if ( usesAnonymousNamespace(name) ) {
-						// symbol that uses anonymous namespace
-						char canonicalName[strlen(name)+2];
-						canonicalizeAnonymousName(name, canonicalName);
-						const char* hashName = strdup(canonicalName);
-						SymbolTable::Mapper::iterator pos = hashTableOfSymbolsWithAnonymousNamespace.find(hashName);
-						if ( pos == hashTableOfSymbolsWithAnonymousNamespace.end() )
-							hashTableOfSymbolsWithAnonymousNamespace[hashName] = atom;
-						else
-							hashTableOfSymbolsWithAnonymousNamespace[hashName] = NULL;	// collision, denote with NULL
-					}
-					else if ( atom->getScope() == ObjectFile::Atom::scopeTranslationUnit ) {
+					if ( atom->getScope() == ObjectFile::Atom::scopeTranslationUnit ) {
 						// static function or data
 						SymbolTable::Mapper::iterator pos = hashTableOfTranslationUnitScopedSymbols.find(name);
 						if ( pos == hashTableOfTranslationUnitScopedSymbols.end() )
@@ -2119,37 +2081,6 @@ ObjectFile::Atom* Linker::findAtom(const Options::OrderedSymbol& orderedSymbol)
 			}
 		}
 		
-		// look for name in hashTableOfSymbolsWithAnonymousNamespace
-		if ( usesAnonymousNamespace(orderedSymbol.symbolName) ) {
-			// symbol that uses anonymous namespace
-			char canonicalName[strlen(orderedSymbol.symbolName)+2];
-			canonicalizeAnonymousName(orderedSymbol.symbolName, canonicalName);
-			SymbolTable::Mapper::iterator pos = hashTableOfSymbolsWithAnonymousNamespace.find(canonicalName);
-			if ( pos != hashTableOfSymbolsWithAnonymousNamespace.end() ) {
-				if ( (pos->second != NULL) && matchesObjectFile(pos->second, orderedSymbol.objectFileName) ) {
-					//fprintf(stderr, "found %s in anonymous namespace hash table\n", canonicalName);
-					return pos->second;
-				}
-				if ( pos->second == NULL )
-				// name is in hash table, but atom is NULL, so that means there are duplicates, so we use super slow way
-				for (std::vector<ObjectFile::Atom*>::iterator it=fAllAtoms.begin(); it != fAllAtoms.end(); it++) {
-					atom = *it;
-					const char* name = atom->getName();
-					if ( (name != NULL) && usesAnonymousNamespace(name) ) {
-						char canonicalAtomName[strlen(name)+2];
-						canonicalizeAnonymousName(name, canonicalAtomName);
-						if ( strcmp(canonicalAtomName, canonicalName) == 0 ) {
-							if ( matchesObjectFile(atom, orderedSymbol.objectFileName) ) {
-								if ( fOptions.printOrderFileStatistics() )
-									warning("%s specified in order_file but it exists in multiple .o files. "
-										"Prefix symbol with .o filename in order_file to disambiguate", orderedSymbol.symbolName);
-								return atom;
-							}
-						}
-					}
-				}
-			}
-		}
 	}
 	return NULL;
 }

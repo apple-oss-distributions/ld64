@@ -145,7 +145,7 @@ public:
 	Scope 										getScope() const 			{ return (fRealAtom ? fRealAtom->getScope() : fScope); }
 	DefinitionKind 								getDefinitionKind() const	{ return (fRealAtom ? fRealAtom->getDefinitionKind() : fKind); }
 	SymbolTableInclusion 						getSymbolTableInclusion() const 
-																			{ return fRealAtom->getSymbolTableInclusion(); }
+																			{ return (fRealAtom ? fRealAtom->getSymbolTableInclusion() : ObjectFile::Atom::kSymbolTableIn); }
 	bool 										dontDeadStrip() const 		{ return false; }
 	bool 										isZeroFill() const 			{ return (fRealAtom ? fRealAtom->isZeroFill() : false); }
 	bool										isThumb() const				{ return false; }

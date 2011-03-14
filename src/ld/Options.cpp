@@ -2520,6 +2520,9 @@ void Options::parse(int argc, const char* argv[])
 				else
 					warning("ignoring unrecognized argument (%s) to -objc_abi_version", version);
 			}
+			else if ( strcmp(arg, "-demangle") == 0 ) {
+				// <rdar://problem/8303976> add -demangle noop to ld64-97
+			}
 			else {
 				throwf("unknown option: %s", arg);
 			}

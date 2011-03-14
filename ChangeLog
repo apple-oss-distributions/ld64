@@ -1,4 +1,27 @@
 
+----- Tagged ld64-97.17
+
+2010-09-07    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7989734> ld mis-handling std::tr1::anonymous symbols
+	Remove support for ordering gcc-4.0 compiled anonymous namespace symbols
+
+2010-09-07    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8388362> RedGarnet's linker does not honor $ld$hide for umbrella libraries
+
+----- Tagged ld64-97.16
+
+2010-08-10    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8303976> add -demangle noop to ld64-97
+
+----- Tagged ld64-97.15
+
+2010-08-10    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8212744> linker crash when using LTO in lto::Atom::getSymbolTableInclusion()
+
 ----- Tagged ld64-97.14
 
 2010-04-20    Nick Kledzik    <kledzik@apple.com>
