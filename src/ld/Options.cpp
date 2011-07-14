@@ -3454,8 +3454,10 @@ void Options::reconfigureDefaults()
 		fCanUseUpwardDylib = true;
 		
 	// x86_64 for MacOSX 10.7 defaults to PIE
-	if ( (fArchitecture == CPU_TYPE_X86_64) && (fOutputKind == kDynamicExecutable) && (fMacVersionMin >= ld::mac10_7) ) {
-		fPositionIndependentExecutable = true;
+	if ( ((fArchitecture == CPU_TYPE_X86_64) || (fArchitecture == CPU_TYPE_I386))
+		&& (fOutputKind == kDynamicExecutable)
+		&& (fMacVersionMin >= ld::mac10_7) ) {
+			fPositionIndependentExecutable = true;
 	}
 
 	// armv7 for iOS4.3 defaults to PIE

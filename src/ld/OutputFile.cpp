@@ -2583,7 +2583,7 @@ void OutputFile::noteTextReloc(const ld::Atom* atom, const ld::Atom* target)
 		if ( _options.warnAboutTextRelocs() )
 			warning("text reloc in %s to %s", atom->name(), target->name());
 	} 
-	else if ( _options.positionIndependentExecutable() && (_options.iphoneOSVersionMin() >= ld::iPhone4_3) ) {
+	else if ( _options.positionIndependentExecutable() && ((_options.iphoneOSVersionMin() >= ld::iPhone4_3) || (_options.macosxVersionMin() >= ld::mac10_7)) ) {
 		if ( ! this->pieDisabled ) {
 			warning("PIE disabled. Absolute addressing (perhaps -mdynamic-no-pic) not allowed in code signed PIE, "
 				"but used in %s from %s. " 

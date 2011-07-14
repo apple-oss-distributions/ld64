@@ -1,4 +1,12 @@
 
+-------- tagged ld64-123.2.1
+
+2010-03-07    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/8955206> enable i386 ASLR
+
+-------- tagged ld64-123.2
+
 2010-12-10    Nick Kledzik    <kledzik@apple.com>
 
 	<rdar://problem/8746980> Man page typo: "dysmutil" under object_path_lto
@@ -71,7 +79,7 @@
 
 2010-11-01    Nick Kledzik    <kledzik@apple.com>
 
-	<rdar://problem/8612861> Durango is missing dof sections for armv7 slice
+	<rdar://problem/8612861>
 
 -------- tagged ld64-120.3
 
@@ -544,7 +552,7 @@
 
 2010-06-09    Nick Kledzik    <kledzik@apple.com>
 
-	<rdar://problem/8076986> Barolo: 'rebase' makes timestamps invalid/unreadable for GDB
+	<rdar://problem/8076986>
 
 2010-06-09    Nick Kledzik    <kledzik@apple.com>
 

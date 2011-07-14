@@ -1,4 +1,4 @@
-.Dd Sept 2, 2010
+.Dd March 7, 2011
 .Dt ld 1
 .Os Darwin
 .Sh NAME
@@ -331,9 +331,9 @@ This option is also called -dylib_current_version for compatibility.
 This makes a special kind of main executable that is position independent (PIE).  On Mac OS X 10.5 and later, the OS
 the OS will load a PIE at a random address each time it is executed.  You cannot create a PIE from .o files compiled 
 with -mdynamic-no-pic.  That means the codegen is less optimal, but the address randomization adds some 
-security. When targeting Mac OS X 10.7 or later PIE is the default for x86_64 main executables.
+security. When targeting Mac OS X 10.7 or later PIE is the default for main executables.
 .It Fl no_pie
-Do not make a position independent executable (PIE).  This is the default, except for x86_64 for 10.7 or later.
+Do not make a position independent executable (PIE).  This is the default, when targeting 10.6 and earlier.
 .It Fl pagezero_size Ar size
 By default the linker creates an unreadable segment starting at address zero named __PAGEZERO.  Its existence
 will cause a bus error if a NULL pointer is dereferenced.  The argument
@@ -516,7 +516,7 @@ This option causes the linker to instead produce traditional relocation informat
 .It Fl allow_heap_execute
 Normally i386 main executables will be marked so that the Mac OS X 10.7 and later kernel 
 will only allow pages with the x-bit to execute instructions. This option overrides that
-behavior and allows instructions on any page to be run.
+behavior and allows instructions on any page to be executed.
 .It Fl no_eh_labels
 Normally in -r mode, the linker produces .eh labels on all FDEs in the __eh_frame section.
 This option suppresses those labels.  Those labels are not needed by the Mac OS X 10.6
