@@ -32,7 +32,7 @@ IMAGE_INFO = "__image_info"
 ifeq ($(ARCH),x86_64)
 	IMAGE_INFO = "__objc_imageinfo"
 endif
-ifeq ($(ARCH),armv6)
+ifeq (${FILEARCH},arm)
 	IMAGE_INFO = "__objc_imageinfo"
 endif
 

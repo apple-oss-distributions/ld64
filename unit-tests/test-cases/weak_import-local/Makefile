@@ -33,7 +33,7 @@ run: all
 all:	
 	${CC} ${CCFLAGS} main.c foo.c -o main
 	${FAIL_IF_BAD_MACHO} main
-	${CC} ${CCFLAGS} main.c foo.c -o main -mmacosx-version-min=10.4
+	${CC} ${CCFLAGS} main.c foo.c -o main ${VERSION_OLD_LINKEDIT}
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:

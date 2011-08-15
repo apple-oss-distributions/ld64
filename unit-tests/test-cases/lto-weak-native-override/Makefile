@@ -28,15 +28,12 @@ include ${TESTROOT}/include/common.makefile
 # and mach-o has a strong _foo.
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
-LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
-
 run: all
 
 all:
 	${CC} ${CCFLAGS} foo.c -c -o foo.o
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.c -c -o main.o
-	${LLVMGCC} ${CCFLAGS} main.o foo.o -o main 
+	${CC} ${CCFLAGS} -flto main.c -c -o main.o
+	${CC} ${CCFLAGS} main.o foo.o -o main 
 	otool -Iv main | grep _abort | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} main
 	

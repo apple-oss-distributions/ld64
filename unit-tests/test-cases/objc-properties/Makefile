@@ -12,7 +12,6 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} test.m -dynamiclib -framework Foundation -o libtest.dylib
-	${CC} ${CCFLAGS} test.m -dynamiclib -framework Foundation -o libtest.dylib -Wl,-no_compact_linkedit -ldylib1.o
 	${PASS_IFF_GOOD_MACHO} libtest.dylib
 	
 clean:

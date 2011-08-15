@@ -30,28 +30,25 @@ include ${TESTROOT}/include/common.makefile
 # <rdar://problem/5847206> SPEC2000/eon built with -mdynamic-no-pic won't run
 #
 
-run: test-run-${ARCH}
+all: test-${FILEARCH}
 
 
-test-run-ppc:
-	${PASS_IFF} true
+test-ppc:  test-good
+test-x86_64: test-good
+test-i386: test
+test-arm: test
 
-test-run-x86_64:
-	${PASS_IFF} true
-	
-test-run-armv6: test-run-i386
-
-test-run-i386:
+test:
 	# check jump table in a weak function
-	${CC} ${CCFLAGS} main.c switch.s -o main
+	${CC} ${CCFLAGS} main.c switch.s -o main -Wl,-no_pie
 	otool -rv main | grep _foo | ${FAIL_IF_STDIN}
 	otool -rv main | grep _bar | ${FAIL_IF_STDIN}
 	# check jump table in a regular function with -flat_namespace
-	${CC} ${CCFLAGS} main.c switch.s -o main  -flat_namespace
+	${CC} ${CCFLAGS} main.c switch.s -o main  -flat_namespace -Wl,-no_pie
 	otool -rv main | grep _foo | ${FAIL_IF_STDIN}
 	otool -rv main | grep _bar | ${FAIL_IF_STDIN}
 	# check jump table in a regular function that is interposable
-	${CC} ${CCFLAGS} main.c switch.s -o main  -Wl,-interposable_list,interpose.exp
+	${CC} ${CCFLAGS} main.c switch.s -o main  -Wl,-interposable_list,interpose.exp -Wl,-no_pie
 	otool -rv main | grep _foo | ${FAIL_IF_STDIN}
 	otool -rv main | grep _bar | ${FAIL_IF_STDIN}
 	# check jump table with -pie, should have no external and some local relocations
@@ -60,6 +57,8 @@ test-run-i386:
 #	otool -rv main | grep "Local relocation" | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 
+test-good:
+	${PASS_IFF} true
 
 clean:
 	rm -f main

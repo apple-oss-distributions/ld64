@@ -28,8 +28,6 @@ include ${TESTROOT}/include/common.makefile
 # Check that LTO can bring in an ObjC class from an archive member
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
-LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
 
 run: all
 
@@ -39,8 +37,8 @@ all:
 	${CC} ${CCFLAGS} foo2.c -c -o foo2.o
 	${CC} ${CCFLAGS} bar2.c -c -o bar2.o
 	libtool -static foo.o bar.o foo2.o bar2.o -o libfoobar.a 
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.m -c -o main.o
-	${LLVMGCC} ${CCFLAGS} main.o -o main libfoobar.a -framework Foundation
+	${CC} ${CCFLAGS} -flto main.m -c -o main.o
+	${CC} ${CCFLAGS} main.o -o main libfoobar.a -framework Foundation
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:

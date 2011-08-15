@@ -1023,12 +1023,18 @@ int main(int argc, const char* argv[])
 						onlyArchs.insert(CPU_TYPE_I386);
 					else if ( strcmp(arch, "x86_64") == 0 )
 						onlyArchs.insert(CPU_TYPE_X86_64);
-					else if ( strcmp(arch, "arm") == 0 )
-						onlyArchs.insert(CPU_TYPE_ARM);
-					else if ( strcmp(arch, "armv6") == 0 )
-						onlyArchs.insert(CPU_TYPE_ARM);
-					else 
-						throwf("unknown architecture %s", arch);
+					else {
+						bool found = false;
+						for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
+							if ( strcmp(t->subTypeName,arch) == 0 ) {
+								onlyArchs.insert(CPU_TYPE_ARM);
+								found = true;
+								break;
+							}
+						}
+						if ( !found )
+							throwf("unknown architecture %s", arch);
+					}
 				}
 				else {
 					usage();

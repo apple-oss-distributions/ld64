@@ -35,6 +35,7 @@ run: all
 all:
 	${CC} ${CCFLAGS} mythumb.s -c 
 	${CC} ${CCFLAGS} myarm.s -c 
+	${LD} -arch ${ARCH} mythumb.o myarm.o -r -o all.o
 	${CC} ${CCFLAGS} mythumb.o myarm.o -dynamiclib -o liball.dylib 
 	${PASS_IFF_GOOD_MACHO} liball.dylib 
 

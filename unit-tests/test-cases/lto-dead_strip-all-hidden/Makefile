@@ -27,14 +27,12 @@ include ${TESTROOT}/include/common.makefile
 # <rdar://problem/6806033> Link Time Optimization error with 'dead code strip' + hidden symbol
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
-LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
 
 run: all
 
 all:
-	${LLVMGCC} ${CCFLAGS} --emit-llvm bar.c  -c -o bar.o -fvisibility=hidden
-	${LLVMGCC} ${CCFLAGS} -dynamiclib bar.o -o libbar.dylib -dead_strip
+	${CC} ${CCFLAGS} -flto bar.c  -c -o bar.o -fvisibility=hidden
+	${CC} ${CCFLAGS} -dynamiclib bar.o -o libbar.dylib -dead_strip
 	${PASS_IFF_GOOD_MACHO} libbar.dylib
 	
 clean:

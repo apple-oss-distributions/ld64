@@ -38,12 +38,15 @@ test-i386:
 test-x86_64:
 	${PASS_IFF} true
 
-test-armv6:
-	gcc foo.c -arch armv4t -c -DAAA=1 -o foo4.o
-	gcc foo.c -arch armv5 -c -DBBB=1 -o foo5.o
-	gcc foo.c -arch armv6 -c -DCCC=1 -o foo6.o
-	gcc foo.c -arch xscale -c -DDDD=1 -o foox.o
-	lipo foo4.o foo5.o foo6.o foox.o -create -output foo.o
+test-armv6: test-arm
+test-armv7: test-arm
+
+test-arm:
+	clang foo.c -arch armv4t -c -DAAA=1 -o foo4.o
+	clang foo.c -arch armv5 -c -DBBB=1 -o foo5.o
+	clang foo.c -arch armv6 -c -DCCC=1 -o foo6.o
+	clang foo.c -arch armv7 -c -DDDD=1 -o foo7.o
+	lipo foo4.o foo5.o foo6.o foo7.o -create -output foo.o
 	
 	# check -arch armv4t pulls out V4 slice
 	${LD} -r -arch armv4t foo.o -o fooa.o
@@ -60,10 +63,10 @@ test-armv6:
 	otool -hv fooc.o | grep V6 | ${FAIL_IF_EMPTY}
 	nm fooc.o | grep _ccc | ${FAIL_IF_EMPTY}
 
-	# check -arch xscale pulls out xscale slice
-	${LD} -r -arch xscale foo.o -o fooxx.o
-	otool -hv fooxx.o | grep XSCALE | ${FAIL_IF_EMPTY}
-	nm fooxx.o | grep _ddd | ${FAIL_IF_EMPTY}
+	# check -arch armv7 pulls out V7 slice
+	${LD} -r -arch armv7 foo.o -o fooc.o
+	otool -hv fooc.o | grep V7 | ${FAIL_IF_EMPTY}
+	nm fooc.o | grep _ddd | ${FAIL_IF_EMPTY}
 
 	${PASS_IFF} true
 

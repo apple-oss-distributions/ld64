@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2009-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -32,7 +32,8 @@ namespace mach_o {
 namespace dylib {
 
 extern ld::dylib::File* parse(const uint8_t* fileContent, uint64_t fileLength, const char* path, 
-								time_t modTime, const Options& opts, uint32_t ordinal, bool bundleLoader);
+								time_t modTime, const Options& opts, uint32_t ordinal, 
+								bool bundleLoader, bool indirectDylib);
 
 } // namespace dylib
 } // namespace mach_o

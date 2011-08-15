@@ -105,6 +105,9 @@ static bool gotFixup(const Options& opts, ld::Internal& internal, const ld::Atom
 		case ld::Fixup::kindStoreX86PCRel32GOT:
 			*optimizable = false;
 			return true;
+		case ld::Fixup::kindNoneGroupSubordinatePersonality:
+			*optimizable = false;
+			return true;
 		default:
 			break;
 	}
@@ -128,8 +131,8 @@ void doPass(const Options& opts, ld::Internal& internal)
 	if ( opts.outputKind() == Options::kObjectFile )
 		return;
 
-	// walk all atoms and fixups looking for stubable references
-	// don't create stubs inline because that could invalidate the sections walk
+	// walk all atoms and fixups looking for GOT-able references
+	// don't create GOT atoms during this loop because that could invalidate the sections iterator
 	std::vector<const ld::Atom*> atomsReferencingGOT;
 	std::map<const ld::Atom*,ld::Atom*> gotMap;
 	std::map<const ld::Atom*,bool>		weakImportMap;
@@ -140,15 +143,18 @@ void doPass(const Options& opts, ld::Internal& internal)
 			const ld::Atom* atom = *ait;
 			bool atomUsesGOT = false;
 			const ld::Atom* targetOfGOT = NULL;
+			bool targetIsWeakImport = false;
 			for (ld::Fixup::iterator fit = atom->fixupsBegin(), end=atom->fixupsEnd(); fit != end; ++fit) {
 				if ( fit->firstInCluster() ) 
 					targetOfGOT = NULL;
 				switch ( fit->binding ) {
 					case ld::Fixup::bindingsIndirectlyBound:
 						targetOfGOT = internal.indirectBindingTable[fit->u.bindingIndex];
+						targetIsWeakImport = fit->weakImport;
 						break;
 					case ld::Fixup::bindingDirectlyBound:
 						targetOfGOT = fit->u.target;
+						targetIsWeakImport = fit->weakImport;
 						break;
                     default:
                         break;   
@@ -183,19 +189,12 @@ void doPass(const Options& opts, ld::Internal& internal)
 					std::map<const ld::Atom*,bool>::iterator pos = weakImportMap.find(targetOfGOT);
 					if ( pos == weakImportMap.end() ) {
 						// target not in weakImportMap, so add
-						weakImportMap[targetOfGOT] = fit->weakImport;
-						// <rdar://problem/5529626> If only weak_import symbols are used, linker should use LD_LOAD_WEAK_DYLIB
-						const ld::dylib::File* dylib = dynamic_cast<const ld::dylib::File*>(targetOfGOT->file());
-						if ( dylib != NULL ) {
-							if ( fit->weakImport )
-								(const_cast<ld::dylib::File*>(dylib))->setUsingWeakImportedSymbols();
-							else
-								(const_cast<ld::dylib::File*>(dylib))->setUsingNonWeakImportedSymbols();
-						}
+						if ( log ) fprintf(stderr, "weakImportMap[%s] = %d\n", targetOfGOT->name(), targetIsWeakImport);
+						weakImportMap[targetOfGOT] = targetIsWeakImport; 
 					}
 					else {
 						// target in weakImportMap, check for weakness mismatch
-						if ( pos->second != fit->weakImport ) {
+						if ( pos->second != targetIsWeakImport ) {
 							// found mismatch
 							switch ( opts.weakReferenceMismatchTreatment() ) {
 								case Options::kWeakReferenceMismatchError:

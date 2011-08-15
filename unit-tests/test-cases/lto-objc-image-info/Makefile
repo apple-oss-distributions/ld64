@@ -27,16 +27,13 @@ include ${TESTROOT}/include/common.makefile
 # <rdar://problem/8198537> trivial Objective-C app fails when using libLTO
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
-LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
-
 
 IMAGE_INFO = "__image_info"
 
 ifeq ($(ARCH),x86_64)
 	IMAGE_INFO = "__objc_imageinfo"
 endif
-ifeq ($(ARCH),armv6)
+ifeq ($(FILEARCH),arm)
 	IMAGE_INFO = "__objc_imageinfo"
 endif
 
@@ -44,8 +41,8 @@ endif
 run: all
 
 all:
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.m -c -o main.o
-	${LLVMGCC} ${CCFLAGS} main.o -o main -framework Foundation
+	${CC} ${CCFLAGS} -flto main.m -c -o main.o
+	${CC} ${CCFLAGS} main.o -o main -framework Foundation
 	size -l main | grep ${IMAGE_INFO} | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 	

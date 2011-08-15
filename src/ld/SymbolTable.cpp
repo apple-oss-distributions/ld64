@@ -137,25 +137,33 @@ bool SymbolTable::addByName(const ld::Atom& newAtom, bool ignoreDuplicates)
 					case ld::Atom::definitionRegular:
 						if ( existingAtom->combine() == ld::Atom::combineByName ) {
 							if ( newAtom.combine() == ld::Atom::combineByName ) {
-								// both weak, prefer non-auto-hide one
-								if ( newAtom.autoHide() != existingAtom->autoHide() ) {
-									// <rdar://problem/6783167> support auto hidden weak symbols: .weak_def_can_be_hidden
-									useNew = existingAtom->autoHide();
-									// don't check for visibility mismatch
-								}
-								else if ( newAtom.autoHide() && existingAtom->autoHide() ) {
-									// both have auto-hide, so use one with greater alignment
-									useNew = ( newAtom.alignment().trailingZeros() > existingAtom->alignment().trailingZeros() );
+								// <rdar://problem/9183821> always choose mach-o over llvm bit code, otherwise LTO may eliminate the llvm atom
+								const bool existingIsLTO = (existingAtom->contentType() == ld::Atom::typeLTOtemporary);
+								const bool newIsLTO = (newAtom.contentType() == ld::Atom::typeLTOtemporary);
+								if ( existingIsLTO != newIsLTO ) {
+									useNew = existingIsLTO;
 								}
 								else {
-									// neither auto-hide, check visibility
-									if ( newAtom.scope() != existingAtom->scope() ) {
-										// <rdar://problem/8304984> use more visible weak def symbol
-										useNew = (newAtom.scope() == ld::Atom::scopeGlobal);
+									// both weak, prefer non-auto-hide one
+									if ( newAtom.autoHide() != existingAtom->autoHide() ) {
+										// <rdar://problem/6783167> support auto hidden weak symbols: .weak_def_can_be_hidden
+										useNew = existingAtom->autoHide();
+										// don't check for visibility mismatch
+									}
+									else if ( newAtom.autoHide() && existingAtom->autoHide() ) {
+										// both have auto-hide, so use one with greater alignment
+										useNew = ( newAtom.alignment().trailingZeros() > existingAtom->alignment().trailingZeros() );
 									}
 									else {
-										// both have same visibility, use one with greater alignment
-										useNew = ( newAtom.alignment().trailingZeros() > existingAtom->alignment().trailingZeros() );
+										// neither auto-hide, check visibility
+										if ( newAtom.scope() != existingAtom->scope() ) {
+											// <rdar://problem/8304984> use more visible weak def symbol
+											useNew = (newAtom.scope() == ld::Atom::scopeGlobal);
+										}
+										else {
+											// both have same visibility, use one with greater alignment
+											useNew = ( newAtom.alignment().trailingZeros() > existingAtom->alignment().trailingZeros() );
+										}
 									}
 								}
 							}
@@ -220,6 +228,11 @@ bool SymbolTable::addByName(const ld::Atom& newAtom, bool ignoreDuplicates)
 											"being replaced by a real definition of size %llu from %s",
 											newAtom.name(), existingAtom->size(), existingAtom->file()->path(),
 											newAtom.size(), newAtom.file()->path());
+						}
+						if ( newAtom.section().type() == ld::Section::typeCode ) {
+							warning("for symbol %s tentative (data) defintion from %s is "
+									"being replaced by code from %s", newAtom.name(), existingAtom->file()->path(),
+									newAtom.file()->path());
 						}
 						break;
 					case ld::Atom::definitionTentative:

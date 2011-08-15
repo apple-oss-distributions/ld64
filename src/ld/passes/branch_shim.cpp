@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2010-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -42,16 +42,14 @@ namespace branch_shim {
 
 
 static bool _s_log = false;
-static ld::Section _s_text_section("__TEXT", "__text", ld::Section::typeCode);
-
 
 
 class Thumb2ToArmShimAtom : public ld::Atom {
 public:
-											Thumb2ToArmShimAtom(const ld::Atom* target)
-				: ld::Atom(_s_text_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
+											Thumb2ToArmShimAtom(const ld::Atom* target, const ld::Section& inSect)
+				: ld::Atom(inSect, ld::Atom::definitionRegular, ld::Atom::combineNever,
 							ld::Atom::scopeLinkageUnit, ld::Atom::typeUnclassified, 
-							ld::Atom::symbolTableIn, false, true, false, ld::Atom::Alignment(1)), 
+							ld::Atom::symbolTableIn, false, true, false, ld::Atom::Alignment(2)), 
 				_name(NULL),
 				_target(target),
 				_fixup1(8, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, target),
@@ -90,13 +88,50 @@ private:
 };
 
 
+class NoPICThumb2ToArmShimAtom : public ld::Atom {
+public:
+											NoPICThumb2ToArmShimAtom(const ld::Atom* target, const ld::Section& inSect)
+				: ld::Atom(inSect, ld::Atom::definitionRegular, ld::Atom::combineNever,
+							ld::Atom::scopeLinkageUnit, ld::Atom::typeUnclassified, 
+							ld::Atom::symbolTableIn, false, true, false, ld::Atom::Alignment(2)), 
+				_name(NULL),
+				_target(target),
+				_fixup1(8, ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressLittleEndian32, target)
+				 { asprintf((char**)&_name, "%s$shim", target->name()); }
+
+	virtual const ld::File*					file() const					{ return NULL; }
+	virtual bool							translationUnitSource(const char** dir, const char**) const 
+																			{ return false; }
+	virtual const char*						name() const					{ return _name; }
+	virtual uint64_t						size() const					{ return 12; }
+	virtual uint64_t						objectAddress() const			{ return 0; }
+	virtual void							copyRawContent(uint8_t buffer[]) const {
+		// Use ARM instructions that can jump to thumb.
+		assert( !  _target->isThumb() );
+		if (_s_log) fprintf(stderr, "3 Thumb2 instruction shim to jump to %s\n", _target->name());
+		OSWriteLittleInt32(&buffer[0], 0, 0xc004f8df);	// 	ldr  ip, pc + 4
+		OSWriteLittleInt16(&buffer[4], 0, 0x4760);		// 	bx	 ip
+		OSWriteLittleInt16(&buffer[6], 0, 0x46C0);		// 	nop
+		OSWriteLittleInt32(&buffer[8], 0, 0x00000000);	// 	.long target		
+	}
+
+	virtual void							setScope(Scope)					{ }
+	virtual ld::Fixup::iterator				fixupsBegin() const				{ return (ld::Fixup*)&_fixup1; }
+	virtual ld::Fixup::iterator				fixupsEnd()	const				{ return &((ld::Fixup*)&_fixup1)[1]; }
+
+private:
+	const char*								_name;
+	const ld::Atom*							_target;
+	ld::Fixup								_fixup1;
+};
+
 
 class Thumb1ToArmShimAtom : public ld::Atom {
 public:
-											Thumb1ToArmShimAtom(const ld::Atom* target)
-				: ld::Atom(_s_text_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
+											Thumb1ToArmShimAtom(const ld::Atom* target, const ld::Section& inSect)
+				: ld::Atom(inSect, ld::Atom::definitionRegular, ld::Atom::combineNever,
 							ld::Atom::scopeLinkageUnit, ld::Atom::typeUnclassified, 
-							ld::Atom::symbolTableIn, false, true, false, ld::Atom::Alignment(1)), 
+							ld::Atom::symbolTableIn, false, true, false, ld::Atom::Alignment(2)), 
 				_name(NULL),
 				_target(target),
 				_fixup1(12, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, target),
@@ -141,8 +176,8 @@ private:
 
 class ARMtoThumbShimAtom : public ld::Atom {
 public:
-											ARMtoThumbShimAtom(const ld::Atom* target)
-				: ld::Atom(_s_text_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
+											ARMtoThumbShimAtom(const ld::Atom* target, const ld::Section& inSect)
+				: ld::Atom(inSect, ld::Atom::definitionRegular, ld::Atom::combineNever,
 							ld::Atom::scopeLinkageUnit, ld::Atom::typeUnclassified, 
 							ld::Atom::symbolTableIn, false, false, false, ld::Atom::Alignment(2)), 
 				_name(NULL),
@@ -182,6 +217,41 @@ private:
 };
 
 
+class NoPICARMtoThumbShimAtom : public ld::Atom {
+public:
+											NoPICARMtoThumbShimAtom(const ld::Atom* target, const ld::Section& inSect)
+				: ld::Atom(inSect, ld::Atom::definitionRegular, ld::Atom::combineNever,
+							ld::Atom::scopeLinkageUnit, ld::Atom::typeUnclassified, 
+							ld::Atom::symbolTableIn, false, false, false, ld::Atom::Alignment(2)), 
+				_name(NULL),
+				_target(target),
+				_fixup1(8, ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressLittleEndian32, target)
+				 { asprintf((char**)&_name, "%s$shim", target->name()); }
+
+	virtual const ld::File*					file() const					{ return NULL; }
+	virtual bool							translationUnitSource(const char** dir, const char**) const 
+																			{ return false; }
+	virtual const char*						name() const					{ return _name; }
+	virtual uint64_t						size() const					{ return 12; }
+	virtual uint64_t						objectAddress() const			{ return 0; }
+	virtual void							copyRawContent(uint8_t buffer[]) const {
+		// Use ARM instructions that can jump to thumb.
+		if (_s_log) fprintf(stderr, "3 ARM instruction shim to jump to %s\n", _target->name());
+		OSWriteLittleInt32(&buffer[ 0], 0, 0xe59fc000);	// 	ldr  ip, pc + 4
+		OSWriteLittleInt32(&buffer[ 4], 0, 0xe12fff1c);	// 	bx	 ip
+		OSWriteLittleInt32(&buffer[ 8], 0, 0);			// 	.long target		
+	}
+	virtual void							setScope(Scope)					{ }
+	virtual ld::Fixup::iterator				fixupsBegin() const				{ return (ld::Fixup*)&_fixup1; }
+	virtual ld::Fixup::iterator				fixupsEnd()	const				{ return &((ld::Fixup*)&_fixup1)[1]; }
+
+private:
+	const char*								_name;
+	const ld::Atom*							_target;
+	ld::Fixup								_fixup1;
+};
+
+
 
 
 
@@ -216,10 +286,6 @@ static void extractTarget(ld::Fixup::iterator fixup, ld::Internal& state, const 
 //
 void doPass(const Options& opts, ld::Internal& state)
 {	
-	std::map<const Atom*, const Atom*> atomToThumbMap;
-	std::map<const Atom*, const Atom*> thumbToAtomMap;
-	std::vector<const Atom*> shims;
-
 	// only make branch shims in final linked images
 	if ( opts.outputKind() == Options::kObjectFile )
 		return;
@@ -228,84 +294,108 @@ void doPass(const Options& opts, ld::Internal& state)
 	if ( opts.architecture() != CPU_TYPE_ARM )
 		return;
 	
-	// scan to find __text section
-	ld::Internal::FinalSection* textSection = NULL;
+	const bool makingKextBundle = (opts.outputKind() == Options::kKextBundle);
+
+	// scan all sections
 	for (std::vector<ld::Internal::FinalSection*>::iterator sit=state.sections.begin(); sit != state.sections.end(); ++sit) {
 		ld::Internal::FinalSection* sect = *sit;
-		if ( strcmp(sect->sectionName(), "__text") == 0 )
-			textSection = sect;
-	}
-	if ( textSection == NULL )
-		return;
-	
-	// scan __text section for branch instructions that need to switch mode
-	for (std::vector<const ld::Atom*>::iterator ait=textSection->atoms.begin();  ait != textSection->atoms.end(); ++ait) {
-		const ld::Atom* atom = *ait;
-		const ld::Atom* target;
-		for (ld::Fixup::iterator fit = atom->fixupsBegin(), end=atom->fixupsEnd(); fit != end; ++fit) {
-			switch ( fit->kind ) {
-				case ld::Fixup::kindStoreTargetAddressThumbBranch22:
-					extractTarget(fit, state, &target);
-					if ( ! target->isThumb() ) {
-						const uint8_t* fixUpLocation = atom->rawContentPointer() + fit->offsetInAtom;
-						uint32_t instruction = *((uint32_t*)fixUpLocation);
-						bool is_b = ((instruction & 0xD000F800) == 0x9000F000);
-						if ( is_b ) {
-							fprintf(stderr, "need to add thumb->arm instr=0x%08X shim to %s for %s\n", instruction, target->name(), atom->name()); 
-							const Atom* shim = NULL;
-							std::map<const Atom*, const Atom*>::iterator pos = thumbToAtomMap.find(target);
-							if ( pos == thumbToAtomMap.end() ) {
-								if ( opts.subArchitecture() == CPU_SUBTYPE_ARM_V7 )
-									shim = new Thumb2ToArmShimAtom(target);
-								else
-									shim = new Thumb1ToArmShimAtom(target);
-								shims.push_back(shim);
-								thumbToAtomMap[target] = shim;
+		std::map<const Atom*, const Atom*> atomToThumbMap;
+		std::map<const Atom*, const Atom*> thumbToAtomMap;
+		std::vector<const Atom*> shims;
+		// scan section for branch instructions that need to switch mode
+		for (std::vector<const ld::Atom*>::iterator ait=sect->atoms.begin();  ait != sect->atoms.end(); ++ait) {
+			const ld::Atom* atom = *ait;
+			const ld::Atom* target = NULL;
+			bool targetIsProxy;
+			for (ld::Fixup::iterator fit = atom->fixupsBegin(), end=atom->fixupsEnd(); fit != end; ++fit) {
+				switch ( fit->kind ) {
+					case ld::Fixup::kindStoreTargetAddressThumbBranch22:
+						extractTarget(fit, state, &target);
+						targetIsProxy = (target->definition() == ld::Atom::definitionProxy);
+						if ( ! target->isThumb() ) {
+							const uint8_t* fixUpLocation = atom->rawContentPointer();
+							// <rdar://problem/9544194> don't try to scan atom for branches if atom unwilling to supply raw content
+							if ( fixUpLocation == NULL )
+								break;
+							fixUpLocation += fit->offsetInAtom;
+							uint32_t instruction = *((uint32_t*)fixUpLocation);
+							bool is_b = ((instruction & 0xD000F800) == 0x9000F000);
+							// need shim for branch from thumb to arm, or for call to function outside kext
+							if ( is_b || (targetIsProxy && makingKextBundle) ) {
+								if ( _s_log ) fprintf(stderr, "need to add thumb->arm instr=0x%08X shim to %s for %s\n", instruction, target->name(), atom->name()); 
+								const Atom* shim = NULL;
+								std::map<const Atom*, const Atom*>::iterator pos = thumbToAtomMap.find(target);
+								if ( pos == thumbToAtomMap.end() ) {
+									if ( opts.archSupportsThumb2() ) {
+										// <rdar://problem/9116044> make long-branch style shims for arm kexts
+										if ( makingKextBundle )
+											shim = new NoPICThumb2ToArmShimAtom(target, *sect);
+										else
+											shim = new Thumb2ToArmShimAtom(target, *sect);
+									}
+									else {
+										shim = new Thumb1ToArmShimAtom(target, *sect);
+									}
+									shims.push_back(shim);
+									thumbToAtomMap[target] = shim;
+								}
+								else {
+									shim = pos->second;
+								}
+								fit->binding = ld::Fixup::bindingDirectlyBound;
+								fit->u.target = shim;
 							}
-							else {
-								shim = pos->second;
-							}
-							fit->binding = ld::Fixup::bindingDirectlyBound;
-							fit->u.target = shim;
 						}
-					}
-					break;
-				case ld::Fixup::kindStoreTargetAddressARMBranch24:
-					extractTarget(fit, state, &target);
-					if ( target->isThumb() ) {
-						const uint8_t* fixUpLocation = atom->rawContentPointer() + fit->offsetInAtom;
-						uint32_t instruction = *((uint32_t*)fixUpLocation);
-						bool is_b = ((instruction & 0x0F000000) == 0x0A000000);
-						if ( is_b ) {
-							fprintf(stderr, "need to add arm->thumb instr=0x%08X shim to %s for %s\n", instruction, target->name(), atom->name()); 
-							const Atom* shim = NULL;
-							std::map<const Atom*, const Atom*>::iterator pos = atomToThumbMap.find(target);
-							if ( pos == atomToThumbMap.end() ) {
-								shim = new ARMtoThumbShimAtom(target);
-								shims.push_back(shim);
-								atomToThumbMap[target] = shim;
+						break;
+					case ld::Fixup::kindStoreTargetAddressARMBranch24:
+						extractTarget(fit, state, &target);
+						targetIsProxy = (target->definition() == ld::Atom::definitionProxy);
+						if ( target->isThumb() || (targetIsProxy && makingKextBundle) ) {
+							const uint8_t* fixUpLocation = atom->rawContentPointer();
+							// <rdar://problem/9544194> don't try to scan atom for branches if atom unwilling to supply raw content
+							if ( fixUpLocation == NULL )
+								break;
+							fixUpLocation += fit->offsetInAtom;
+							uint32_t instruction = *((uint32_t*)fixUpLocation);
+							bool is_b = ((instruction & 0x0F000000) == 0x0A000000) && ((instruction & 0xF0000000) != 0xF0000000);
+							// need shim for branch from arm to thumb, or for call to function outside kext
+							if ( is_b || (targetIsProxy && makingKextBundle) ) {
+								if ( _s_log ) fprintf(stderr, "need to add arm->thumb instr=0x%08X shim to %s for %s\n", instruction, target->name(), atom->name()); 
+								const Atom* shim = NULL;
+								std::map<const Atom*, const Atom*>::iterator pos = atomToThumbMap.find(target);
+								if ( pos == atomToThumbMap.end() ) {
+									// <rdar://problem/9116044> make long-branch style shims for arm kexts
+									if ( makingKextBundle )
+										shim = new NoPICARMtoThumbShimAtom(target, *sect);
+									else
+										shim = new ARMtoThumbShimAtom(target, *sect);
+									shims.push_back(shim);
+									atomToThumbMap[target] = shim;
+								}
+								else {
+									shim = pos->second;
+								}
+								fit->binding = ld::Fixup::bindingDirectlyBound;
+								fit->u.target = shim;
 							}
-							else {
-								shim = pos->second;
-							}
-							fit->binding = ld::Fixup::bindingDirectlyBound;
-							fit->u.target = shim;
 						}
-					}
-					break;
-				
-				case ld::Fixup::kindStoreARMBranch24:
-				case ld::Fixup::kindStoreThumbBranch22:
-					fprintf(stderr, "found branch-22 without store in %s\n", atom->name()); 
-					break;
-				default:
-					break;
+						break;
+					
+					//case ld::Fixup::kindStoreARMBranch24:
+					//case ld::Fixup::kindStoreThumbBranch22:
+					// Note: these fixups will only be seen if the the b/bl is to a symbol plus addend
+					// for now we don't handle making shims.  If a shim is needed there will
+					// be an error later.
+					//	break;
+					default:
+						break;
+				}
 			}
 		}
-	}
 
-	// append all new shims to end of __text
-	textSection->atoms.insert(textSection->atoms.end(), shims.begin(), shims.end());
+		// append all new shims to end of __text
+		sect->atoms.insert(sect->atoms.end(), shims.begin(), shims.end());
+	}
 }
 
 

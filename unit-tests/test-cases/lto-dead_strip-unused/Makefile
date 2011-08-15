@@ -27,15 +27,12 @@ include ${TESTROOT}/include/common.makefile
 # <rdar://problem/7438246> LTO with 'dead code strip' can't ignore unused functions with undefined references
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
-LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
-
 run: all
 
 all:
-	${LLVMGCC} ${CCFLAGS} --emit-llvm bar.c  -c -o bar.o
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.c -c -o main.o 
-	${LLVMGCC} ${CCFLAGS} -dead_strip main.o bar.o -o main
+	${CC} ${CCFLAGS} -flto bar.c  -c -o bar.o
+	${CC} ${CCFLAGS} -flto main.c -c -o main.o 
+	${CC} ${CCFLAGS} -dead_strip main.o bar.o -o main
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:

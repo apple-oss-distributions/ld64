@@ -29,5 +29,6 @@ extern void func(int);
 int main()
 {
 	func(data);
+	return 0;
 }
 

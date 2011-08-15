@@ -31,13 +31,16 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:	
-	${CC} ${CCFLAGS} -c foo.c -o foo-${ARCH}.o
-	${FAIL_IF_BAD_OBJ} foo-${ARCH}.o
+	${CC} ${CCFLAGS} -c foo.c -o foo.o
+	${FAIL_IF_BAD_OBJ} foo.o
 
-	${CC} ${CCFLAGS} -c foo1.c -o foo1-${ARCH}.o
-	${FAIL_IF_BAD_OBJ} foo1-${ARCH}.o
+	${CC} ${CCFLAGS} -c foo1.c -o foo1.o
+	${FAIL_IF_BAD_OBJ} foo1.o
 
-	${PASS_IFF_ERROR} ${CC} ${CCFLAGS} -dynamiclib foo-${ARCH}.o foo1-${ARCH}.o -o libfoo-${ARCH}.dylib 2>/dev/null
+	${PASS_IFF_ERROR} ${CC} ${CCFLAGS} -dynamiclib foo.o foo1.o -o libfoo.dylib 
 
 clean:
-	rm -rf *.o *.dylib main-*
+	rm -rf foo.o foo1.o libfoo.dylib
+
+
+#2>/dev/null

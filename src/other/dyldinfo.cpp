@@ -50,7 +50,7 @@ static bool printExportNodes = false;
 static bool printSharedRegion = false;
 static bool printFunctionStarts = false;
 static bool printDylibs = false;
-static cpu_type_t	sPreferredArch = CPU_TYPE_I386;
+static cpu_type_t	sPreferredArch = 0;
 static cpu_type_t	sPreferredSubArch = 0;
 
 
@@ -73,8 +73,8 @@ class DyldInfoPrinter
 {
 public:
 	static bool									validFile(const uint8_t* fileContent);
-	static DyldInfoPrinter<A>*					make(const uint8_t* fileContent, uint32_t fileLength, const char* path) 
-														{ return new DyldInfoPrinter<A>(fileContent, fileLength, path); }
+	static DyldInfoPrinter<A>*					make(const uint8_t* fileContent, uint32_t fileLength, const char* path, bool printArch) 
+														{ return new DyldInfoPrinter<A>(fileContent, fileLength, path, printArch); }
 	virtual										~DyldInfoPrinter() {}
 
 
@@ -91,7 +91,7 @@ private:
 
 	typedef __gnu_cxx::hash_set<const char*, __gnu_cxx::hash<const char*>, CStringEquals>  StringSet;
 
-												DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path);
+												DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path, bool printArch);
 	void										printRebaseInfo();
 	void										printRebaseInfoOpcodes();
 	void										printBindingInfo();
@@ -246,7 +246,7 @@ bool DyldInfoPrinter<arm>::validFile(const uint8_t* fileContent)
 }
 
 template <typename A>
-DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path)
+DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path, bool printArch)
  : fHeader(NULL), fLength(fileLength), 
    fStrings(NULL), fStringsEnd(NULL), fSymbols(NULL), fSymbolCount(0), fInfo(NULL), 
    fSharedRegionInfo(NULL), fFunctionStartsInfo(NULL), 
@@ -335,6 +335,28 @@ DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLen
 		}
 		cmd = (const macho_load_command<P>*)endOfCmd;
 	}
+	
+	if ( printArch ) {
+		switch ( fHeader->cputype() ) {
+			case CPU_TYPE_I386:
+				printf("for arch i386:\n");
+				break;
+			case CPU_TYPE_X86_64:
+				printf("for arch x86_64:\n");
+				break;
+			case CPU_TYPE_POWERPC:			
+				printf("for arch ppc:\n");
+				break;
+			case CPU_TYPE_ARM:
+				for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
+					if ( (cpu_subtype_t)fHeader->cpusubtype() == t->subType) {
+						printf("for arch %s:\n", t->subTypeName);
+						break;
+					}
+				}
+		}
+	}
+	
 	
 	if ( printRebase ) {
 		if ( fInfo != NULL )
@@ -1428,6 +1450,60 @@ const uint8_t* DyldInfoPrinter<A>::printSharedRegionInfoForEachULEB128Address(co
 		case 4:
 			kindStr = "32-bit offset to IMPORT";
 			break;
+		case 5:
+			kindStr = "thumb2 movw";
+			break;
+		case 6:
+			kindStr = "ARM movw";
+			break;
+		case 0x10:
+			kindStr = "thumb2 movt low high 4 bits=0";
+			break;
+		case 0x11:
+			kindStr = "thumb2 movt low high 4 bits=1";
+			break;
+		case 0x12:
+			kindStr = "thumb2 movt low high 4 bits=2";
+			break;
+		case 0x13:
+			kindStr = "thumb2 movt low high 4 bits=3";
+			break;
+		case 0x14:
+			kindStr = "thumb2 movt low high 4 bits=4";
+			break;
+		case 0x15:
+			kindStr = "thumb2 movt low high 4 bits=5";
+			break;
+		case 0x16:
+			kindStr = "thumb2 movt low high 4 bits=6";
+			break;
+		case 0x17:
+			kindStr = "thumb2 movt low high 4 bits=7";
+			break;
+		case 0x18:
+			kindStr = "thumb2 movt low high 4 bits=8";
+			break;
+		case 0x19:
+			kindStr = "thumb2 movt low high 4 bits=9";
+			break;
+		case 0x1A:
+			kindStr = "thumb2 movt low high 4 bits=0xA";
+			break;
+		case 0x1B:
+			kindStr = "thumb2 movt low high 4 bits=0xB";
+			break;
+		case 0x1C:
+			kindStr = "thumb2 movt low high 4 bits=0xC";
+			break;
+		case 0x1D:
+			kindStr = "thumb2 movt low high 4 bits=0xD";
+			break;
+		case 0x1E:
+			kindStr = "thumb2 movt low high 4 bits=0xE";
+			break;
+		case 0x1F:
+			kindStr = "thumb2 movt low high 4 bits=0xF";
+			break;
 	}
 	uint64_t address = 0;
 	uint64_t delta = 0;
@@ -1723,21 +1799,31 @@ void DyldInfoPrinter<A>::printSymbolTableExportInfo()
 template <typename A>
 const char* DyldInfoPrinter<A>::symbolNameForAddress(uint64_t addr)
 {
-	// find exact match in globals
-	const macho_nlist<P>* lastExport = &fSymbols[fDynamicSymbolTable->iextdefsym()+fDynamicSymbolTable->nextdefsym()];
-	for (const macho_nlist<P>* sym = &fSymbols[fDynamicSymbolTable->iextdefsym()]; sym < lastExport; ++sym) {
-		if ( (sym->n_value() == addr) && ((sym->n_type() & N_TYPE) == N_SECT) && ((sym->n_type() & N_STAB) == 0) ) {
-			return &fStrings[sym->n_strx()];
+	if ( fDynamicSymbolTable != NULL ) {
+		// find exact match in globals
+		const macho_nlist<P>* lastExport = &fSymbols[fDynamicSymbolTable->iextdefsym()+fDynamicSymbolTable->nextdefsym()];
+		for (const macho_nlist<P>* sym = &fSymbols[fDynamicSymbolTable->iextdefsym()]; sym < lastExport; ++sym) {
+			if ( (sym->n_value() == addr) && ((sym->n_type() & N_TYPE) == N_SECT) && ((sym->n_type() & N_STAB) == 0) ) {
+				return &fStrings[sym->n_strx()];
+			}
+		}
+		// find exact match in local symbols
+		const macho_nlist<P>* lastLocal = &fSymbols[fDynamicSymbolTable->ilocalsym()+fDynamicSymbolTable->nlocalsym()];
+		for (const macho_nlist<P>* sym = &fSymbols[fDynamicSymbolTable->ilocalsym()]; sym < lastLocal; ++sym) {
+			if ( (sym->n_value() == addr) && ((sym->n_type() & N_TYPE) == N_SECT) && ((sym->n_type() & N_STAB) == 0) ) {
+				return &fStrings[sym->n_strx()];
+			}
 		}
 	}
-	// find exact match in local symbols
-	const macho_nlist<P>* lastLocal = &fSymbols[fDynamicSymbolTable->ilocalsym()+fDynamicSymbolTable->nlocalsym()];
-	for (const macho_nlist<P>* sym = &fSymbols[fDynamicSymbolTable->ilocalsym()]; sym < lastLocal; ++sym) {
-		if ( (sym->n_value() == addr) && ((sym->n_type() & N_TYPE) == N_SECT) && ((sym->n_type() & N_STAB) == 0) ) {
-			return &fStrings[sym->n_strx()];
+	else {
+		// find exact match in all symbols
+		const macho_nlist<P>* lastSym = &fSymbols[fSymbolCount];
+		for (const macho_nlist<P>* sym = &fSymbols[0]; sym < lastSym; ++sym) {
+			if ( (sym->n_value() == addr) && ((sym->n_type() & N_TYPE) == N_SECT) && ((sym->n_type() & N_STAB) == 0) ) {
+				return &fStrings[sym->n_strx()];
+			}
 		}
 	}
-
 
 	return "?";
 }
@@ -1889,36 +1975,37 @@ static void dump(const char* path)
 				size_t size = OSSwapBigToHostInt32(archs[i].size);
 				cpu_type_t cputype = OSSwapBigToHostInt32(archs[i].cputype);
 				cpu_type_t cpusubtype = OSSwapBigToHostInt32(archs[i].cpusubtype);
-				if ( (cputype == sPreferredArch) 
-					&& ((sPreferredSubArch==0) || (sPreferredSubArch==cpusubtype)) ) {	
+				if ( ((cputype == sPreferredArch) 
+					&& ((sPreferredSubArch==0) || (sPreferredSubArch==cpusubtype)))
+					|| (sPreferredArch == 0) ) {	
 					switch(cputype) {
 					case CPU_TYPE_POWERPC:
 						if ( DyldInfoPrinter<ppc>::validFile(p + offset) )
-							DyldInfoPrinter<ppc>::make(p + offset, size, path);
+							DyldInfoPrinter<ppc>::make(p + offset, size, path, (sPreferredArch == 0));
 						else
 							throw "in universal file, ppc slice does not contain ppc mach-o";
 						break;
 					case CPU_TYPE_I386:
 						if ( DyldInfoPrinter<x86>::validFile(p + offset) )
-							DyldInfoPrinter<x86>::make(p + offset, size, path);
+							DyldInfoPrinter<x86>::make(p + offset, size, path, (sPreferredArch == 0));
 						else
 							throw "in universal file, i386 slice does not contain i386 mach-o";
 						break;
 					case CPU_TYPE_POWERPC64:
 						if ( DyldInfoPrinter<ppc64>::validFile(p + offset) )
-							DyldInfoPrinter<ppc64>::make(p + offset, size, path);
+							DyldInfoPrinter<ppc64>::make(p + offset, size, path, (sPreferredArch == 0));
 						else
 							throw "in universal file, ppc64 slice does not contain ppc64 mach-o";
 						break;
 					case CPU_TYPE_X86_64:
 						if ( DyldInfoPrinter<x86_64>::validFile(p + offset) )
-							DyldInfoPrinter<x86_64>::make(p + offset, size, path);
+							DyldInfoPrinter<x86_64>::make(p + offset, size, path, (sPreferredArch == 0));
 						else
 							throw "in universal file, x86_64 slice does not contain x86_64 mach-o";
 						break;
 					case CPU_TYPE_ARM:
-						if ( DyldInfoPrinter<arm>::validFile(p + offset) )
-							DyldInfoPrinter<arm>::make(p + offset, size, path);
+						if ( DyldInfoPrinter<arm>::validFile(p + offset) ) 
+							DyldInfoPrinter<arm>::make(p + offset, size, path, (sPreferredArch == 0));
 						else
 							throw "in universal file, arm slice does not contain arm mach-o";
 						break;
@@ -1929,19 +2016,19 @@ static void dump(const char* path)
 			}
 		}
 		else if ( DyldInfoPrinter<x86>::validFile(p) ) {
-			DyldInfoPrinter<x86>::make(p, length, path);
+			DyldInfoPrinter<x86>::make(p, length, path, false);
 		}
 		else if ( DyldInfoPrinter<ppc>::validFile(p) ) {
-			DyldInfoPrinter<ppc>::make(p, length, path);
+			DyldInfoPrinter<ppc>::make(p, length, path, false);
 		}
 		else if ( DyldInfoPrinter<ppc64>::validFile(p) ) {
-			DyldInfoPrinter<ppc64>::make(p, length, path);
+			DyldInfoPrinter<ppc64>::make(p, length, path, false);
 		}
 		else if ( DyldInfoPrinter<x86_64>::validFile(p) ) {
-			DyldInfoPrinter<x86_64>::make(p, length, path);
+			DyldInfoPrinter<x86_64>::make(p, length, path, false);
 		}
 		else if ( DyldInfoPrinter<arm>::validFile(p) ) {
-			DyldInfoPrinter<arm>::make(p, length, path);
+			DyldInfoPrinter<arm>::make(p, length, path, false);
 		}
 		else {
 			throw "not a known file type";
@@ -1990,26 +2077,19 @@ int main(int argc, const char* argv[])
 						sPreferredArch = CPU_TYPE_I386;
 					else if ( strcmp(arch, "x86_64") == 0 )
 						sPreferredArch = CPU_TYPE_X86_64;
-					else if ( strcmp(arch, "arm") == 0 )
-						sPreferredArch = CPU_TYPE_ARM;
-					else if ( strcmp(arch, "armv4t") == 0 ) {
-						sPreferredArch = CPU_TYPE_ARM;
-						sPreferredSubArch = CPU_SUBTYPE_ARM_V4T;
+					else {
+						bool found = false;
+						for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
+							if ( strcmp(t->subTypeName,arch) == 0 ) {
+								sPreferredArch = CPU_TYPE_ARM;
+								sPreferredSubArch = t->subType;
+								found = true;
+								break;
+							}
+						}
+						if ( !found )
+							throwf("unknown architecture %s", arch);
 					}
-					else if ( strcmp(arch, "armv5") == 0 ) {
-						sPreferredArch = CPU_TYPE_ARM;
-						sPreferredSubArch = CPU_SUBTYPE_ARM_V5TEJ;
-					}
-					else if ( strcmp(arch, "armv6") == 0 ) {
-						sPreferredArch = CPU_TYPE_ARM;
-						sPreferredSubArch = CPU_SUBTYPE_ARM_V6;
-					}
-					else if ( strcmp(arch, "armv7") == 0 ) {
-						sPreferredArch = CPU_TYPE_ARM;
-						sPreferredSubArch = CPU_SUBTYPE_ARM_V7;
-					}
-					else 
-						throwf("unknown architecture %s", arch);
 				}
 				else if ( strcmp(arg, "-rebase") == 0 ) {
 					printRebase = true;

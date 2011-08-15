@@ -33,9 +33,9 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.cxx -c -o hello.o -mdynamic-no-pic
-	${CXX} ${CCXXFLAGS} -gdwarf-2 other.cxx -c -o other.o -mdynamic-no-pic
-	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.o other.o -o hello
+	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.cxx -c -o hello.o 
+	${CXX} ${CCXXFLAGS} -gdwarf-2 other.cxx -c -o other.o 
+	${CXX} ${CCXXFLAGS} -gdwarf-2 hello.o other.o -o hello -Wl,-order_file,hello.order
 	${FAIL_IF_BAD_MACHO} hello
 	nm -ap hello | ./stabs-filter.pl > hello.stabs
 	${PASS_IFF} diff hello.stabs expected-stabs

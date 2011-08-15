@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2010 Apple Inc. All rights reserved.
+# Copyright (c) 2010-2011 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -35,6 +35,10 @@ all:
 	rm -rf trace_ars
 	export LD_TRACE_ARCHIVES=1 && export LD_TRACE_FILE=trace_ars && ${CC} ${CCFLAGS} main.c libfoo.a -o main
 	grep 'libfoo.a' trace_ars | ${FAIL_IF_EMPTY}
+	export LD_TRACE_ARCHIVES=1 && export LD_TRACE_FILE=trace_ars2 && ${CC} ${CCFLAGS} main.c -Wl,-force_load,libfoo.a -o main
+	grep 'libfoo.a' trace_ars2 | ${FAIL_IF_EMPTY}
+	export LD_TRACE_ARCHIVES=1 && export LD_TRACE_FILE=trace_ars3 && ${CC} ${CCFLAGS} main.c libfoo.a -o main -all_load
+	grep 'libfoo.a' trace_ars3 | ${FAIL_IF_EMPTY}
 	${CC} ${CCFLAGS} foo.c -dynamiclib -o libfoo.dylib
 	rm -rf trace_dylibs
 	export LD_TRACE_DYLIBS=1 && export LD_TRACE_FILE=trace_dylibs && ${CC} ${CCFLAGS} main.c libfoo.dylib -o main
@@ -43,4 +47,4 @@ all:
 	
 
 clean:
-	rm -rf foo.o libfoo.a libfoo.dylib main trace_ars trace_dylibs
+	rm -rf foo.o libfoo.a libfoo.dylib main trace_ars trace_ars2 trace_ars3 trace_dylibs

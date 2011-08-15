@@ -42,8 +42,9 @@ static bool			sNMmode		= false;
 static bool			sShowSection			= true;
 static bool			sShowDefinitionKind		= true;
 static bool			sShowCombineKind		= true;
+static bool			sShowLineInfo			= true;
 
-static cpu_type_t		sPreferredArch = CPU_TYPE_I386;
+static cpu_type_t		sPreferredArch = 0xFFFFFFFF;
 static cpu_subtype_t	sPreferredSubArch = 0xFFFFFFFF;
 static const char* sMatchName = NULL;
 static int sPrintRestrict;
@@ -966,7 +967,20 @@ void dumper::dumpAtom(const ld::Atom& atom)
 	if ( sShowSection )
 		printf("section:  %s,%s\n", atom.section().segmentName(), atom.section().sectionName());
 	if ( atom.beginUnwind() != atom.endUnwind() ) {
-		printf("unwind:   0x%08X\n", atom.beginUnwind()->unwindInfo);
+		uint32_t lastOffset = 0;
+		uint32_t lastCUE = 0;
+		bool first = true;
+		const char* label = "unwind:";
+		for (ld::Atom::UnwindInfo::iterator it=atom.beginUnwind(); it != atom.endUnwind(); ++it) {
+			if ( !first ) {
+				printf("%s   0x%08X -> 0x%08X: 0x%08X\n", label, lastOffset, it->startOffset, lastCUE);
+				label = "       ";
+			}
+			lastOffset = it->startOffset;
+			lastCUE = it->unwindInfo;
+			first = false;
+		}
+		printf("%s   0x%08X -> 0x%08X: 0x%08X\n", label, lastOffset, (uint32_t)atom.size(), lastCUE);
 	}
 	if ( atom.contentType() == ld::Atom::typeCString ) {
 		uint8_t buffer[atom.size()+2];
@@ -1028,13 +1042,15 @@ void dumper::dumpAtom(const ld::Atom& atom)
 			}
 		}
 	}
-	if ( atom.beginLineInfo() != atom.endLineInfo() ) {
-		printf("line info:\n");
-		for (ld::Atom::LineInfo::iterator it = atom.beginLineInfo(); it != atom.endLineInfo(); ++it) {
-			printf("   offset 0x%04X, line %d, file %s\n", it->atomOffset, it->lineNumber, it->fileName);
+	if ( sShowLineInfo ) {
+		if ( atom.beginLineInfo() != atom.endLineInfo() ) {
+			printf("line info:\n");
+			for (ld::Atom::LineInfo::iterator it = atom.beginLineInfo(); it != atom.endLineInfo(); ++it) {
+				printf("   offset 0x%04X, line %d, file %s\n", it->atomOffset, it->lineNumber, it->fileName);
+			}
 		}
 	}
-
+	
 	printf("\n");
 }
 
@@ -1088,14 +1104,27 @@ static ld::relocatable::File* createReader(const char* path)
 	if ( mh->magic == OSSwapBigToHostInt32(FAT_MAGIC) ) {
 		const struct fat_header* fh = (struct fat_header*)p;
 		const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
-		for (unsigned long i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
-			if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)sPreferredArch ) {
-				if ( ((uint32_t)sPreferredSubArch == 0xFFFFFFFF) || ((uint32_t)sPreferredSubArch == OSSwapBigToHostInt32(archs[i].cpusubtype)) ) {
-					p = p + OSSwapBigToHostInt32(archs[i].offset);
-					mh = (struct mach_header*)p;
-					fileLen = OSSwapBigToHostInt32(archs[i].size);
-					foundFatSlice = true;
-					break;
+		if ( (uint32_t)sPreferredArch ==  0xFFFFFFFF ) {
+			// just dump first slice of fat .o file
+			if ( OSSwapBigToHostInt32(fh->nfat_arch) > 0 )  {
+				p = p + OSSwapBigToHostInt32(archs[0].offset);
+				mh = (struct mach_header*)p;
+				fileLen = OSSwapBigToHostInt32(archs[0].size);
+				sPreferredArch = OSSwapBigToHostInt32(archs[0].cputype);
+				sPreferredSubArch = OSSwapBigToHostInt32(archs[0].cpusubtype);
+				foundFatSlice = true;
+			}
+		}
+		else {
+			for (unsigned long i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
+				if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)sPreferredArch ) {
+					if ( ((uint32_t)sPreferredSubArch == 0xFFFFFFFF) || ((uint32_t)sPreferredSubArch == OSSwapBigToHostInt32(archs[i].cpusubtype)) ) {
+						p = p + OSSwapBigToHostInt32(archs[i].offset);
+						mh = (struct mach_header*)p;
+						fileLen = OSSwapBigToHostInt32(archs[i].size);
+						foundFatSlice = true;
+						break;
+					}
 				}
 			}
 		}
@@ -1186,6 +1215,9 @@ int main(int argc, const char* argv[])
 				else if ( strcmp(arg, "-no_combine") == 0 ) {
 					sShowCombineKind = false;
 				}
+				else if ( strcmp(arg, "-no_line_info") == 0 ) {
+					sShowLineInfo = false;
+				}
 				else if ( strcmp(arg, "-arch") == 0 ) {
 					const char* arch = ++i<argc? argv[i]: "";
 					if ( strcmp(arch, "ppc64") == 0 )
@@ -1196,26 +1228,19 @@ int main(int argc, const char* argv[])
 						sPreferredArch = CPU_TYPE_I386;
 					else if ( strcmp(arch, "x86_64") == 0 )
 						sPreferredArch = CPU_TYPE_X86_64;
-					else if ( strcmp(arch, "arm") == 0 )
-						sPreferredArch = CPU_TYPE_ARM;
-					else if ( strcmp(arch, "armv4t") == 0 ) {
-						sPreferredArch = CPU_TYPE_ARM;
-						sPreferredSubArch = CPU_SUBTYPE_ARM_V4T;
+					else {
+						bool found = false;
+						for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
+							if ( strcmp(t->subTypeName,arch) == 0 ) {
+								sPreferredArch = CPU_TYPE_ARM;
+								sPreferredSubArch = t->subType;
+								found = true;
+								break;
+							}
+						}
+						if ( !found )
+							throwf("unknown architecture %s", arch);
 					}
-					else if ( strcmp(arch, "armv5") == 0 ) {
-						sPreferredArch = CPU_TYPE_ARM;
-						sPreferredSubArch = CPU_SUBTYPE_ARM_V5TEJ;
-					}
-					else if ( strcmp(arch, "armv6") == 0 ) {
-						sPreferredArch = CPU_TYPE_ARM;
-						sPreferredSubArch = CPU_SUBTYPE_ARM_V6;
-					}
-					else if ( strcmp(arch, "armv7") == 0 ) {
-						sPreferredArch = CPU_TYPE_ARM;
-						sPreferredSubArch = CPU_SUBTYPE_ARM_V7;
-					}
-					else 
-						throwf("unknown architecture %s", arch);
 				}
 				else if ( strcmp(arg, "-only") == 0 ) {
 					sMatchName = ++i<argc? argv[i]: NULL;

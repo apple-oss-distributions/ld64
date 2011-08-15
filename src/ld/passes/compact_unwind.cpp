@@ -706,6 +706,11 @@ static void getAllUnwindInfos(const ld::Internal& state, std::vector<UnwindEntry
 							assert(fit->binding == ld::Fixup::bindingDirectlyBound);
 							lsda = fit->u.target;
 							break;
+						case ld::Fixup::kindNoneGroupSubordinatePersonality:
+							assert(fit->binding == ld::Fixup::bindingDirectlyBound);
+							personalityPointer = fit->u.target;
+							assert(personalityPointer->section().type() == ld::Section::typeNonLazyPointer);
+							break;
 						default:
 							break;
 					}
@@ -753,16 +758,8 @@ static void getAllUnwindInfos(const ld::Internal& state, std::vector<UnwindEntry
 }
 
 
-
-
-void doPass(const Options& opts, ld::Internal& state)
+static void makeFinalLinkedImageCompactUnwindSection(const Options& opts, ld::Internal& state)
 {
-	//const bool log = false;
-	
-	// only make make __unwind_info in final linked images
-	if ( !opts.needsUnwindInfoSection() )
-		return;
-
 	// walk every atom and gets its unwind info
 	std::vector<UnwindEntry> entries;
 	entries.reserve(64);
@@ -786,6 +783,146 @@ void doPass(const Options& opts, ld::Internal& state)
 		default:
 			assert(0 && "no compact unwind for arch");
 	}	
+}
+
+
+
+template <typename A>
+class CompactUnwindAtom : public ld::Atom {
+public:
+											CompactUnwindAtom(ld::Internal& state,const ld::Atom* funcAtom, 
+															  uint32_t startOffset, uint32_t len, uint32_t cui);
+											~CompactUnwindAtom() {}
+											
+	virtual const ld::File*					file() const					{ return NULL; }
+	virtual bool							translationUnitSource(const char** dir, const char**) const 
+																			{ return false; }
+	virtual const char*						name() const					{ return "compact unwind info"; }
+	virtual uint64_t						size() const					{ return sizeof(macho_compact_unwind_entry<P>); }
+	virtual uint64_t						objectAddress() const			{ return 0; }
+	virtual void							copyRawContent(uint8_t buffer[]) const;
+	virtual void							setScope(Scope)					{ }
+	virtual ld::Fixup::iterator				fixupsBegin() const				{ return (ld::Fixup*)&_fixups[0]; }
+	virtual ld::Fixup::iterator				fixupsEnd()	const 				{ return (ld::Fixup*)&_fixups[_fixups.size()]; }
+
+private:
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
+	
+
+	const ld::Atom*							_atom;
+	const uint32_t							_startOffset;
+	const uint32_t							_len;
+	const uint32_t							_compactUnwindInfo;
+	std::vector<ld::Fixup>					_fixups;
+	
+	static ld::Fixup::Kind					_s_pointerKind;
+	static ld::Fixup::Kind					_s_pointerStoreKind;
+	static ld::Section						_s_section;
+};
+
+
+template <typename A>
+ld::Section CompactUnwindAtom<A>::_s_section("__LD", "__compact_unwind", ld::Section::typeDebug);
+
+template <> ld::Fixup::Kind CompactUnwindAtom<x86>::_s_pointerKind = ld::Fixup::kindStoreLittleEndian32;
+template <> ld::Fixup::Kind CompactUnwindAtom<x86>::_s_pointerStoreKind = ld::Fixup::kindStoreTargetAddressLittleEndian32;
+template <> ld::Fixup::Kind CompactUnwindAtom<x86_64>::_s_pointerKind = ld::Fixup::kindStoreLittleEndian64;
+template <> ld::Fixup::Kind CompactUnwindAtom<x86_64>::_s_pointerStoreKind = ld::Fixup::kindStoreTargetAddressLittleEndian64;
+
+template <typename A>
+CompactUnwindAtom<A>::CompactUnwindAtom(ld::Internal& state,const ld::Atom* funcAtom, uint32_t startOffset,
+										uint32_t len, uint32_t cui)
+	: ld::Atom(_s_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
+				ld::Atom::scopeTranslationUnit, ld::Atom::typeUnclassified, 
+				symbolTableNotIn, false, false, false, ld::Atom::Alignment(0)),
+	_atom(funcAtom), _startOffset(startOffset), _len(len), _compactUnwindInfo(cui)
+{
+	_fixups.push_back(ld::Fixup(macho_compact_unwind_entry<P>::codeStartFieldOffset(), ld::Fixup::k1of3, ld::Fixup::kindSetTargetAddress, funcAtom));
+	_fixups.push_back(ld::Fixup(macho_compact_unwind_entry<P>::codeStartFieldOffset(), ld::Fixup::k2of3, ld::Fixup::kindAddAddend, _startOffset));
+	_fixups.push_back(ld::Fixup(macho_compact_unwind_entry<P>::codeStartFieldOffset(), ld::Fixup::k3of3, _s_pointerKind));
+	// see if atom has subordinate personality function or lsda
+	for (ld::Fixup::iterator fit = funcAtom->fixupsBegin(), end=funcAtom->fixupsEnd(); fit != end; ++fit) {
+		switch ( fit->kind ) {
+			case ld::Fixup::kindNoneGroupSubordinatePersonality:
+				assert(fit->binding == ld::Fixup::bindingsIndirectlyBound);
+				_fixups.push_back(ld::Fixup(macho_compact_unwind_entry<P>::personalityFieldOffset(), ld::Fixup::k1of1, _s_pointerStoreKind, state.indirectBindingTable[fit->u.bindingIndex]));
+				break;
+			case ld::Fixup::kindNoneGroupSubordinateLSDA:
+				assert(fit->binding == ld::Fixup::bindingDirectlyBound);
+				_fixups.push_back(ld::Fixup(macho_compact_unwind_entry<P>::lsdaFieldOffset(), ld::Fixup::k1of1, _s_pointerStoreKind, fit->u.target));
+				break;
+			default:
+				break;
+		}
+	}
+
+}
+
+template <typename A>
+void CompactUnwindAtom<A>::copyRawContent(uint8_t buffer[]) const
+{
+	macho_compact_unwind_entry<P>* buf = (macho_compact_unwind_entry<P>*)buffer;
+	buf->set_codeStart(0);
+	buf->set_codeLen(_len);
+	buf->set_compactUnwindInfo(_compactUnwindInfo);
+	buf->set_personality(0);
+	buf->set_lsda(0);
+}
+
+
+static void makeCompactUnwindAtom(const Options& opts, ld::Internal& state, const ld::Atom* atom, 
+											uint32_t startOffset, uint32_t endOffset, uint32_t cui)
+{
+	switch ( opts.architecture() ) {
+		case CPU_TYPE_X86_64:
+			state.addAtom(*new CompactUnwindAtom<x86_64>(state, atom, startOffset, endOffset-startOffset, cui));
+			break;
+		case CPU_TYPE_I386:
+			state.addAtom(*new CompactUnwindAtom<x86>(state, atom, startOffset, endOffset-startOffset, cui));
+			break;
+	}
+}
+
+static void makeRelocateableCompactUnwindSection(const Options& opts, ld::Internal& state)
+{
+	// can't add CompactUnwindAtom atoms will iterating, so pre-scan
+	std::vector<const ld::Atom*> atomsWithUnwind;
+	for (std::vector<ld::Internal::FinalSection*>::const_iterator sit=state.sections.begin(); sit != state.sections.end(); ++sit) {
+		ld::Internal::FinalSection* sect = *sit;
+		for (std::vector<const ld::Atom*>::iterator ait=sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+			const ld::Atom* atom = *ait;
+			if ( atom->beginUnwind() != atom->endUnwind() ) 
+				atomsWithUnwind.push_back(atom);
+		}
+	}
+	// make one CompactUnwindAtom for each compact unwind range in each atom
+	for (std::vector<const ld::Atom*>::iterator it = atomsWithUnwind.begin(); it != atomsWithUnwind.end(); ++it) {
+		const ld::Atom* atom = *it;
+		uint32_t lastOffset = 0;
+		uint32_t lastCUE = 0;
+		bool first = true;
+		for (ld::Atom::UnwindInfo::iterator uit=atom->beginUnwind(); uit != atom->endUnwind(); ++uit) {
+			if ( !first ) {
+				makeCompactUnwindAtom(opts, state, atom, lastOffset, uit->startOffset, lastCUE);
+			}
+			lastOffset = uit->startOffset;
+			lastCUE = uit->unwindInfo;
+			first = false;
+		}
+		makeCompactUnwindAtom(opts, state, atom, lastOffset, (uint32_t)atom->size(), lastCUE);
+	}
+}
+
+
+void doPass(const Options& opts, ld::Internal& state)
+{
+	if ( opts.outputKind() == Options::kObjectFile )
+		makeRelocateableCompactUnwindSection(opts, state);
+		
+	else if ( opts.needsUnwindInfoSection() ) 
+		makeFinalLinkedImageCompactUnwindSection(opts, state);
 }
 
 

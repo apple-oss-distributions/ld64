@@ -485,7 +485,8 @@ void SymbolTableAtom<A>::addImport(const ld::Atom* atom, StringPoolAtom* pool)
 		&& (atom->combine() == ld::Atom::combineByName) ) {
 			desc |= N_REF_TO_WEAK;
 	}
-	if ( atom->weakImported() )	
+	const ld::dylib::File* dylib = dynamic_cast<const ld::dylib::File*>(atom->file());
+	if ( atom->weakImported() || ((dylib != NULL) && dylib->forcedWeakLinked()) )
 		desc |= N_WEAK_REF;
 	entry.set_n_desc(desc);
 
@@ -1384,8 +1385,12 @@ void SectionRelocationsAtom<x86>::encodeSectionReloc(ld::Internal::FinalSection*
 				else
 					sreloc1->set_r_type(GENERIC_RELOC_SECTDIFF);
 				sreloc1->set_r_address(address);
-				if ( entry.toTarget == entry.inAtom )
-					sreloc1->set_r_value(entry.toTarget->finalAddress()+entry.toAddend);
+				if ( entry.toTarget == entry.inAtom ) {
+					if ( entry.toAddend > entry.toTarget->size() ) 
+						sreloc1->set_r_value(entry.toTarget->finalAddress()+entry.offsetInAtom);
+					else
+						sreloc1->set_r_value(entry.toTarget->finalAddress()+entry.toAddend);
+				}
 				else
 					sreloc1->set_r_value(entry.toTarget->finalAddress());
 				sreloc2->set_r_scattered(true);
@@ -1513,10 +1518,15 @@ void SectionRelocationsAtom<arm>::encodeSectionReloc(ld::Internal::FinalSection*
 				else
 					sreloc1->set_r_type(ARM_RELOC_SECTDIFF);
 				sreloc1->set_r_address(address);
-				if ( entry.toTarget == entry.inAtom )
-					sreloc1->set_r_value(entry.toTarget->finalAddress()+entry.toAddend);
-				else
+				if ( entry.toTarget == entry.inAtom ) {
+					if ( entry.toAddend > entry.toTarget->size() ) 
+						sreloc1->set_r_value(entry.toTarget->finalAddress()+entry.offsetInAtom);
+					else
+						sreloc1->set_r_value(entry.toTarget->finalAddress()+entry.toAddend);
+				}
+				else {
 					sreloc1->set_r_value(entry.toTarget->finalAddress());
+				}
 				sreloc2->set_r_scattered(true);
 				sreloc2->set_r_pcrel(false);
 				sreloc2->set_r_length(2);
@@ -1632,7 +1642,7 @@ void SectionRelocationsAtom<arm>::encodeSectionReloc(ld::Internal::FinalSection*
 						reloc1.set_r_symbolnum(symbolNum);
 						reloc1.set_r_pcrel(false);
 						reloc1.set_r_length(len);
-						reloc1.set_r_extern(false);
+						reloc1.set_r_extern(external);
 						reloc1.set_r_type(ARM_RELOC_HALF);
 						reloc2.set_r_address(otherHalf);  // other half
 						reloc2.set_r_symbolnum(0);
@@ -2393,10 +2403,6 @@ uint32_t IndirectSymbolTableAtom<A>::symIndexOfNonLazyPointerAtom(const ld::Atom
 			default:
 				throw "internal error: unexpected non-lazy pointer binding";
 		}
-		// Special case non-lazy-pointer slot used to point to "dyld_stub_binder"
-		// That slot is never bound using indirect symbol table
-		if ( target == _state.compressedFastBinderProxy )
-			return INDIRECT_SYMBOL_ABS;
 		bool targetIsGlobal = (target->scope() == ld::Atom::scopeGlobal);
 		switch ( target->definition() ) {
 			case ld::Atom::definitionRegular:

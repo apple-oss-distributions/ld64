@@ -1,4 +1,5 @@
 	.text
+	.align 4
 	.globl	_test
 _test:
 #if __i386__

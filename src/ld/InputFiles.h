@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-*
  *
- * Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2009-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -60,7 +60,8 @@ public:
 	// iterates all atoms in initial files
 	bool						forEachInitialAtom(ld::File::AtomHandler&) const;
 	// searches libraries for name
-	bool						searchLibraries(const char* name, bool searchDylibs, bool searchArchives, ld::File::AtomHandler&) const;
+	bool						searchLibraries(const char* name, bool searchDylibs, bool searchArchives,  
+																  bool dataSymbolOnly, ld::File::AtomHandler&) const;
 	// see if any linked dylibs export a weak def of symbol
 	bool						searchWeakDefInDylib(const char* name) const;
 	// copy dylibs to link with in command line order
@@ -81,7 +82,7 @@ public:
 private:
 	void						inferArchitecture(Options& opts, const char** archName);
 	const char*					fileArch(const uint8_t* p, unsigned len);
-	ld::File*					makeFile(const Options::FileInfo& info);
+	ld::File*					makeFile(const Options::FileInfo& info, bool indirectDylib);
 	ld::File*					addDylib(ld::dylib::File* f,        const Options::FileInfo& info, uint64_t mappedLen);
 	ld::File*					addObject(ld::relocatable::File* f, const Options::FileInfo& info, uint64_t mappedLen);
 	ld::File*					addArchive(ld::File* f,             const Options::FileInfo& info, uint64_t mappedLen);

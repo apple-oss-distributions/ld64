@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-*
  *
- * Copyright (c) 2009-2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2009-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -186,7 +186,7 @@ const char* InputFiles::fileArch(const uint8_t* p, unsigned len)
 }
 
 
-ld::File* InputFiles::makeFile(const Options::FileInfo& info)
+ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib)
 {
 	// map in whole file
 	uint64_t len = info.fileLen;
@@ -256,7 +256,7 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info)
 	// see if it is an object file
 	mach_o::relocatable::ParserOptions objOpts;
 	objOpts.architecture		= _options.architecture();
-	objOpts.objSubtypeMustMatch = _options.preferSubArchitecture();
+	objOpts.objSubtypeMustMatch = !_options.allowSubArchitectureMismatches();
 	objOpts.logAllFiles			= _options.logAllFiles();
 	objOpts.convertUnwindInfo	= _options.needsUnwindInfoSection();
 	objOpts.subType				= _options.subArchitecture();
@@ -270,22 +270,27 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info)
 		return this->addObject(objResult, info, len);
 
 	// see if it is a dynamic library
-	ld::dylib::File* dylibResult = mach_o::dylib::parse(p, len, info.path, info.modTime, _options, _nextInputOrdinal, info.options.fBundleLoader);
+	ld::dylib::File* dylibResult = mach_o::dylib::parse(p, len, info.path, info.modTime, _options, _nextInputOrdinal, info.options.fBundleLoader, indirectDylib);
 	if ( dylibResult != NULL ) 
 		return this->addDylib(dylibResult, info, len);
 
 	// see if it is a static library
-	archive::ParserOptions archOpts;
+	::archive::ParserOptions archOpts;
 	archOpts.objOpts				= objOpts;
 	archOpts.forceLoadThisArchive	= info.options.fForceLoad;
 	archOpts.forceLoadAll			= _options.fullyLoadArchives();
 	archOpts.forceLoadObjC			= _options.loadAllObjcObjectsFromArchives();
+	archOpts.objcABI2				= _options.objCABIVersion2POverride();
 	archOpts.verboseLoad			= _options.whyLoad();
 	archOpts.logAllFiles			= _options.logAllFiles();
-	ld::File* archiveResult = archive::parse(p, len, info.path, info.modTime, _nextInputOrdinal, archOpts);
-	if ( archiveResult != NULL ) 
+	ld::archive::File* archiveResult = ::archive::parse(p, len, info.path, info.modTime, _nextInputOrdinal, archOpts);
+	if ( archiveResult != NULL ) {
+		// <rdar://problem/9740166> force loaded archives should be in LD_TRACE
+		if ( (info.options.fForceLoad || _options.fullyLoadArchives()) && _options.traceArchives() ) 
+			logArchive(archiveResult);
 		return this->addArchive(archiveResult, info, len);
-
+	}
+	
 	// does not seem to be any valid linker input file, check LTO misconfiguration problems
 	if ( lto::archName((uint8_t*)p, len) != NULL ) {
 		if ( lto::libLTOisLoaded() ) {
@@ -404,7 +409,7 @@ ld::dylib::File* InputFiles::findDylib(const char* installPath, const char* from
 			if ( strcmp(dit->installName,installPath) == 0 ) {
 				try {
 					Options::FileInfo info = _options.findFile(dit->useInstead);
-					ld::File* reader = this->makeFile(info);
+					ld::File* reader = this->makeFile(info, true);
 					ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(reader);
 					if ( dylibReader != NULL ) {
 						//_installPathToDylibs[strdup(installPath)] = dylibReader;
@@ -434,7 +439,7 @@ ld::dylib::File* InputFiles::findDylib(const char* installPath, const char* from
 		// search for dylib using -F and -L paths
 		Options::FileInfo info = _options.findFileUsingPaths(installPath);
 		try {
-			ld::File* reader = this->makeFile(info);
+			ld::File* reader = this->makeFile(info, true);
 			ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(reader);
 			if ( dylibReader != NULL ) {
 				//assert(_installPathToDylibs.find(installPath) !=  _installPathToDylibs.end());
@@ -465,7 +470,7 @@ void InputFiles::createIndirectDylibs()
 	
 	// keep processing dylibs until no more dylibs are added
 	unsigned long lastMapSize = 0;
-	std::set<ld::dylib::File*>	dylibsProcessed;
+	std::set<ld::dylib::File*>  dylibsProcessed;
 	while ( lastMapSize != _allDylibs.size() ) {
 		lastMapSize = _allDylibs.size();
 		// can't iterator _installPathToDylibs while modifying it, so use temp buffer
@@ -659,7 +664,7 @@ InputFiles::InputFiles(Options& opts, const char** archName)
 	for (std::vector<Options::FileInfo>::const_iterator it = files.begin(); it != files.end(); ++it) {
 		const Options::FileInfo& entry = *it;
 		try {
-			_inputFiles.push_back(this->makeFile(entry));
+			_inputFiles.push_back(this->makeFile(entry, false));
 		}
 		catch (const char* msg) {
 			if ( (strstr(msg, "architecture") != NULL) && !_options.errorOnOtherArchFiles() ) {
@@ -717,7 +722,7 @@ ld::File* InputFiles::addDylib(ld::dylib::File* reader, const Options::FileInfo&
 	}
 	// store options about how dylib will be used in dylib itself
 	if ( info.options.fWeakImport )
-		reader->setWillBeWeakLinked();
+		reader->setForcedWeakLinked();
 	if ( info.options.fReExport )
 		reader->setWillBeReExported();
 	if ( info.options.fUpward ) {
@@ -778,6 +783,7 @@ bool InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler) const
 	}
 	if ( didSomething || true ) {
 		switch ( _options.outputKind() ) {
+			case Options::kStaticExecutable:
 			case Options::kDynamicExecutable:
 				// add implicit __dso_handle label
 				handler.doAtom(DSOHandleAtom::_s_atomExecutable);
@@ -802,11 +808,6 @@ bool InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler) const
 				handler.doAtom(DSOHandleAtom::_s_atomDyld);
 				handler.doAtom(DSOHandleAtom::_s_atomAll);
 				break;
-			case Options::kStaticExecutable:
-				// add implicit __dso_handle label
-				handler.doAtom(DSOHandleAtom::_s_atomExecutable);
-				handler.doAtom(DSOHandleAtom::_s_atomAll);
-				break;
 			case Options::kPreload:
 				// add implicit __mh_preload_header label
 				handler.doAtom(DSOHandleAtom::_s_atomPreload);
@@ -824,7 +825,7 @@ bool InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler) const
 }
 
 
-bool InputFiles::searchLibraries(const char* name, bool searchDylibs, bool searchArchives, ld::File::AtomHandler& handler) const
+bool InputFiles::searchLibraries(const char* name, bool searchDylibs, bool searchArchives, bool dataSymbolOnly, ld::File::AtomHandler& handler) const
 {
 	// check each input file 
 	for (std::vector<ld::File*>::const_iterator it=_inputFiles.begin(); it != _inputFiles.end(); ++it) {
@@ -832,6 +833,7 @@ bool InputFiles::searchLibraries(const char* name, bool searchDylibs, bool searc
 		// if this reader is a static archive that has the symbol we need, pull in all atoms in that module
 		// if this reader is a dylib that exports the symbol we need, have it synthesize an atom for us.
 		ld::dylib::File* dylibFile = dynamic_cast<ld::dylib::File*>(file);
+		ld::archive::File* archiveFile = dynamic_cast<ld::archive::File*>(file);
 		if ( searchDylibs && (dylibFile != NULL) ) {
 			//fprintf(stderr, "searchLibraries(%s), looking in linked %s\n", name, dylibFile->path() );
 			if ( dylibFile->justInTimeforEachAtom(name, handler) ) {
@@ -842,12 +844,22 @@ bool InputFiles::searchLibraries(const char* name, bool searchDylibs, bool searc
 				// else continue search for a non-weak definition
 			}
 		}
-		else if ( searchArchives && (dylibFile == NULL) ) {
-			if ( file->justInTimeforEachAtom(name, handler) ) {
-				if ( _options.traceArchives() ) 
-					logArchive(file);
-				// found definition in static library, done
-				return true;
+		else if ( searchArchives && (archiveFile != NULL) ) {
+			if ( dataSymbolOnly ) {
+				if ( archiveFile->justInTimeDataOnlyforEachAtom(name, handler) ) {
+					if ( _options.traceArchives() ) 
+						logArchive(file);
+					// found data definition in static library, done
+					return true;
+				}
+			}
+			else {
+				if ( archiveFile->justInTimeforEachAtom(name, handler) ) {
+					if ( _options.traceArchives() ) 
+						logArchive(file);
+					// found definition in static library, done
+					return true;
+				}
 			}
 		}
 	}
@@ -898,7 +910,7 @@ bool InputFiles::searchWeakDefInDylib(const char* name) const
 
 void InputFiles::dylibs(ld::Internal& state)
 {
-	bool dylibsOK;
+	bool dylibsOK = false;
 	switch ( _options.outputKind() ) {
 		case Options::kDynamicExecutable:
 		case Options::kDynamicLibrary:

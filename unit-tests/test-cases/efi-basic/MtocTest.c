@@ -12,7 +12,7 @@ int gWhyAreUninitializedGlobalsBad;
 
 void _ModuleEntryPoint(void)
 { 
-  __asm__ __volatile__ ("int $3");  
+  //__asm__ __volatile__ ("int $3");  
 
   LibInit ();
   gWhyAreUninitializedGlobalsBad =1;

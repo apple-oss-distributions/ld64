@@ -7,7 +7,7 @@
 0000 ENSYM 
 0000 BNSYM 
 0000   FUN __Z3fooi
-0000   SOL CWD//header.h
+0000   SOL CWD/header.h
 0000   FUN 
 0000 ENSYM 
 0000    SO 

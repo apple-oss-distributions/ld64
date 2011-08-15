@@ -1,6 +1,7 @@
 
 
     .text
+	.align 4
 
 #if __thumb__
 	.thumb_func _foo
@@ -14,7 +15,7 @@ _foo:
 	blx		_bar
 //	b		_bar
 
-
+	.align 4
 _space1:
 
 #if __thumb2__

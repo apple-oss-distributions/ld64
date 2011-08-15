@@ -33,8 +33,8 @@ all:
 	${CC} ${CCFLAGS} foo.c -dynamiclib -o libfoo.dylib
 	${CC} ${CCFLAGS} bar.c -dynamiclib -o libbar.dylib
 	${CC} ${CCFLAGS} main.c libfoo.dylib libbar.dylib -o main -Wl,-bind_at_load
-	dyldinfo -lazy_bind main | grep "no compressed lazy binding info" | ${FAIL_IF_EMPTY}
-	dyldinfo -bind main | grep _bar | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -lazy_bind main | grep "no compressed lazy binding info" | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -bind main | grep _bar | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:

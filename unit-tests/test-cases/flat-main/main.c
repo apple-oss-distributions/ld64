@@ -30,4 +30,5 @@ int main()
 {
 	foo();
 	fprintf(stdout, "hello\n");
+	return 0;
 }

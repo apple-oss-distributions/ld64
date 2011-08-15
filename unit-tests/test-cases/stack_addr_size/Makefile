@@ -25,7 +25,7 @@ include ${TESTROOT}/include/common.makefile
 
 # Test the ld option -stack_addr and -stack_size used together
 
-ifeq ($(ARCH),armv6)
+ifeq ($(FILEARCH),arm)
 	STACK_ADDR = 0x2C000000
 	STACK_SIZE = 0x05000000
 	STACK_TOP  = 0x27000000
@@ -51,7 +51,12 @@ all:
 	otool -l main | grep -A6 __UNIXSTACK > main.otool
 	grep " vmsize[ ]*${STACK_SIZE}" main.otool | ${FAIL_IF_EMPTY}
 	grep " vmaddr[ ]*${STACK_TOP}" main.otool | ${FAIL_IF_EMPTY}
-	${PASS_IFF_GOOD_MACHO} main
+	${FAIL_IF_BAD_MACHO} main
+	${CC} ${CCFLAGS} -static main.c -o main2 -e _main -nostdlib -Wl,-new_linker -Wl,-stack_size,${STACK_SIZE} -Wl,-stack_addr,${STACK_ADDR}
+	otool -l main2 | grep -A6 __UNIXSTACK > main2.otool
+	grep " vmsize[ ]*${STACK_SIZE}" main2.otool | ${FAIL_IF_EMPTY}
+	grep " vmaddr[ ]*${STACK_TOP}" main2.otool | ${FAIL_IF_EMPTY}
+	${PASS_IFF_GOOD_MACHO} main2
 
 clean:
-	rm -rf main main.otool
+	rm -rf main main.otool main2.otool main2

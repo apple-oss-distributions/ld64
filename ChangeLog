@@ -1,4 +1,403 @@
 
+-------- tagged ld64-127.2
+
+2011-08-15    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9945513> suppress version load command for simulator builds
+
+-------- tagged ld64-127.1
+
+2011-07-26    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9847280> Csu needs to support for armv7 variants
+
+-------- tagged ld64-127
+
+2011-07-26    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9838090> crash with TLS + -dead_strip
+
+2011-07-20    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9778727> ld64-123.2.1/ChangeLog contains internal train names and radar titles
+
+2011-07-17    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9777977> ld crashes with an assertion failure when linking WebKit with LTO
+	
+2011-07-14    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9779759> Personalities missing when using compact unwind
+
+2011-07-13    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9740166> force loaded archives not listed in LD_TRACE
+
+2011-07-05    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9716724> spurious warning: Codegen prevents image from working in dyld shared cache
+
+2011-07-01    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9707126> Fix -classic_linker option
+
+-------- tagged ld64-126.5
+
+2011-06-15    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9618702> ld64-124.6: ld -r introduces duplicate symbols
+	
+2011-06-15    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9610466> loosen check for 32-bit absolute address out of range 
+		
+-------- tagged ld64-126.3.1
+
+2011-06-15    Nick Kledzik    <kledzik@apple.com>
+
+	Update armv7 variants
+
+-------- tagged ld64-126.2
+
+2011-06-13    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9461567> iOS ld -r loses dont-dead-strip attribute on __objc_nlclslist section
+
+2011-06-13    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9231829> LC_ENCRYPTION_INFO size can be wrong
+	
+
+-------- tagged ld64-126.1
+
+2011-06-10    Nick Kledzik    <kledzik@apple.com>
+
+	Add back support for armv7 variants
+
+-------- tagged ld64-126
+
+2011-06-09    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9581690> -ObjC does not work for simulator
+	
+2011-06-09    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9551362> clang ld: bad codegen, pointer diff
+	Added test case: unit-tests/test-cases/weak-def-hidden-and-global
+
+2011-06-03    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9553065> warning then assertion when libSystem.dylib is missing
+
+2011-06-02    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9544194> ld crash with resolver functions
+
+2011-06-01    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7259423> define way for compilers to specify compact unwind info
+	Added test case: unit-tests/test-cases/compact-unwind-basic
+	Updated unwinddump tool to display compact unwind info in .o files
+	
+2011-06-01    Nick Kledzik    <kledzik@apple.com>
+
+	Allow 8612550 (turn ordered zero fill symbols into zero data) to work not just for dyld
+
+2011-06-01    Nick Kledzik    <kledzik@apple.com>
+
+	Remove trailing /. in dwarf source dirs to cannoicalize paths
+
+2011-06-01    Nick Kledzik    <kledzik@apple.com>
+
+	Sort debug notes by output order instead of input order.
+
+2011-06-01    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9537755> remove support for invoking ld_classic in iOS
+
+2011-06-01    Nick Kledzik    <kledzik@apple.com>
+
+	Fix arm branch interworking in -r for armv6
+
+2011-06-01    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9521882> i386 regression with pointer-diff of same pointer
+
+2011-05-27    Nick Kledzik    <kledzik@apple.com>
+
+	Canonicalize dwarf source file dirname to always end in / 
+
+2011-05-27    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9513487> support arm branch interworking in -r mode (use extern relocs)
+
+2011-05-27    Nick Kledzik    <kledzik@apple.com>
+
+	Add -page_align_data_atoms option
+
+2011-05-24    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9292295> align(16384) doesn't produce 16K aligned globals on ARMv7
+
+2011-05-24    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9493908> support arm shims in sections other than __text
+
+2011-05-23    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8750693> ld64 should only install to the platform in iOS
+
+2011-05-19    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9452006> Ld assertion with unusual section order
+
+2011-05-17    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9441273> Linker is not automatically weak loading dylibs when all references are weak
+
+-------- tagged ld64-125.3
+
+2011-05-12    Nick Kledzik    <kledzik@apple.com>
+
+	Fix missing split-seg-info for kindSetTargetImageOffset
+
+2011-05-12    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9420745> Linker crashes with __gcc_except_tab data belonging to no FDE
+
+2011-05-11    Nick Kledzik    <kledzik@apple.com>
+
+	Fix nop padding for arm code
+
+2011-05-05    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9394006> x86_64: cmp of GOT slot loses weak_import bit
+
+-------- tagged ld64-125.2
+
+2011-05-02    Nick Kledzik    <kledzik@apple.com>
+
+	Fix -flat_namespace issue with not all indirect dylibs being processed
+
+2011-04-29    Nick Kledzik    <kledzik@apple.com>
+
+	Fix sign extention on i386 addends of extern vanilla relocs 
+
+2011-04-29    Nick Kledzik    <kledzik@apple.com>
+
+	Don't let -ObjC double load any archive members
+
+2011-04-29    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9356572> better warning about unaligned ARM functions
+
+-------- tagged ld64-125.1
+
+2011-04-28    Nick Kledzik    <kledzik@apple.com>
+
+	Fix sign extention on arm sect-diff relocs so as to not trip rangeCheckAbsolute32() 
+
+-------- tagged ld64-125
+
+2011-04-24    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8866673> the entry point should start out initially undefined
+
+2011-04-24    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/5804214> ld should never have a symbol in the non-lazy indirect symbol table with index 0
+
+2011-04-24    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/6978069> ld adds undefined symbol from .exp file to kext bundle 
+
+2011-04-24    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7664544> Linker typo suggestions should ignore l- and L- symbols
+
+2011-04-24    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7952137> -order_file_statistics warns about syms in multiple .o files even when names in order file are prefixed
+
+2011-04-23    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8642343> warning when a method is overridden in a category in the same link unit
+	Add test case: unit-tests/test-cases/objc-category-warning
+
+2011-04-23    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/7890410> don't let function from archive override a tentative definition
+	Add test case: unit-tests/test-cases/tentative-and-archive-code
+
+2011-04-23    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8822887> x86_64 -- lossy relocation at static link time (push/mov $imm)
+
+2011-04-23    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8989530> Add comment to error message when __ZTV symbols are undefined
+
+2011-04-23    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8995535> obsolete -no_compact_linkedit
+
+2011-04-23    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9281002> sect->sectname() passed to "%s" formats
+
+2011-04-14    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9275707> linking a sub library of libSystem should not warn about common symbols
+
+2011-04-14    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9282815> support movw/movt in static executables
+
+2011-04-12    Nick Kledzik    <kledzik@apple.com>
+
+	Rework ARM subtype handling to be table driven
+
+2011-04-11    Nick Kledzik    <kledzik@apple.com>
+
+	Error if -init or -e function not in image being linked
+
+2011-04-01    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9216420> -static and -stack_addr don't work together
+
+2011-03-31    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9183821> ld assert in LTO mode if libLTO suppresses a weak symbol it should have perserved
+
+-------- tagged ld64-124.1
+
+2011-03-30    Nick Kledzik    <kledzik@apple.com>
+
+	log warning if ld_classic is invoked
+
+2011-03-30    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9209135> Support "-arch arm -force_cpusubtype_ALL" to keep gcc building
+
+-------- tagged ld64-124
+
+2011-03-24    Nick Kledzik    <kledzik@apple.com>
+	
+	<rdar://problem/9144456> make libgcc_s and libSystem work for any link order
+	
+2011-03-18    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8750693> ld64 should only install to the platform in iOS trains
+
+2011-03-18    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9127471> ld64 should build stand-alone and not need libunwind headers
+
+2011-03-18    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9139782> add LC_VERSION_MIN_IPHONEOS to iOS targets, warn on mismatches
+
+2011-03-18    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8836481> Make iOS simulator a real platform with command line versioning
+
+2011-03-15    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8964869> static executables don't get function start information
+
+2011-03-15    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9112113> allow_sub_type_mismatches linker flag broken
+
+2011-03-15    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9106345> Add option to support merging zero fill sections
+	Add test case: unit-tests/test-cases/merge_zero_fill_sections
+
+2011-03-15    Nick Kledzik    <kledzik@apple.com>
+
+	Improve error message about text-relocs caused by direct access to global weak symbols.
+
+2011-03-10    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9116044> ld assert linking armv7 kext bundle on b/bl to external function
+
+-------- tagged ld64-123.10
+
+2011-03-03    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9085618> linking x86_64 causes assert from changes in ld64-123.9
+
+-------- tagged ld64-123.9
+
+2011-03-03    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9055754> movw/movt don't work in dyld shared cache
+
+2011-03-03    Nick Kledzik    <kledzik@apple.com>
+    
+    <rdar://problem/8995525> classic linkedit does not match compact for non-lazy pointers
+
+2011-02-24    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9052679> Support armv7 variants
+
+-------- tagged ld64-123.8
+
+2011-02-10    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/8926992> Switch arm32 kexts to MH_KEXT_BUNDLE
+
+-------- tagged ld64-123.7
+
+2011-02-10    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/8926992> Switch arm32 kexts to MH_KEXT_BUNDLE, if LD_KEXT_BUNDLE is set
+
+2011-01-28    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/8931747> spurious 'found branch-22 without store' warning
+
+-------- tagged ld64-123.6
+
+2011-01-26    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/8904405> crash with arm hi16/lo16 to external symbols
+
+-------- tagged ld64-123.5
+
+2011-01-24    Nick Kledzik    <kledzik@apple.com>
+    
+    <rdar://problem/8910802> dyld synthesized tail call stubs don't always work
+
+-------- tagged ld64-123.4
+
+2011-01-19    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/8866345> __text with >10 alignment should disable close-stub optimization 
+
+2011-01-18    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/8877072> :upper16: / :lower16: not working when targeting thumb functions
+
+-------- tagged ld64-123.3
+
+2010-12-14    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8764917> ld64 making shims when not necessary
+
+2010-12-14    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8760268> Add work around for latest llvm-c/lto.h 
+
+-------- tagged ld64-123.2.1
+
+2011-03-07    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/8955206> enable i386 ASLR
+
+-------- tagged ld64-123.2
+
 2010-12-10    Nick Kledzik    <kledzik@apple.com>
 
 	<rdar://problem/8746980> Man page typo: "dysmutil" under object_path_lto
@@ -71,7 +470,7 @@
 
 2010-11-01    Nick Kledzik    <kledzik@apple.com>
 
-	<rdar://problem/8612861> Durango is missing dof sections for armv7 slice
+	<rdar://problem/8612861> iOS is missing dof sections for armv7 slice
 
 -------- tagged ld64-120.3
 
@@ -394,7 +793,7 @@
 
 2010-08-20    Nick Kledzik    <kledzik@apple.com>
 
-	<rdar://problem/8309595> SWB: ld64-117.1 on Durango8F54: Assertion failed:
+	<rdar://problem/8309595> SWB: ld64-117.1 on 8F54: Assertion failed:
 	UTF16 CFStrings were not coalesced correctly when gcc built the .o files and the
 	last string in the __ustring section only had a single zero byte at the end.
 	
@@ -436,17 +835,17 @@
 
 2010-08-14    Nick Kledzik    <kledzik@apple.com>
 
-	<rdar://problem/8309530> SWB: ld64-117.1 on Durango8F54: Assertion failed: (categoryAtom->size() == Category<A>::size())
+	<rdar://problem/8309530> SWB: ld64-117.1 on 8F54: Assertion failed: (categoryAtom->size() == Category<A>::size())
 	gcc-4.0 uses 'L' labels on categories.  This merges them onto previous data and disable category optimzation
 
 2010-08-14    Nick Kledzik    <kledzik@apple.com>
 
-	<rdar://problem/8309917> SWB: ld64-117.1 on Durango8F54: bad category optimization
+	<rdar://problem/8309917> SWB: ld64-117.1 on 8F54: bad category optimization
 	Disable category optimization for i386 and arm until further testing
 
 2010-08-14    Nick Kledzik    <kledzik@apple.com>
 
-	<rdar://problem/8309608> SWB: ld64-117.1 on Durango8F54: address not in any section
+	<rdar://problem/8309608> SWB: ld64-117.1 on 8F54: address not in any section
 	Handle pointer diff to stub for weak hidden function
 
 2010-08-13    Nick Kledzik    <kledzik@apple.com>
@@ -544,7 +943,7 @@
 
 2010-06-09    Nick Kledzik    <kledzik@apple.com>
 
-	<rdar://problem/8076986> Barolo: 'rebase' makes timestamps invalid/unreadable for GDB
+	<rdar://problem/8076986> 'rebase' makes timestamps invalid/unreadable for GDB
 
 2010-06-09    Nick Kledzik    <kledzik@apple.com>
 

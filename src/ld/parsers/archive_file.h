@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2009-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -35,11 +35,12 @@ struct ParserOptions {
 	bool								forceLoadThisArchive;
 	bool								forceLoadAll;
 	bool								forceLoadObjC;
+	bool								objcABI2;
 	bool								verboseLoad;
 	bool								logAllFiles;
 };
 
-extern ld::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
+extern ld::archive::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
 						const char* path, time_t modTime, uint32_t ordinal, const ParserOptions& opts);
 
 } // namespace archive

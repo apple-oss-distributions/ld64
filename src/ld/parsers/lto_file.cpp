@@ -41,6 +41,9 @@
 #include "macho_relocatable_file.h"
 #include "lto_file.h"
 
+// #defines are a work around for <rdar://problem/8760268>
+#define __STDC_LIMIT_MACROS 1
+#define __STDC_CONSTANT_MACROS 1
 #include "llvm-c/lto.h"
 
 
@@ -249,11 +252,9 @@ bool Parser::validFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type
 		case CPU_TYPE_X86_64:
 			return ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, "x86_64-");
 		case CPU_TYPE_ARM:
-			switch ( subarch ) {
-				case CPU_SUBTYPE_ARM_V6:
-					return ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, "armv6-");
-				case CPU_SUBTYPE_ARM_V7:
-					return ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, "thumbv7-");
+			for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
+				if ( subarch == t->subType )
+					return ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, t->llvmTriplePrefix);
 			}
 			break;
 		case CPU_TYPE_POWERPC:
@@ -274,10 +275,10 @@ const char* Parser::fileKind(const uint8_t* p, uint64_t fileLength)
 			case CPU_TYPE_X86_64:
 				return "x86_64";
 			case CPU_TYPE_ARM:
-				if ( ::lto_module_is_object_file_in_memory_for_target(p, fileLength, "armv6-") )
-					return "armv6";
-				if ( ::lto_module_is_object_file_in_memory_for_target(p, fileLength, "thumbv7-") )
-					return "armv7";
+				for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
+					if ( ::lto_module_is_object_file_in_memory_for_target(p, fileLength, t->llvmTriplePrefix) )
+						return t->subTypeName;
+				}
 				return "arm";
 		}
 		return "unknown bitcode architecture";

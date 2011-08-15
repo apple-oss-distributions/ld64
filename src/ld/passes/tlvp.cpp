@@ -172,14 +172,6 @@ void doPass(const Options& opts, ld::Internal& internal)
 			if ( pos == weakImportMap.end() ) {
 				// target not in weakImportMap, so add
 				weakImportMap[it->targetOfTLV] = it->fixupWithTarget->weakImport;
-				// <rdar://problem/5529626> If only weak_import symbols are used, linker should use LD_LOAD_WEAK_DYLIB
-				const ld::dylib::File* dylib = dynamic_cast<const ld::dylib::File*>(it->targetOfTLV->file());
-				if ( dylib != NULL ) {
-					if ( it->fixupWithTarget->weakImport )
-						(const_cast<ld::dylib::File*>(dylib))->setUsingWeakImportedSymbols();
-					else
-						(const_cast<ld::dylib::File*>(dylib))->setUsingNonWeakImportedSymbols();
-				}
 			}
 			else {
 				// target in weakImportMap, check for weakness mismatch

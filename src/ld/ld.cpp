@@ -103,7 +103,7 @@ private:
 	public:
 							FinalSection(const ld::Section& sect, uint32_t sectionsSeen, bool objFile);
 		static int					sectionComparer(const void* l, const void* r);
-		static const ld::Section&	outputSection(const ld::Section& sect);
+		static const ld::Section&	outputSection(const ld::Section& sect, bool mergeZeroFill);
 		static const ld::Section&	objectOutputSection(const ld::Section& sect, bool makeTentativeDefsReal);
 	private:
 		friend class InternalState;
@@ -119,6 +119,7 @@ private:
 		static ld::Section		_s_TEXT_const;
 		static ld::Section		_s_DATA_nl_symbol_ptr;
 		static ld::Section		_s_DATA_common;
+		static ld::Section		_s_DATA_zerofill;
 	};
 	
 	
@@ -141,6 +142,7 @@ ld::Section	InternalState::FinalSection::_s_TEXT_text( "__TEXT", "__text",  ld::
 ld::Section	InternalState::FinalSection::_s_TEXT_const("__TEXT", "__const", ld::Section::typeUnclassified);
 ld::Section	InternalState::FinalSection::_s_DATA_nl_symbol_ptr("__DATA", "__nl_symbol_ptr", ld::Section::typeNonLazyPointer);
 ld::Section	InternalState::FinalSection::_s_DATA_common("__DATA", "__common", ld::Section::typeZeroFill);
+ld::Section	InternalState::FinalSection::_s_DATA_zerofill("__DATA", "__zerofill", ld::Section::typeZeroFill);
 std::vector<const char*> InternalState::FinalSection::_s_segmentsSeen;
 
 
@@ -168,7 +170,7 @@ InternalState::FinalSection::FinalSection(const ld::Section& sect, uint32_t sect
 	//		this->segmentName(), this->sectionName(), _segmentOrder, _sectionOrder);
 }
 
-const ld::Section& InternalState::FinalSection::outputSection(const ld::Section& sect)
+const ld::Section& InternalState::FinalSection::outputSection(const ld::Section& sect, bool mergeZeroFill)
 {
 	// merge sections in final linked image
 	switch ( sect.type() ) {
@@ -187,6 +189,10 @@ const ld::Section& InternalState::FinalSection::outputSection(const ld::Section&
 				if ( strcmp(sect.sectionName(), "__const_coal") == 0 )
 					return _s_TEXT_const;
 			}
+			break;
+		case ld::Section::typeZeroFill:
+			if ( mergeZeroFill )
+				return _s_DATA_zerofill;
 			break;
 		case ld::Section::typeCode:
 			if ( strcmp(sect.segmentName(), "__TEXT") == 0 ) {
@@ -207,7 +213,10 @@ const ld::Section& InternalState::FinalSection::outputSection(const ld::Section&
 			}
 			break;
 		case ld::Section::typeTentativeDefs:
-			return _s_DATA_common;
+			if ( mergeZeroFill )
+				return _s_DATA_zerofill;
+			else
+				return _s_DATA_common;
 			break;
 			// FIX ME: more 
 		default:
@@ -436,7 +445,7 @@ ld::Internal::FinalSection* InternalState::addAtom(const ld::Atom& atom)
 	switch ( atom.section().type() ) {
 		case ld::Section::typeZeroFill:
 		case ld::Section::typeTentativeDefs:
-			if ( (_options.outputKind() == Options::kDyld) && (atom.symbolTableInclusion() == ld::Atom::symbolTableIn) 
+			if ( (atom.symbolTableInclusion() == ld::Atom::symbolTableIn) 
 					&& (atom.size() <= 512) && (_options.orderedSymbolsCount() != 0) ) {
 				for(Options::OrderedSymbolsIterator it = _options.orderedSymbolsBegin(); it != _options.orderedSymbolsEnd(); ++it) {
 					if ( (it->objectFileName == NULL) && (strcmp(it->symbolName, atom.name()) == 0) ) {
@@ -482,7 +491,7 @@ ld::Internal::FinalSection* InternalState::getFinalSection(const ld::Section& in
 		case Options::kPreload:
 			{
 				// coalesce some sections
-				const ld::Section& outSect = FinalSection::outputSection(inputSection);
+				const ld::Section& outSect = FinalSection::outputSection(inputSection, _options.mergeZeroFill());
 				pos = _sectionInToFinalMap.find(&outSect);
 				if ( pos != _sectionInToFinalMap.end() ) {
 					_sectionInToFinalMap[&inputSection] = pos->second;

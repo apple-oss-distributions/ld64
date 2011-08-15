@@ -27,9 +27,9 @@ include ${TESTROOT}/include/common.makefile
 # Check that ld can remove non-lazy pointers for x86_64
 #
 
-all: all-${ARCH}
+all: all-${FILEARCH}
 
-all-armv6: all-true
+all-arm: all-true
 
 all-ppc: all-true
 

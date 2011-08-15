@@ -35,9 +35,9 @@ run: all
 
 all:
 	${CXX} ${CXXFLAGS} main.cxx -c
-	${FAIL_IF_SUCCESS} ${LD} -arch ${ARCH} -dylib main.o -lSystem -o main 2>main1.fail
+	${FAIL_IF_SUCCESS} ${LD} -arch ${ARCH} -dylib main.o ${LD_SYSROOT} ${LD_NEW_LINKEDIT} -lSystem -o main 2>main1.fail
 	grep __ZN3Foo4doitEv main1.fail | ${FAIL_IF_EMPTY}
-	${FAIL_IF_SUCCESS} ${LD} -arch ${ARCH} -dylib main.o -lSystem -demangle -o main 2>main2.fail
+	${FAIL_IF_SUCCESS} ${LD} -arch ${ARCH} -dylib main.o ${LD_SYSROOT} ${LD_NEW_LINKEDIT} -lSystem -demangle -o main 2>main2.fail
 	grep 'Foo::doit()' main2.fail | ${PASS_IFF_STDIN}
 	
 

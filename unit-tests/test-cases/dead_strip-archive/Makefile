@@ -36,7 +36,7 @@ all:
 	${CC} ${CCFLAGS} foo.c -c -o foo.o
 	${FAIL_IF_BAD_OBJ} foo.o
 	libtool -static foo.o -o libfoo.a
-	${CC} ${CCFLAGS}  main.c -mdynamic-no-pic -Os libfoo.a -dead_strip -o main
+	${CC} ${CCFLAGS}  main.c -Os libfoo.a -dead_strip -o main
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:

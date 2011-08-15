@@ -30,16 +30,13 @@ include ${TESTROOT}/include/common.makefile
 # symbol from a dylib.
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
-LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
-
 run: all
 
 all:
 	${CC} ${CCFLAGS} foo.c -c -o foo.o
 	libtool -static foo.o -o libfoo.a 
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.c -c -o main.o
-	${LLVMGCC} ${CCFLAGS} main.o -o main libfoo.a 
+	${CC} ${CCFLAGS} -flto main.c -c -o main.o
+	${CC} ${CCFLAGS} main.o -o main libfoo.a 
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:

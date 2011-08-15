@@ -29,11 +29,22 @@ SHELL = bash # use bash shell so we can redirect just stderr
 # The point of this test is to build a prebound split-seg library
 #
 
-run: all
+all: all-${ARCH}
 
-all: 
+all-i386: all-32
+all-ppc: all-32
+all-x86_64: all-good
+all-armv6: all-good
+all-armv7: all-good
+
+
+all-good:
+	${PASS_IFF} true
+
+
+all-32: 
 	${CC} ${CCFLAGS} -seg_addr_table address_table -prebind bar.c -dynamiclib -o libbar.dylib -install_name /foo/bar/libbar.dylib
 	${PASS_IFF_GOOD_MACHO} libbar.dylib
 
 clean:
-	rm *.dylib 
+	rm -rf *.dylib 

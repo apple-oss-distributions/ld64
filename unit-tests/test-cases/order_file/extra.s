@@ -1,6 +1,7 @@
 
 
 	.text
+	.align 4
 	
 	.globl _foo1
 _foo1: nop

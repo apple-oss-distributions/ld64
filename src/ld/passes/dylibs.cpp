@@ -72,11 +72,60 @@ void doPass(const Options& opts, ld::Internal& state)
 		// set "willRemoved" bit on any unused explicit when -dead_strip_dylibs is used
 		if ( opts.deadStripDylibs() && !aDylib->providedExportAtom() )
 			aDylib->setWillBeRemoved(true);
-	}
-	
-	
+	}	
 	// remove unused dylibs
 	state.dylibs.erase(std::remove_if(state.dylibs.begin(), state.dylibs.end(), WillBeUsed()), state.dylibs.end());
+	
+	
+	// <rdar://problem/9441273> automatically weak-import dylibs when all symbols from it are weak-imported
+	for (std::vector<ld::Internal::FinalSection*>::iterator sit=state.sections.begin(); sit != state.sections.end(); ++sit) {
+		ld::Internal::FinalSection* sect = *sit;
+		for (std::vector<const ld::Atom*>::iterator ait=sect->atoms.begin();  ait != sect->atoms.end(); ++ait) {
+			const ld::Atom* atom = *ait;
+			const ld::Atom* target = NULL;
+			bool targetIsWeakImport = false;
+			for (ld::Fixup::iterator fit = atom->fixupsBegin(), end=atom->fixupsEnd(); fit != end; ++fit) {
+				if ( fit->firstInCluster() ) 
+					target = NULL;
+				switch ( fit->binding ) {
+					case ld::Fixup::bindingsIndirectlyBound:
+						target = state.indirectBindingTable[fit->u.bindingIndex];
+						targetIsWeakImport = fit->weakImport;
+						break;
+					case ld::Fixup::bindingDirectlyBound:
+						target = fit->u.target;
+						targetIsWeakImport = fit->weakImport;
+						break;
+                    default:
+                        break;   
+				}
+				if ( (target != NULL) && (target->definition() == ld::Atom::definitionProxy) ) {
+					ld::Atom::WeakImportState curWI = target->weakImportState();
+					if ( curWI == ld::Atom::weakImportUnset ) {
+						// first use of this proxy, set weak-import based on this usage
+						(const_cast<ld::Atom*>(target))->setWeakImportState(targetIsWeakImport);
+					}
+					else {
+						// proxy already has weak-importness set, check for weakness mismatch
+						bool curIsWeakImport = (curWI == ld::Atom::weakImportTrue);
+						if ( curIsWeakImport != targetIsWeakImport ) {
+							// found mismatch
+							switch ( opts.weakReferenceMismatchTreatment() ) {
+								case Options::kWeakReferenceMismatchError:
+									throwf("mismatching weak references for symbol: %s", target->name());
+								case Options::kWeakReferenceMismatchWeak:
+									(const_cast<ld::Atom*>(target))->setWeakImportState(true);
+									break;
+								case Options::kWeakReferenceMismatchNonWeak:
+									(const_cast<ld::Atom*>(target))->setWeakImportState(false);
+									break;
+							}
+						}
+					}
+				}
+			}
+		}
+	}
 	
 }
 

@@ -22,7 +22,8 @@
  */
 
 	.text
-
+	.align 4
+	
 _temp:	nop
 		nop
 		

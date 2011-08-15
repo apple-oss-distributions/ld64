@@ -1,7 +1,8 @@
 
 
 			.text
-
+			.align 4
+			
 			.globl _my_weak
 			.weak_def_can_be_hidden _my_weak
 _my_weak:	nop

@@ -6,5 +6,6 @@ int main()
 {
 	fprintf(stdout, "hello\n");
     foo();
+	return 0;
 }
 

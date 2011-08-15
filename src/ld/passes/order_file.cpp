@@ -274,12 +274,24 @@ void Layout::buildNameTable()
 					if ( pos == _nameTable.end() )
 						_nameTable[name] = atom;
 					else {
-						_nameTable[name] = NULL;	// collision, denote with NULL
+						const ld::Atom* existing = _nameTable[name];
+						if ( existing != NULL ) {
+							_nameCollisionAtoms.push_back(existing);
+							_nameTable[name] = NULL;	// collision, denote with NULL
+						}
 						_nameCollisionAtoms.push_back(atom);
 					}
 				}
 			}
 		}
+	}
+	if ( _s_log ) {
+		fprintf(stderr, "buildNameTable() _nameTable:\n");
+		for(NameToAtom::iterator it=_nameTable.begin(); it != _nameTable.end(); ++it)
+			fprintf(stderr, "  %p <- %s\n", it->second, it->first);
+		fprintf(stderr, "buildNameTable() _nameCollisionAtoms:\n");
+		for(std::vector<const ld::Atom*>::iterator it=_nameCollisionAtoms.begin(); it != _nameCollisionAtoms.end(); ++it)
+			fprintf(stderr, "  %p, %s\n", *it, (*it)->name());
 	}
 }
 
@@ -295,13 +307,14 @@ const ld::Atom* Layout::findAtom(const Options::OrderedSymbol& orderedSymbol)
 		}
 		if ( pos->second == NULL ) {
 			// name is in hash table, but atom is NULL, so that means there are duplicates, so we use super slow way
+			if ( ( orderedSymbol.objectFileName == NULL) && _options.printOrderFileStatistics() ) {
+				warning("%s specified in order_file but it exists in multiple .o files. "
+						"Prefix symbol with .o filename in order_file to disambiguate", orderedSymbol.symbolName);
+			}
 			for (std::vector<const ld::Atom*>::iterator it=_nameCollisionAtoms.begin(); it != _nameCollisionAtoms.end(); it++) {
 				const ld::Atom* atom = *it;
 				if ( strcmp(atom->name(), orderedSymbol.symbolName) == 0 ) {
 					if ( matchesObjectFile(atom, orderedSymbol.objectFileName) ) {
-						if ( _options.printOrderFileStatistics() )
-							warning("%s specified in order_file but it exists in multiple .o files. "
-									"Prefix symbol with .o filename in order_file to disambiguate", orderedSymbol.symbolName);
 						return atom;
 					}
 				}

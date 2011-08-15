@@ -1,5 +1,11 @@
 
     .text
+	.align 4
+_junk:
+	  nop
+	  nop
+	  nop
+	  nop
 #if __arm__
 	.syntax unified
 	.thumb_func _mythumb

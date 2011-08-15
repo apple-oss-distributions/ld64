@@ -9,6 +9,7 @@
 */
 	.globl _foo
 	.weak_definition _foo
+	.align 4
 _foo:
 	nop
 	nop
@@ -29,6 +30,7 @@ L3: nop
 	to a jump table
 */
 	.text
+	.align 4
 	.globl _bar
 _bar: nop
 	nop

@@ -35,7 +35,7 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} bar.c -dynamiclib -o libbar.dylib -install_name /usr/lib/libbar.dylib
-	${CC} ${CCFLAGS} foo.c  -dynamiclib -o libfoo.dylib -reexport_library libbar.dylib -sub_library libbar
+	${CC} ${CCFLAGS} foo.c  -dynamiclib -o libfoo.dylib -Wl,-reexport_library,libbar.dylib -sub_library libbar
 	# verify that main gets bar from libbar
 	${CC} ${CCFLAGS} main.c libfoo.dylib -o main -L.
 	nm -m main | grep _bar | grep libbar | ${FAIL_IF_EMPTY}

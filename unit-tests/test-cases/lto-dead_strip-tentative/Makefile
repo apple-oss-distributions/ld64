@@ -27,17 +27,15 @@ include ${TESTROOT}/include/common.makefile
 # <rdar://problem/8708091> Link Time Optimization error with tentative defs and -dead_strip
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
-LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
 
 run: all
 
 all:
-	${LLVMGCC} ${CCFLAGS} --emit-llvm foo.c -c -o foo.o 
-	${LLVMGCC} ${CCFLAGS} --emit-llvm bar.c -c -o bar.o 
-	${LLVMGCC} ${CCFLAGS} --emit-llvm baz.c -c -o baz.o 
-	${LLVMGCC} ${CCFLAGS} main.c -c -o main.o 
-	${LLVMGCC} ${CCFLAGS} main.o foo.o bar.o baz.o -o main -dead_strip
+	${CC} ${CCFLAGS} -flto foo.c -c -o foo.o 
+	${CC} ${CCFLAGS} -flto bar.c -c -o bar.o 
+	${CC} ${CCFLAGS} -flto baz.c -c -o baz.o 
+	${CC} ${CCFLAGS} main.c -c -o main.o 
+	${CC} ${CCFLAGS} main.o foo.o bar.o baz.o -o main -dead_strip
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:

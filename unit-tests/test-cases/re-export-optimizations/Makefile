@@ -29,11 +29,17 @@ include ${TESTROOT}/include/common.makefile
 #
 
 
-run: all
 
-all:
+all: all-${ARCH}
 
-# -sub_library for 10.4
+all-i386: all-new all-old
+all-x86_64: all-new all-old
+all-armv6: all-new 
+all-armv7: all-new 
+
+
+all-old:
+	# -sub_library for 10.4
 	${CC} ${CCFLAGS} -dynamiclib bar.c -o libbar.dylib  -install_name /usr/lib/libbar.dylib -mmacosx-version-min=10.4
 	${FAIL_IF_BAD_MACHO} libbar.dylib
 	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo.dylib -lbar -L. -sub_library libbar -mmacosx-version-min=10.4
@@ -44,16 +50,17 @@ all:
 	${CC} ${CCFLAGS} main.c libfoo.dylib -o main -L. -mmacosx-version-min=10.4
 	otool -L main | grep libbar | ${FAIL_IF_STDIN}
 	
-		
-# -sub_library for 10.5
-	${CC} ${CCFLAGS} -dynamiclib bar.c -o libbar.dylib  -install_name /usr/lib/libbar.dylib -mmacosx-version-min=10.5
+
+all-new:		
+	# -sub_library for 10.5
+	${CC} ${CCFLAGS} -dynamiclib bar.c -o libbar.dylib  -install_name /usr/lib/libbar.dylib 
 	${FAIL_IF_BAD_MACHO} libbar.dylib
-	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo.dylib -lbar -L. -sub_library libbar -mmacosx-version-min=10.5
+	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo.dylib -lbar -L. -sub_library libbar 
 	${FAIL_IF_BAD_MACHO} libfoo.dylib
-	${CC} ${CCFLAGS} main.c -DCALL_BAR libfoo.dylib -o main -L. -mmacosx-version-min=10.5
+	${CC} ${CCFLAGS} main.c -DCALL_BAR libfoo.dylib -o main -L. 
 	otool -L main | grep libbar | ${FAIL_IF_EMPTY}
 	nm -m main | grep _bar | grep libbar | ${FAIL_IF_EMPTY}
-	${CC} ${CCFLAGS} main.c libfoo.dylib -o main -L. -mmacosx-version-min=10.5
+	${CC} ${CCFLAGS} main.c libfoo.dylib -o main -L. 
 	otool -L main | grep libbar | ${FAIL_IF_STDIN}
 	
 			

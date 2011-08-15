@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2009 Apple Inc. All rights reserved.
+# Copyright (c) 2009-2011 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -25,6 +25,7 @@ include ${TESTROOT}/include/common.makefile
 
 #
 # <rdar://problem/7043256> ld64 can not find a -e entry point from an archive
+# <rdar://problem/8866673> "start" and other special symbols should start out initially undefined
 #
 
 run: all
@@ -32,6 +33,7 @@ run: all
 all:
 	${CC} ${CCFLAGS} foo.c -c -o foo.o
 	libtool -static foo.o -o libfoo.a
+	${FAIL_IF_ERROR} ${CC} ${CCFLAGS}  bar.c -Os libfoo.a -o foo -Wl,-e,_foo -nostartfiles
 	${FAIL_IF_ERROR} ${CC} ${CCFLAGS}  bar.c -Os libfoo.a -dead_strip -o foo -Wl,-e,_foo 
 	${PASS_IFF_GOOD_MACHO} foo
 

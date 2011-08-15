@@ -30,6 +30,9 @@ CLASS_NAME_FOO = .objc_class_name_Foo
 ifeq (${ARCH},x86_64)
 	CLASS_NAME_FOO = '_OBJC_CLASS_$$_Foo'
 endif
+ifeq (${FILEARCH},arm)
+	CLASS_NAME_FOO = '_OBJC_CLASS_$$_Foo'
+endif
 
 
 run: all

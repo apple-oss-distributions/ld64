@@ -1,5 +1,6 @@
 
     .text
+	.align 4
 #if __arm__
 	.code 32
 	.align 2

@@ -130,9 +130,10 @@ public:
 	};
 	
 	struct SplitSegInfoEntry {
-						SplitSegInfoEntry(uint64_t a, ld::Fixup::Kind k) : address(a), kind(k) {}
+						SplitSegInfoEntry(uint64_t a, ld::Fixup::Kind k, uint32_t e=0) : address(a), kind(k), extra(e) {}
 		uint64_t		address;
 		ld::Fixup::Kind	kind;
+        uint32_t        extra;
 	};
 	
 private:
@@ -175,7 +176,7 @@ private:
 	uint64_t					addressOf(const ld::Internal& state, const ld::Fixup* fixup, const ld::Atom** target);
 	bool						targetIsThumb(ld::Internal& state, const ld::Fixup* fixup);
 	uint32_t					lazyBindingInfoOffsetForLazyPointerAddress(uint64_t lpAddress);
-	void						copyNoOps(uint8_t* from, uint8_t* to);
+	void						copyNoOps(uint8_t* from, uint8_t* to, bool thumb);
 	bool						isPointerToTarget(ld::Fixup::Kind kind);
 	bool						isPointerFromTarget(ld::Fixup::Kind kind);
 	bool						isPcRelStore(ld::Fixup::Kind kind);
@@ -198,6 +199,8 @@ private:
 	void						rangeCheck16(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
 																							const ld::Fixup* fixup);
 	void						rangeCheckBranch32(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
+																							const ld::Fixup* fixup);
+	void						rangeCheckAbsolute32(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
 																							const ld::Fixup* fixup);
 	void						rangeCheckRIP32(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
 																							const ld::Fixup* fixup);

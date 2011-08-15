@@ -30,9 +30,12 @@ include ${TESTROOT}/include/common.makefile
 # makes them weak/hidden.  Test to make sure that weak/hidden does not leak out.
 #
 
+STRING_LABEL_COUNT = 0
+
 ifeq (${ARCH},x86_64)
 	STRING_LABEL_COUNT = 3
-else
+endif
+ifeq (${ARCH},i386)
 	STRING_LABEL_COUNT = 1
 endif
 
@@ -49,7 +52,7 @@ all:
 	nm -nm foobar.o | grep __cstring | grep "weak private external" | ${FAIL_IF_STDIN}
 	nm -m foobar.o | grep __cstring | wc -l | grep ${STRING_LABEL_COUNT}  | ${FAIL_IF_EMPTY}
 	${CC} ${CCFLAGS} foo.o bar.o -dynamiclib -o libfoobar.dylib
-	nm -m libfoobar.dylib | grep __cstring | wc -l | grep 1  | ${FAIL_IF_EMPTY}
+	nm -m libfoobar.dylib | grep __cstring | wc -l |  egrep '[01]'  | ${FAIL_IF_EMPTY}
 	${PASS_IFF} /usr/bin/true
 
 clean:

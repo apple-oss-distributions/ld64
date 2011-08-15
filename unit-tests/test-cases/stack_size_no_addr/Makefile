@@ -25,10 +25,10 @@ include ${TESTROOT}/include/common.makefile
 
 # Test the ld option -stack_size adds a custom stack segment
 
-ifeq ($(ARCH),armv6)
+ifeq (${FILEARCH},arm)
 	STACK_ADDR = 0x30000000
 	STACK_SIZE = 0x05000000
-	STACK_TOP  = 0x2b000000
+	STACK_TOP  = 0x2a000000
 else
 ifeq (,${findstring 64,$(ARCH)})
 	STACK_ADDR = 0xC0000000

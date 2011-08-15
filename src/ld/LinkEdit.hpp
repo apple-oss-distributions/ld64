@@ -1058,12 +1058,16 @@ private:
 	typedef typename A::P::E					E;
 	typedef typename A::P::uint_t				pint_t;
 
-	void										addSplitSegInfo(uint64_t address, ld::Fixup::Kind k) const;
+	void										addSplitSegInfo(uint64_t address, ld::Fixup::Kind k, uint32_t) const;
 	void										uleb128EncodeAddresses(const std::vector<uint64_t>& locations) const;
 
 	mutable std::vector<uint64_t>				_32bitPointerLocations;
 	mutable std::vector<uint64_t>				_64bitPointerLocations;
 	mutable std::vector<uint64_t>				_ppcHi16Locations;
+	mutable std::vector<uint64_t>				_thumbLo16Locations;
+	mutable std::vector<uint64_t>				_thumbHi16Locations[16];
+	mutable std::vector<uint64_t>				_armLo16Locations;
+	mutable std::vector<uint64_t>				_armHi16Locations[16];
 
 
 	static ld::Section			_s_section;
@@ -1073,7 +1077,7 @@ template <typename A>
 ld::Section SplitSegInfoAtom<A>::_s_section("__LINKEDIT", "__splitSegInfo", ld::Section::typeLinkEdit, true);
 
 template <>
-void SplitSegInfoAtom<x86_64>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind) const
+void SplitSegInfoAtom<x86_64>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind, uint32_t extra) const
 {
 	switch (kind) {
 		case ld::Fixup::kindStoreX86PCRel32:
@@ -1101,7 +1105,7 @@ void SplitSegInfoAtom<x86_64>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind
 }
 
 template <>
-void SplitSegInfoAtom<x86>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind) const
+void SplitSegInfoAtom<x86>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind, uint32_t extra) const
 {
 	switch (kind) {
 		case ld::Fixup::kindStoreLittleEndian32:
@@ -1115,11 +1119,25 @@ void SplitSegInfoAtom<x86>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind ki
 }
 
 template <>
-void SplitSegInfoAtom<arm>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind) const
+void SplitSegInfoAtom<arm>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind, uint32_t extra) const
 {
 	switch (kind) {
 		case ld::Fixup::kindStoreLittleEndian32:
 			_32bitPointerLocations.push_back(address);
+			break;
+        case ld::Fixup::kindStoreARMLow16:
+ 			_armLo16Locations.push_back(address);
+			break;
+       case ld::Fixup::kindStoreThumbLow16: 
+			_thumbLo16Locations.push_back(address);
+			break;
+        case ld::Fixup::kindStoreARMHigh16: 
+            assert(extra < 16);
+			_armHi16Locations[extra].push_back(address);
+			break;
+        case ld::Fixup::kindStoreThumbHigh16: 
+            assert(extra < 16);
+			_thumbHi16Locations[extra].push_back(address);
 			break;
 		default:
 			warning("codegen at address 0x%08llX prevents image from working in dyld shared cache", address);
@@ -1129,7 +1147,7 @@ void SplitSegInfoAtom<arm>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind ki
 
 
 template <>
-void SplitSegInfoAtom<ppc>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind) const
+void SplitSegInfoAtom<ppc>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind, uint32_t extra) const
 {
 	switch (kind) {
 		case ld::Fixup::kindStorePPCPicHigh16AddLow:
@@ -1146,7 +1164,7 @@ void SplitSegInfoAtom<ppc>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind ki
 
 
 template <>
-void SplitSegInfoAtom<ppc64>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind) const
+void SplitSegInfoAtom<ppc64>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind, uint32_t extra) const
 {
 	switch (kind) {
 		case ld::Fixup::kindStorePPCPicHigh16AddLow:
@@ -1192,7 +1210,7 @@ void SplitSegInfoAtom<A>::encode() const
 	// sort into group by pointer adjustment kind
 	std::vector<OutputFile::SplitSegInfoEntry>& info = this->_writer._splitSegInfos;
 	for (std::vector<OutputFile::SplitSegInfoEntry>::const_iterator it = info.begin(); it != info.end(); ++it) {
-		this->addSplitSegInfo(it->address, it->kind);
+		this->addSplitSegInfo(it->address, it->kind, it->extra);
 	}
 
 	// delta compress runs of addresses
@@ -1219,6 +1237,42 @@ void SplitSegInfoAtom<A>::encode() const
 		std::sort(_ppcHi16Locations.begin(), _ppcHi16Locations.end());
 		this->uleb128EncodeAddresses(_ppcHi16Locations);
 		this->_encodedData.append_byte(0); // terminator
+	}
+
+	if ( _thumbLo16Locations.size() != 0 ) {
+		this->_encodedData.append_byte(5);
+		//fprintf(stderr, "type 5:\n");
+		std::sort(_thumbLo16Locations.begin(), _thumbLo16Locations.end());
+		this->uleb128EncodeAddresses(_thumbLo16Locations);
+		this->_encodedData.append_byte(0); // terminator
+	}
+
+	if ( _armLo16Locations.size() != 0 ) {
+		this->_encodedData.append_byte(6);
+		//fprintf(stderr, "type 6:\n");
+		std::sort(_armLo16Locations.begin(), _armLo16Locations.end());
+		this->uleb128EncodeAddresses(_armLo16Locations);
+		this->_encodedData.append_byte(0); // terminator
+	}
+
+	for (uint32_t i=0; i < 16; ++i) {
+		if ( _thumbHi16Locations[i].size() != 0 ) {
+			this->_encodedData.append_byte(16+i);
+			//fprintf(stderr, "type 16+%d:\n", i);
+			std::sort(_thumbHi16Locations[i].begin(), _thumbHi16Locations[i].end());
+			this->uleb128EncodeAddresses(_thumbHi16Locations[i]);
+			this->_encodedData.append_byte(0); // terminator
+		}
+	}
+
+	for (uint32_t i=0; i < 16; ++i) {
+		if ( _armHi16Locations[i].size() != 0 ) {
+			this->_encodedData.append_byte(32+i);
+			//fprintf(stderr, "type 32+%d:\n", i);
+			std::sort(_armHi16Locations[i].begin(), _armHi16Locations[i].end());
+			this->uleb128EncodeAddresses(_armHi16Locations[i]);
+			this->_encodedData.append_byte(0); // terminator
+		}
 	}
 
 	// always add zero byte to mark end

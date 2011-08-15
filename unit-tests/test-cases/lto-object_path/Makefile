@@ -28,13 +28,12 @@ include ${TESTROOT}/include/common.makefile
 # being produced.
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
 
 run: all
 
 all:
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.c -c -o main.o -fvisibility=hidden
-	${LLVMGCC} ${CCFLAGS} main.o -o main -Wl,-object_path_lto,`pwd`/main.tmp.o
+	${CC} ${CCFLAGS} -flto main.c -c -o main.o -fvisibility=hidden
+	${CC} ${CCFLAGS} main.o -o main -Wl,-object_path_lto,`pwd`/main.tmp.o
 	nm main.tmp.o | grep _main | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 	

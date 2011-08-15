@@ -647,6 +647,8 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 				return S_REGULAR | S_ATTR_NO_DEAD_STRIP;
 			else if ( (strncmp(sect->sectionName(), "__objc_superrefs", 16) == 0) && (strcmp(sect->segmentName(), "__DATA") == 0) )
 				return S_REGULAR | S_ATTR_NO_DEAD_STRIP;
+			else if ( (strncmp(sect->sectionName(), "__objc_nlclslist", 16) == 0) && (strcmp(sect->segmentName(), "__DATA") == 0) )
+				return S_REGULAR | S_ATTR_NO_DEAD_STRIP;
 			else
 				return S_REGULAR;
 		case ld::Section::typeCode:
@@ -750,6 +752,8 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 		case ld::Section::typeLastSection:
 			assert(0 && "typeLastSection should not make it to final linked image");
 			return S_REGULAR;
+		case ld::Section::typeDebug:
+			return S_REGULAR | S_ATTR_DEBUG;
 	}
 	return S_REGULAR;
 }
@@ -1013,9 +1017,9 @@ template <typename A>
 uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p) const
 {
 	macho_version_min_command<P>* cmd = (macho_version_min_command<P>*)p;
-	ld::MacVersionMin    macVersion      = _options.macosxVersionMin();
-	ld::IPhoneVersionMin iphoneOSVersion = _options.iphoneOSVersionMin();
-	assert( (macVersion != ld::macVersionUnset) || (iphoneOSVersion != ld::iPhoneVersionUnset) );
+	ld::MacVersionMin macVersion = _options.macosxVersionMin();
+	ld::IOSVersionMin iOSVersion = _options.iOSVersionMin();
+	assert( (macVersion != ld::macVersionUnset) || (iOSVersion != ld::iOSVersionUnset) );
 	if ( macVersion != ld::macVersionUnset ) {
 		cmd->set_cmd(LC_VERSION_MIN_MACOSX);
 		cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
@@ -1025,7 +1029,7 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p) const
 	else {
 		cmd->set_cmd(LC_VERSION_MIN_IPHONEOS);
 		cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
-		cmd->set_version((uint32_t)iphoneOSVersion);
+		cmd->set_version((uint32_t)iOSVersion);
 		cmd->set_reserved(0);
 	}
 	return p + sizeof(macho_version_min_command<P>);
@@ -1177,13 +1181,9 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyDylibLoadCommand(uint8_t* p, const ld
 {
 	uint32_t sz = alignedSize(sizeof(macho_dylib_command<P>) + strlen(dylib->installPath()) + 1);
 	macho_dylib_command<P>* cmd = (macho_dylib_command<P>*)p;
-	// <rdar://problem/5529626> If only weak_import symbols are used, linker should use LD_LOAD_WEAK_DYLIB
-	bool autoWeakLoadDylib = false; // FIX
-							//( (fWriter.fDylibReadersWithWeakImports.count(fInfo.reader) > 0) 
-							//&& (fWriter.fDylibReadersWithNonWeakImports.count(fInfo.reader) == 0) );
 	if ( dylib->willBeLazyLoadedDylib() )
 		cmd->set_cmd(LC_LAZY_LOAD_DYLIB);
-	else if ( dylib->willBeWeakLinked() || autoWeakLoadDylib )
+	else if ( dylib->forcedWeakLinked() || dylib->allSymbolsAreWeakImported() )
 		cmd->set_cmd(LC_LOAD_WEAK_DYLIB);
 	else if ( dylib->willBeReExported() && _options.useSimplifiedDylibReExports() )
 		cmd->set_cmd(LC_REEXPORT_DYLIB);

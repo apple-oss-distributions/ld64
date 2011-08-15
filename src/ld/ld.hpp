@@ -83,8 +83,8 @@ private:
 //
 enum MacVersionMin { macVersionUnset=0, mac10_4=0x000A0400, mac10_5=0x000A0500, 
 						mac10_6=0x000A0600, mac10_7=0x000A0700 };
-enum IPhoneVersionMin { iPhoneVersionUnset=0, iPhone2_0=0x00020000, iPhone3_1=0x00030100, 
-						iPhone4_2=0x00040200, iPhone4_3=0x00040300 };
+enum IOSVersionMin { iOSVersionUnset=0, iOS_2_0=0x00020000, iOS_3_1=0x00030100, 
+						iOS_4_2=0x00040200, iOS_4_3=0x00040300, iOS_5_0=0x00050000 };
  
 namespace relocatable {
 	//
@@ -153,9 +153,8 @@ namespace dylib {
 												: ld::File(pth, modTime, ord), _dylibInstallPath(NULL),
 												_dylibTimeStamp(0), _dylibCurrentVersion(0), _dylibCompatibilityVersion(0),
 												_explicitlyLinked(false), _implicitlyLinked(false),
-												_lazyLoadedDylib(false), _weakLinked(false), _reExported(false),
-												_upward(false), _hasNonWeakImportedSymbols(false), 
-												_hasWeakImportedSymbols(false), _dead(false) { }
+												_lazyLoadedDylib(false), _forcedWeakLinked(false), _reExported(false),
+												_upward(false), _dead(false) { }
 				const char*					installPath() const			{ return _dylibInstallPath; }
 				uint32_t					timestamp() const			{ return _dylibTimeStamp; }
 				uint32_t					currentVersion() const		{ return _dylibCurrentVersion; }
@@ -167,15 +166,13 @@ namespace dylib {
 				// attributes of how dylib will be used when linked
 				void						setWillBeLazyLoadedDylb()		{ _lazyLoadedDylib = true; }
 				bool						willBeLazyLoadedDylib() const	{ return _lazyLoadedDylib; }
-				void						setWillBeWeakLinked()			{ _weakLinked = true; }
-				bool						willBeWeakLinked() const		{ return _weakLinked ||
-															(_hasWeakImportedSymbols && !_hasNonWeakImportedSymbols); }
+				void						setForcedWeakLinked()			{ _forcedWeakLinked = true; }
+				bool						forcedWeakLinked() const		{ return _forcedWeakLinked; }
+															
 				void						setWillBeReExported()			{ _reExported = true; }
 				bool						willBeReExported() const		{ return _reExported; }
 				void						setWillBeUpwardDylib()			{ _upward = true; }
 				bool						willBeUpwardDylib() const		{ return _upward; }
-				void						setUsingNonWeakImportedSymbols(){ _hasNonWeakImportedSymbols = true; }
-				void						setUsingWeakImportedSymbols()   { _hasWeakImportedSymbols = true; }
 				void						setWillBeRemoved(bool value)	{ _dead = value; }
 				bool						willRemoved() const				{ return _dead; }
 				
@@ -187,6 +184,7 @@ namespace dylib {
 		virtual bool						deadStrippable() const = 0;
 		virtual bool						hasWeakDefinition(const char* name) const = 0;
 		virtual bool						hasPublicInstallName() const = 0;
+		virtual bool						allSymbolsAreWeakImported() const = 0;
 	protected:
 		const char*							_dylibInstallPath;
 		uint32_t							_dylibTimeStamp;
@@ -195,15 +193,29 @@ namespace dylib {
 		bool								_explicitlyLinked;
 		bool								_implicitlyLinked;
 		bool								_lazyLoadedDylib;
-		bool								_weakLinked;
+		bool								_forcedWeakLinked;
 		bool								_reExported;
 		bool								_upward;
-		bool								_hasNonWeakImportedSymbols;
-		bool								_hasWeakImportedSymbols;
 		bool								_dead;
 	};
 } // namespace dylib
 
+
+namespace archive {
+	//
+	// ld::archive::File 
+	//
+	// Abstract base class for static libraries read by the linker processes.
+	//
+	class File : public ld::File
+	{
+	public:
+											File(const char* pth, time_t modTime, uint32_t ord)
+												: ld::File(pth, modTime, ord) { }
+		virtual								~File() {}
+		virtual bool						justInTimeDataOnlyforEachAtom(const char* name, AtomHandler&) const = 0;
+	};
+} // namespace archive 
 
 
 //
@@ -220,7 +232,7 @@ public:
 				typeLazyDylibPointer, typeStubHelper, typeInitializerPointers, typeTerminatorPointers,
 				typeStubClose, typeLazyPointerClose, typeAbsoluteSymbols, 
 				typeTLVDefs, typeTLVZeroFill, typeTLVInitialValues, typeTLVInitializerPointers, typeTLVPointers,
-				typeFirstSection, typeLastSection };
+				typeFirstSection, typeLastSection, typeDebug };
 
 
 					Section(const char* sgName, const char* sctName,
@@ -494,6 +506,8 @@ public:
 	enum SymbolTableInclusion { symbolTableNotIn, symbolTableNotInFinalLinkedImages, symbolTableIn,
 								symbolTableInAndNeverStrip, symbolTableInAsAbsolute, 
 								symbolTableInWithRandomAutoStripLabel };
+	enum WeakImportState { weakImportUnset, weakImportTrue, weakImportFalse };
+	
 	struct Alignment { 
 					Alignment(int p2, int m=0) : powerOf2(p2), modulus(m) {}
 		uint8_t		trailingZeros() const { return (modulus==0) ? powerOf2 : __builtin_ctz(modulus); }
@@ -522,7 +536,7 @@ public:
 													_contentType(ct), _symbolTableInclusion(i),
 													_scope(s), _mode(modeSectionOffset), 
 													_overridesADylibsWeakDef(false), _coalescedAway(false),
-													_weakImport(false), _live(false), _machoSection(0)
+													_live(false), _machoSection(0), _weakImportState(weakImportUnset)
 													 {
 													#ifndef NDEBUG
 														switch ( _combine ) {
@@ -551,7 +565,8 @@ public:
 	Alignment								alignment() const			{ return Alignment(_alignmentPowerOf2, _alignmentModulus); }
 	bool									overridesDylibsWeakDef() const	{ return _overridesADylibsWeakDef; }
 	bool									coalescedAway() const		{ return _coalescedAway; }
-	bool									weakImported() const		{ return _weakImport; }
+	bool									weakImported() const		{ return _weakImportState == weakImportTrue; }
+	WeakImportState							weakImportState() const		{ return _weakImportState; }
 	bool									autoHide() const			{ return _autoHide; }
 	bool									live() const				{ return _live; }
 	uint8_t									machoSection() const		{ assert(_machoSection != 0); return _machoSection; }
@@ -562,7 +577,7 @@ public:
 	void									setCombine(Combine c)		{ _combine = c; }
 	void									setOverridesDylibsWeakDef()	{ _overridesADylibsWeakDef = true; }
 	void									setCoalescedAway()			{ _coalescedAway = true; }
-	void									setWeakImported()			{ _weakImport = true; assert(_definition == definitionProxy); }
+	void									setWeakImportState(bool w)	{ assert(_definition == definitionProxy); _weakImportState = ( w ? weakImportTrue : weakImportFalse); }
 	void									setAutoHide()				{ _autoHide = true; }
 	void									setLive()					{ _live = true; }
 	void									setLive(bool value)			{ _live = value; }
@@ -607,7 +622,7 @@ protected:
 													_mode = a._mode;
 													_overridesADylibsWeakDef = a._overridesADylibsWeakDef;
 													_coalescedAway = a._coalescedAway;
-													_weakImport = a._weakImport;
+													_weakImportState = a._weakImportState;
 												}
 
 	const Section *						_section;
@@ -626,9 +641,9 @@ protected:
 	AddressMode							_mode: 2;
 	bool								_overridesADylibsWeakDef : 1;
 	bool								_coalescedAway : 1;
-	bool								_weakImport : 1;
 	bool								_live : 1;
 	unsigned							_machoSection : 8;
+	WeakImportState						_weakImportState : 2;
 };
 
 

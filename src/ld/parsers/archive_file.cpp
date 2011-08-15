@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2005-2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2005-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -31,6 +31,7 @@
 
 #include <vector>
 #include <set>
+#include <map>
 #include <algorithm>
 #include <ext/hash_map>
 
@@ -69,7 +70,7 @@ public:
 };
 
 template <typename A>
-class File : public ld::File
+class File : public ld::archive::File
 {
 public:
 	static bool										validFile(const uint8_t* fileContent, uint64_t fileLength,
@@ -84,13 +85,15 @@ public:
 	virtual bool										justInTimeforEachAtom(const char* name, ld::File::AtomHandler&) const;
 	virtual uint32_t									subFileCount() const  { return _archiveFilelength/sizeof(ar_hdr); }
 	
+	// overrides of ld::archive::File
+	virtual bool										justInTimeDataOnlyforEachAtom(const char* name, ld::File::AtomHandler& handler) const;
+
 private:
 	static bool										validMachOFile(const uint8_t* fileContent, uint64_t fileLength, 
 																	const mach_o::relocatable::ParserOptions& opts);
 	static bool										validLTOFile(const uint8_t* fileContent, uint64_t fileLength, 
 																	const mach_o::relocatable::ParserOptions& opts);
 	static cpu_type_t								architecture();
-
 
 	class Entry : ar_hdr
 	{
@@ -116,8 +119,12 @@ private:
 	typedef typename A::P							P;
 	typedef typename A::P::E						E;
 
+	struct MemberState { ld::relocatable::File* file; bool logged; bool loaded; };
+	
+	typedef std::map<const class Entry*, MemberState> MemberToStateMap;
+
 	const struct ranlib*							ranlibHashSearch(const char* name) const;
-	ld::relocatable::File*							makeObjectFileForMember(const Entry* member) const;
+	MemberState&									makeObjectFileForMember(const Entry* member) const;
 	bool											memberHasObjCCategories(const Entry* member) const;
 	void											dumpTableOfContents();
 	void											buildHashTable();
@@ -127,12 +134,12 @@ private:
 	const struct ranlib*							_tableOfContents;
 	uint32_t										_tableOfContentCount;
 	const char*										_tableOfContentStrings;
-	mutable std::vector<ld::relocatable::File*>		_instantiatedFiles;
-	mutable std::set<const class Entry*>			_instantiatedEntries;
+	mutable MemberToStateMap						_instantiatedEntries;
 	NameToEntryMap									_hashTable;
 	const bool										_forceLoadAll;
 	const bool										_forceLoadObjC;
 	const bool										_forceLoadThis;
+	const bool										_objc2ABI;
 	const bool										_verboseLoad;
 	const bool										_logAllFiles;
 	const mach_o::relocatable::ParserOptions		_objOpts;
@@ -266,11 +273,11 @@ bool File<A>::validFile(const uint8_t* fileContent, uint64_t fileLength, const m
 template <typename A>
 File<A>::File(const uint8_t fileContent[], uint64_t fileLength, const char* pth, time_t modTime, 
 					uint32_t ord, const ParserOptions& opts)
- : ld::File(strdup(pth), modTime, ord),
+ : ld::archive::File(strdup(pth), modTime, ord),
 	_archiveFileContent(fileContent), _archiveFilelength(fileLength), 
 	_tableOfContents(NULL), _tableOfContentCount(0), _tableOfContentStrings(NULL), 
 	_forceLoadAll(opts.forceLoadAll), _forceLoadObjC(opts.forceLoadObjC), 
-	_forceLoadThis(opts.forceLoadThisArchive), _verboseLoad(opts.verboseLoad), 
+	_forceLoadThis(opts.forceLoadThisArchive), _objc2ABI(opts.objcABI2), _verboseLoad(opts.verboseLoad), 
 	_logAllFiles(opts.logAllFiles), _objOpts(opts.objOpts)
 {
 	if ( strncmp((const char*)fileContent, "!<arch>\n", 8) != 0 )
@@ -297,8 +304,14 @@ File<A>::File(const uint8_t fileContent[], uint64_t fileLength, const char* pth,
 template <>
 bool File<x86>::memberHasObjCCategories(const Entry* member) const
 {
-	// i386 uses ObjC1 ABI which has .objc_category* global symbols
-	return false;
+	if ( _objc2ABI ) {	
+		// i386 for iOS simulator uses ObjC2 which has no global symbol for categories
+		return mach_o::relocatable::hasObjC2Categories(member->content());
+	}
+	else {
+		// i386 uses ObjC1 ABI which has .objc_category* global symbols
+		return false;
+	}
 }
 
 template <>
@@ -318,8 +331,13 @@ bool File<A>::memberHasObjCCategories(const Entry* member) const
 
 
 template <typename A>
-ld::relocatable::File* File<A>::makeObjectFileForMember(const Entry* member) const
+typename File<A>::MemberState& File<A>::makeObjectFileForMember(const Entry* member) const
 {
+	// in case member was instantiated earlier but not needed yet
+	typename MemberToStateMap::iterator pos = _instantiatedEntries.find(member);
+	if ( pos != _instantiatedEntries.end() )
+		return pos->second;
+
 	const char* memberName = member->name();
 	char memberPath[strlen(this->path()) + strlen(memberName)+4];
 	strcpy(memberPath, this->path());
@@ -340,14 +358,20 @@ ld::relocatable::File* File<A>::makeObjectFileForMember(const Entry* member) con
 		ld::relocatable::File* result = mach_o::relocatable::parse(member->content(), member->contentSize(), 
 																	mPath, member->modificationTime(), 
 																	this->ordinal() + memberIndex, _objOpts);
-		if ( result != NULL )
-			return result;
+		if ( result != NULL ) {
+			MemberState state = {result, false, false};
+			_instantiatedEntries[member] = state;
+			return _instantiatedEntries[member];
+		}
 		// see if member is llvm bitcode file
 		result = lto::parse(member->content(), member->contentSize(), 
 								mPath, member->modificationTime(), this->ordinal() + memberIndex, 
 								_objOpts.architecture, _objOpts.subType, _logAllFiles);
-		if ( result != NULL )
-			return result;
+		if ( result != NULL ) {
+			MemberState state = {result, false, false};
+			_instantiatedEntries[member] = state;
+			return _instantiatedEntries[member];
+		}
 			
 		throwf("archive member '%s' with length %d is not mach-o or llvm bitcode", memberName, member->contentSize());
 	}
@@ -369,14 +393,16 @@ bool File<A>::forEachAtom(ld::File::AtomHandler& handler) const
 			const char* memberName = p->name();
 			if ( (p==start) && ((strcmp(memberName, SYMDEF_SORTED) == 0) || (strcmp(memberName, SYMDEF) == 0)) )
 				continue;
+			MemberState& state = this->makeObjectFileForMember(p);
 			if ( _verboseLoad ) {
 				if ( _forceLoadThis )
 					printf("-force_load forced load of %s(%s)\n", this->path(), memberName);
 				else
 					printf("-all_load forced load of %s(%s)\n", this->path(), memberName);
+				state.logged = true;
 			}
-			ld::relocatable::File* file = this->makeObjectFileForMember(p);
-			didSome |= file->forEachAtom(handler);
+			didSome |= state.file->forEachAtom(handler);
+			state.loaded = true;
 		}
 	}
 	else if ( _forceLoadObjC ) {
@@ -384,18 +410,18 @@ bool File<A>::forEachAtom(ld::File::AtomHandler& handler) const
 		for(typename NameToEntryMap::const_iterator it = _hashTable.begin(); it != _hashTable.end(); ++it) {
 			if ( (strncmp(it->first, ".objc_c", 7) == 0) || (strncmp(it->first, "_OBJC_CLASS_$_", 14) == 0) ) {
 				const Entry* member = (Entry*)&_archiveFileContent[E::get32(it->second->ran_off)];
-				if ( _instantiatedEntries.count(member) == 0 ) {
-					if ( _verboseLoad )
-						printf("-ObjC forced load of %s(%s)\n", this->path(), member->name());
-					// only return these atoms once
-					_instantiatedEntries.insert(member);
-					ld::relocatable::File* file = this->makeObjectFileForMember(member);
-					didSome |= file->forEachAtom(handler);
-					_instantiatedFiles.push_back(file);
+				MemberState& state = this->makeObjectFileForMember(member);
+				if ( _verboseLoad && !state.logged ) {
+					printf("-ObjC forced load of %s(%s)\n", this->path(), member->name());
+					state.logged = true;
+				}
+				if ( ! state.loaded ) {
+					didSome |= state.file->forEachAtom(handler);
+					state.loaded = true;
 				}
 			}
 		}
-		// ObjC2 has no symbols in .o files with categories, but not classes, look deeper for those
+		// ObjC2 has no symbols in .o files with categories but not classes, look deeper for those
 		const Entry* const start = (Entry*)&_archiveFileContent[8];
 		const Entry* const end = (Entry*)&_archiveFileContent[_archiveFilelength];
 		for (const Entry* member=start; member < end; member = member->next()) {
@@ -403,13 +429,15 @@ bool File<A>::forEachAtom(ld::File::AtomHandler& handler) const
 			if ( _instantiatedEntries.count(member) == 0 ) {
 				//fprintf(stderr, "checking member %s\n", member->name());
 				if ( this->memberHasObjCCategories(member) ) {
-					if ( _verboseLoad )
+					MemberState& state = this->makeObjectFileForMember(member);
+					if ( _verboseLoad && !state.logged ) {
 						printf("-ObjC forced load of %s(%s)\n", this->path(), member->name());
-					// only return these atoms once
-					_instantiatedEntries.insert(member);
-					ld::relocatable::File* file = this->makeObjectFileForMember(member);
-					didSome |= file->forEachAtom(handler);
-					_instantiatedFiles.push_back(file);
+						state.logged = true;
+					}
+					if ( ! state.loaded ) {
+						didSome |= state.file->forEachAtom(handler);
+						state.loaded = true;
+					}
 				}
 			}
 		}
@@ -428,14 +456,64 @@ bool File<A>::justInTimeforEachAtom(const char* name, ld::File::AtomHandler& han
 	const struct ranlib* result = ranlibHashSearch(name);
 	if ( result != NULL ) {
 		const Entry* member = (Entry*)&_archiveFileContent[E::get32(result->ran_off)];
+		MemberState& state = this->makeObjectFileForMember(member);
 		// only call handler for each member once
-		if ( _instantiatedEntries.count(member) == 0 ) {
-			_instantiatedEntries.insert(member);
-			if ( _verboseLoad ) 
+		if ( ! state.loaded && !state.logged ) {
+			if ( _verboseLoad ) {
 				printf("%s forced load of %s(%s)\n", name, this->path(), member->name());
-			ld::relocatable::File* file = this->makeObjectFileForMember(member);
-			_instantiatedFiles.push_back(file);
-			return file->forEachAtom(handler);
+				state.logged = true;
+			}
+			state.loaded = true;
+			return state.file->forEachAtom(handler);
+		}
+	}
+	//fprintf(stderr, "%s NOT found in archive %s\n", name, this->path());
+	return false;
+}
+
+class CheckIsDataSymbolHandler : public ld::File::AtomHandler
+{
+public:
+					CheckIsDataSymbolHandler(const char* n) : _name(n), _isData(false) {}
+	virtual void	doAtom(const class ld::Atom& atom) {
+						if ( strcmp(atom.name(), _name) == 0 ) {
+							if ( atom.section().type() != ld::Section::typeCode )
+								_isData = true;
+						}
+					}
+	virtual void	doFile(const class ld::File&) {}
+	bool			symbolIsDataDefinition() { return _isData; }
+
+private:
+	const char*		_name;
+	bool			_isData;
+
+};
+
+template <typename A>
+bool File<A>::justInTimeDataOnlyforEachAtom(const char* name, ld::File::AtomHandler& handler) const
+{
+	// in force load case, all members already loaded
+	if ( _forceLoadAll || _forceLoadThis ) 
+		return false;
+	
+	// do a hash search of table of contents looking for requested symbol
+	const struct ranlib* result = ranlibHashSearch(name);
+	if ( result != NULL ) {
+		const Entry* member = (Entry*)&_archiveFileContent[E::get32(result->ran_off)];
+		MemberState& state = this->makeObjectFileForMember(member);
+		// only call handler for each member once
+		if ( ! state.loaded ) {
+			CheckIsDataSymbolHandler checker(name);
+			state.file->forEachAtom(checker);
+			if ( checker.symbolIsDataDefinition() ) {
+				if ( _verboseLoad && !state.logged ) {
+					printf("%s forced load of %s(%s)\n", name, this->path(), member->name());
+					state.logged = true;
+				}
+				state.loaded = true;
+				return state.file->forEachAtom(handler);
+			}
 		}
 	}
 	//fprintf(stderr, "%s NOT found in archive %s\n", name, this->path());
@@ -487,7 +565,7 @@ void File<A>::dumpTableOfContents()
 //
 // main function used by linker to instantiate archive files
 //
-ld::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
+ld::archive::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
 				const char* path, time_t modTime, uint32_t ordinal, const ParserOptions& opts)
 {
 	switch ( opts.objOpts.architecture ) {

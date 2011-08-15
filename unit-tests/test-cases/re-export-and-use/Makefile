@@ -38,14 +38,14 @@ all:
 	${CC} ${CCFLAGS} -dynamiclib baz.c -o libbaz.dylib  
 	# verify uses of symbols from re-exported dylibs have ordinal that allows dyld to search amoung re-exported dylibs 
 	${CC} ${CCFLAGS} -dynamiclib foo.c -DUSE_BAZ -o libfoo2.dylib -Wl,-reexport_library libpub.dylib -Wl,-reexport_library libbar.dylib  -Wl,-reexport_library libbaz.dylib 
-	dyldinfo -bind      libfoo2.dylib | grep _bar | grep this-image | ${FAIL_IF_EMPTY}
-	dyldinfo -lazy_bind libfoo2.dylib | grep _bar | grep this-image | ${FAIL_IF_EMPTY}
-	dyldinfo -bind      libfoo2.dylib | grep _baz | grep this-image | ${FAIL_IF_EMPTY}
-	dyldinfo -lazy_bind libfoo2.dylib | grep _baz | grep this-image | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -bind      libfoo2.dylib | grep _bar | grep this-image | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -lazy_bind libfoo2.dylib | grep _bar | grep this-image | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -bind      libfoo2.dylib | grep _baz | grep this-image | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -lazy_bind libfoo2.dylib | grep _baz | grep this-image | ${FAIL_IF_EMPTY}
 	# verify that if only one non-publc re-exported dylib, don't use magic ordinal
 	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo1.dylib -Wl,-reexport_library libpub.dylib -Wl,-reexport_library libbar.dylib 
-	dyldinfo -bind      libfoo1.dylib | grep _bar | grep this-image | ${FAIL_IF_STDIN}
-	dyldinfo -lazy_bind libfoo1.dylib | grep _bar | grep this-image | ${FAIL_IF_STDIN}
+	${DYLDINFO} -bind      libfoo1.dylib | grep _bar | grep this-image | ${FAIL_IF_STDIN}
+	${DYLDINFO} -lazy_bind libfoo1.dylib | grep _bar | grep this-image | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} libfoo2.dylib
 
 

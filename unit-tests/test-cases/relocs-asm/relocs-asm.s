@@ -126,7 +126,7 @@ L101:
 	
 	.text
 _pointer_diffs:
-	.long _foo-1b
+1:	.long _foo-1b
 	.long _foo+10-1b
 	.long _test_branches-1b
 	.long _test_branches+3-1b
@@ -244,6 +244,12 @@ _arm16tests:
        movt    r0, :upper16:_datahilo16alt+1792
        movw    r0, :lower16:_datahilo16alt+165
        movt    r0, :upper16:_datahilo16alt+165
+       movw    r0, :lower16:_thumbTarget
+       movt    r0, :upper16:_thumbTarget
+       movw    r0, :lower16:_externalTarget
+       movt    r0, :upper16:_externalTarget
+       movw    r0, :lower16:_externalTarget+61447
+       movt    r0, :upper16:_externalTarget+61447
 Lpicbase:
        movw    r0, :lower16:_datahilo16 - Lpicbase
        movt    r0, :upper16:_datahilo16 - Lpicbase
@@ -259,6 +265,8 @@ Lpicbase:
        movt    r0, :upper16:_datahilo16alt+1792 - Lpicbase
        movw    r0, :lower16:_datahilo16alt+165 - Lpicbase
        movt    r0, :upper16:_datahilo16alt+165 - Lpicbase
+       movw    r0, :lower16:_thumbTarget - Lpicbase
+       movt    r0, :upper16:_thumbTarget - Lpicbase
        bx      lr
 	   
 	.code 16
@@ -278,6 +286,12 @@ _thumb16tests:
        movt    r0, :upper16:_datahilo16alt+1792
        movw    r0, :lower16:_datahilo16alt+165
        movt    r0, :upper16:_datahilo16alt+165
+       movw    r0, :lower16:_thumbTarget
+       movt    r0, :upper16:_thumbTarget
+       movw    r0, :lower16:_externalTarget
+       movt    r0, :upper16:_externalTarget
+       movw    r0, :lower16:_externalTarget+61447
+       movt    r0, :upper16:_externalTarget+61447
 Lpicbase2:
        movw    r0, :lower16:_datahilo16 - Lpicbase2
        movt    r0, :upper16:_datahilo16 - Lpicbase2
@@ -293,11 +307,21 @@ Lpicbase2:
        movt    r0, :upper16:_datahilo16alt+1792 - Lpicbase2
        movw    r0, :lower16:_datahilo16alt+165 - Lpicbase2
        movt    r0, :upper16:_datahilo16alt+165 - Lpicbase2
+       movw    r0, :lower16:_thumbTarget - Lpicbase2
+       movt    r0, :upper16:_thumbTarget - Lpicbase2
        bx      lr
-	   
+
+	.code 16
+	.thumb_func _thumbTarget
+_thumbTarget:
+        nop
+        bx  lr
+
 	.data
 _datahilo16:	.long 0
 _datahilo16alt:	.long 0
+
+
 
 #endif
 	
@@ -727,6 +751,9 @@ _b:
 	.long	_external+16
 	.long	_test_weak
 	.long	_test_weak+16
+	.long	Lother - . + 0x4000000
+Lother: 
+	.long	 0
 #elif __ppc64__ || __x86_64__
 	.quad	_test_calls
 	.quad	_test_calls+16
@@ -734,6 +761,9 @@ _b:
 	.quad	_external+16
 	.quad	_test_weak
 	.quad	_test_weak+16
+	.quad	Lother - . + 0x4000000
+Lother: 
+	.quad	 0
 #endif
 
 	# test that reloc sizes are the same

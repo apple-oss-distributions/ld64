@@ -312,7 +312,7 @@ static ld::Atom* makeBranchIsland(const Options& opts, ld::Fixup::Kind kind, int
 		case ld::Fixup::kindStoreTargetAddressARMBranch24:
 		case ld::Fixup::kindStoreTargetAddressThumbBranch22:
 			if ( finalTarget.atom->isThumb() ) {
-				if ( opts.preferSubArchitecture() && opts.subArchitecture() == CPU_SUBTYPE_ARM_V7 ) {
+				if ( opts.preferSubArchitecture() && opts.archSupportsThumb2() ) {
 					return new Thumb2toThumbBranchIslandAtom(name, nextTarget, finalTarget);
 				}
 				else if ( opts.outputSlidable() ) {
@@ -344,7 +344,7 @@ static uint64_t textSizeWhenMightNeedBranchIslands(const Options& opts, bool see
 		case CPU_TYPE_ARM:
 			if ( ! seenThumbBranch )
 				return 32000000;  // ARM can branch +/- 32MB
-			else if ( opts.preferSubArchitecture() && opts.subArchitecture() == CPU_SUBTYPE_ARM_V7 ) 
+			else if ( opts.preferSubArchitecture() && opts.archSupportsThumb2() ) 
 				return 16000000;  // thumb2 can branch +/- 16MB
 			else
 				return  4000000;  // thumb1 can branch +/- 4MB
@@ -365,7 +365,7 @@ static uint64_t maxDistanceBetweenIslands(const Options& opts, bool seenThumbBra
 		case CPU_TYPE_ARM:
 			if ( ! seenThumbBranch )
 				return 30*1024*1024;	// 2MB of branch islands per 32MB
-			else if ( opts.preferSubArchitecture() && opts.subArchitecture() == CPU_SUBTYPE_ARM_V7 ) 
+			else if ( opts.preferSubArchitecture() && opts.archSupportsThumb2() ) 
 				return 14*1024*1024;	// 2MB of branch islands per 16MB
 			else
 				return 3500000;			// 0.5MB of branch islands per 4MB

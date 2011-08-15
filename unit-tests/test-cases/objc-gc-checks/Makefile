@@ -31,18 +31,19 @@ IMAGE_INFO = "__image_info"
 ifeq ($(ARCH),x86_64)
 	IMAGE_INFO = "__objc_imageinfo"
 endif
-ifeq ($(ARCH),armv6)
-	IMAGE_INFO = "__objc_imageinfo"
-endif
 
+test: test-${FILEARCH}
 
+test-i386: test-macosx
+test-x86_64: test-macosx
+test-arm:   test-good
 
 #
 # Validate that the linker catches illegal combinations of .o files 
 # compiled with different GC settings. 
 #
 
-test:
+test-macosx:
 	${CC} ${CCFLAGS} foo.m -c -o foo.o
 	${FAIL_IF_BAD_OBJ} foo.o
 
@@ -127,7 +128,9 @@ test:
 	${CC} ${CCFLAGS} foo.o runtime.c -dynamiclib -o libfoo.dylib 
 	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} bar-gc-only.o runtime.c -dynamiclib libfoo.dylib -o libbar.dylib 2> fail.log
 
+	${PASS_IFF} true
 
+test-good:
 	${PASS_IFF} true
 
 clean:

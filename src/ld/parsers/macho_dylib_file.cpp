@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2005-2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2005-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -146,8 +146,8 @@ public:
 											File(const uint8_t* fileContent, uint64_t fileLength, const char* path,   
 													time_t mTime, uint32_t ordinal, bool linkingFlatNamespace, 
 													bool linkingMainExecutable, bool hoistImplicitPublicDylibs, 
-													ld::MacVersionMin macMin, ld::IPhoneVersionMin iPhoneMin,
-													bool logAllFiles);
+													ld::MacVersionMin macMin, ld::IOSVersionMin iPhoneMin, bool addVers, 
+													bool logAllFiles, const char* installPath, bool indirectDylib);
 	virtual									~File() {}
 
 	// overrides of ld::File
@@ -164,6 +164,7 @@ public:
 	virtual bool							deadStrippable() const		{ return _deadStrippable; }
 	virtual bool							hasPublicInstallName() const{ return _hasPublicInstallName; }
 	virtual bool							hasWeakDefinition(const char* name) const;
+	virtual bool							allSymbolsAreWeakImported() const;
 
 
 protected:
@@ -185,7 +186,7 @@ private:
 	public:
 		bool operator()(const char* left, const char* right) const { return (strcmp(left, right) == 0); }
 	};
-	struct AtomAndWeak { ld::Atom* atom; bool weak; bool tlv; pint_t address; };
+	struct AtomAndWeak { ld::Atom* atom; bool weakDef; bool tlv; pint_t address; };
 	typedef __gnu_cxx::hash_map<const char*, AtomAndWeak, __gnu_cxx::hash<const char*>, CStringEquals> NameToAtomMap;
 	typedef __gnu_cxx::hash_set<const char*, __gnu_cxx::hash<const char*>, CStringEquals>  NameSet;
 
@@ -204,7 +205,8 @@ private:
 	static const char*							objCInfoSectionName();
 	
 	const ld::MacVersionMin						_macVersionMin;
-	const ld::IPhoneVersionMin					_iPhoneVersionMin;
+	const ld::IOSVersionMin						_iOSVersionMin;
+	const bool									_addVersionLoadCommand;
 	bool										_linkingFlat;
 	bool										_implicitlyLinkPublicDylibs;
 	ld::File::ObjcConstraint					_objcContraint;
@@ -240,9 +242,10 @@ template <typename A> const char* File<A>::objCInfoSectionName() { return "__ima
 template <typename A>
 File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, time_t mTime, uint32_t ord,
 				bool linkingFlatNamespace, bool linkingMainExecutable, bool hoistImplicitPublicDylibs,
-				ld::MacVersionMin macMin, ld::IPhoneVersionMin iPhoneMin, bool logAllFiles)
+				ld::MacVersionMin macMin, ld::IOSVersionMin iOSMin, bool addVers,
+				bool logAllFiles, const char* targetInstallPath, bool indirectDylib)
 	: ld::dylib::File(strdup(pth), mTime, ord), 
-	_macVersionMin(macMin), _iPhoneVersionMin(iPhoneMin), 
+	_macVersionMin(macMin), _iOSVersionMin(iOSMin), _addVersionLoadCommand(addVers), 
 	_linkingFlat(linkingFlatNamespace), _implicitlyLinkPublicDylibs(hoistImplicitPublicDylibs),
 	_objcContraint(ld::File::objcConstraintNone),
 	_importProxySection("__TEXT", "__import", ld::Section::typeImportProxies, true),
@@ -322,6 +325,14 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 			case LC_SUB_CLIENT:
 				_allowableClients.push_back(strdup(((macho_sub_client_command<P>*)cmd)->client()));
 				break;
+			case LC_VERSION_MIN_MACOSX:
+				if ( _addVersionLoadCommand && !indirectDylib && (_iOSVersionMin != ld::iOSVersionUnset) )
+					warning("building for iOS, but linking against dylib built for MacOSX: %s", pth);
+				break;
+			case LC_VERSION_MIN_IPHONEOS:
+				if ( _addVersionLoadCommand && !indirectDylib && (_macVersionMin != ld::macVersionUnset) )
+					warning("building for MacOSX, but linking against dylib built for iOS: %s", pth);
+				break;
 			case macho_segment_command<P>::CMD:
 				// check for Objective-C info
 				if ( strcmp(((macho_segment_command<P>*)cmd)->segname(), objCInfoSegmentName()) == 0 ) {
@@ -381,7 +392,8 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 					entry.path = strdup(((macho_dylib_command<P>*)cmd)->name());
 					entry.dylib = NULL;
 					entry.reExport = (cmd->cmd() == LC_REEXPORT_DYLIB);
-					_dependentDylibs.push_back(entry);
+					if ( (targetInstallPath == NULL) || (strcmp(targetInstallPath, entry.path) != 0) )
+						_dependentDylibs.push_back(entry);
 					break;
 			}
 			cmd = (const macho_load_command<P>*)(((char*)cmd)+cmd->cmdsize());
@@ -546,8 +558,8 @@ void File<A>::addSymbol(const char* name, bool weakDef, bool tlv, pint_t address
 			if ( _macVersionMin != ld::macVersionUnset ) {
 				sprintf(curOSVers, "$os%d.%d$", (_macVersionMin >> 16), ((_macVersionMin >> 8) & 0xFF));
 			}
-			else if ( _iPhoneVersionMin != ld::iPhoneVersionUnset ) {
-				sprintf(curOSVers, "$os%d.%d$", (_iPhoneVersionMin >> 16), ((_iPhoneVersionMin >> 8) & 0xFF));
+			else if ( _iOSVersionMin != ld::iOSVersionUnset ) {
+				sprintf(curOSVers, "$os%d.%d$", (_iOSVersionMin >> 16), ((_iOSVersionMin >> 8) & 0xFF));
 			}
 			else {
 				assert(0 && "targeting neither macosx nor iphoneos");
@@ -580,7 +592,7 @@ void File<A>::addSymbol(const char* name, bool weakDef, bool tlv, pint_t address
 	if ( _ignoreExports.count(name) == 0 ) {
 		AtomAndWeak bucket;
 		bucket.atom = NULL;
-		bucket.weak = weakDef;
+		bucket.weakDef = weakDef;
 		bucket.tlv = tlv;
 		bucket.address = address;
 		if ( _s_logHashtable ) fprintf(stderr, "  adding %s to hash table for %s\n", name, this->path());
@@ -611,7 +623,7 @@ bool File<A>::hasWeakDefinition(const char* name) const
 		
 	typename NameToAtomMap::const_iterator pos = _atoms.find(name);
 	if ( pos != _atoms.end() ) {
-		return pos->second.weak;
+		return pos->second.weakDef;
 	}
 	else {
 		// look in children that I re-export
@@ -620,20 +632,48 @@ bool File<A>::hasWeakDefinition(const char* name) const
 				//fprintf(stderr, "getJustInTimeAtomsFor: %s NOT found in %s, looking in child %s\n", name, this->path(), (*it)->getInstallPath());
 				typename NameToAtomMap::iterator cpos = it->dylib->_atoms.find(name);
 				if ( cpos != it->dylib->_atoms.end() ) 
-					return cpos->second.weak;
+					return cpos->second.weakDef;
 			}
 		}
 	}
 	return false;
 }
 
+
+// <rdar://problem/5529626> If only weak_import symbols are used, linker should use LD_LOAD_WEAK_DYLIB
+template <typename A>
+bool File<A>::allSymbolsAreWeakImported() const
+{
+	bool foundNonWeakImport = false;
+	bool foundWeakImport = false;
+	//fprintf(stderr, "%s:\n", this->path());
+	for (typename NameToAtomMap::const_iterator it = _atoms.begin(); it != _atoms.end(); ++it) {
+		const ld::Atom* atom = it->second.atom;
+		if ( atom != NULL ) {
+			if ( atom->weakImported() )
+				foundWeakImport = true;
+			else
+				foundNonWeakImport = true;
+			//fprintf(stderr, "  weak_import=%d, name=%s\n", atom->weakImported(), it->first);
+		}
+	}
+	
+	// don't automatically weak link dylib with no imports
+	// so at least one weak import symbol and no non-weak-imported symbols must be found
+	return foundWeakImport && !foundNonWeakImport;
+}
+
+
 template <typename A>
 bool File<A>::containsOrReExports(const char* name, bool* weakDef, bool* tlv, pint_t* defAddress) const
 {
-	// check myself
+	if ( _ignoreExports.count(name) != 0 )
+		return false;
+
+// check myself
 	typename NameToAtomMap::iterator pos = _atoms.find(name);
 	if ( pos != _atoms.end() ) {
-		*weakDef = pos->second.weak;
+		*weakDef = pos->second.weakDef;
 		*tlv = pos->second.tlv;
 		*defAddress = pos->second.address;
 		return true;
@@ -660,8 +700,8 @@ bool File<A>::justInTimeforEachAtom(const char* name, ld::File::AtomHandler& han
 	
 	
 	AtomAndWeak bucket;
-	if ( this->containsOrReExports(name, &bucket.weak, &bucket.tlv, &bucket.address) ) {
-		bucket.atom = new ExportAtom<A>(*this, name, bucket.weak, bucket.tlv, bucket.address);
+	if ( this->containsOrReExports(name, &bucket.weakDef, &bucket.tlv, &bucket.address) ) {
+		bucket.atom = new ExportAtom<A>(*this, name, bucket.weakDef, bucket.tlv, bucket.address);
 		_atoms[name] = bucket;
 		_providedAtom = true;
 		if ( _s_logHashtable ) fprintf(stderr, "getJustInTimeAtomsFor: %s found in %s\n", name, this->path());
@@ -789,15 +829,6 @@ void File<A>::assertNoReExportCycles(ReExportChain* prev)
 }
 
 
-struct ParserOptions {
-	bool					linkingFlat;
-	bool					linkingMain;
-	bool					addImplictDylibs;
-	ld::MacVersionMin		macOSMin;
-	ld::IPhoneVersionMin	iphoneOSMin;
-};
-
-
 template <typename A>
 class Parser 
 {
@@ -807,14 +838,17 @@ public:
 	static bool										validFile(const uint8_t* fileContent, bool executableOrDyliborBundle);
 	static ld::dylib::File*							parse(const uint8_t* fileContent, uint64_t fileLength, 
 															const char* path, time_t mTime, 
-															uint32_t ordinal, const Options& opts) {
+															uint32_t ordinal, const Options& opts, bool indirectDylib) {
 															 return new File<A>(fileContent, fileLength, path, mTime,
 																			ordinal, opts.flatNamespace(), 
 																			opts.linkingMainExecutable(),
 																			opts.implicitlyLinkIndirectPublicDylibs(), 
 																			opts.macosxVersionMin(), 
-																			opts.iphoneOSVersionMin(),
-																			opts.logAllFiles());
+																			opts.iOSVersionMin(),
+																			opts.addVersionLoadCommand(),
+																			opts.logAllFiles(), 
+																			opts.installPath(),
+																			indirectDylib);
 														}
 
 };
@@ -962,28 +996,29 @@ bool Parser<arm>::validFile(const uint8_t* fileContent, bool executableOrDylibor
 // main function used by linker to instantiate ld::Files
 //
 ld::dylib::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
-							const char* path, time_t modTime, const Options& opts, uint32_t ordinal, bool bundleLoader)
+							const char* path, time_t modTime, const Options& opts, uint32_t ordinal, 
+							bool bundleLoader, bool indirectDylib)
 {
 	switch ( opts.architecture() ) {
 		case CPU_TYPE_X86_64:
 			if ( Parser<x86_64>::validFile(fileContent, bundleLoader) )
-				return Parser<x86_64>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
+				return Parser<x86_64>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
 		case CPU_TYPE_I386:
 			if ( Parser<x86>::validFile(fileContent, bundleLoader) )
-				return Parser<x86>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
+				return Parser<x86>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
 		case CPU_TYPE_ARM:
 			if ( Parser<arm>::validFile(fileContent, bundleLoader) )
-				return Parser<arm>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
+				return Parser<arm>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
 		case CPU_TYPE_POWERPC:
 			if ( Parser<ppc>::validFile(fileContent, bundleLoader) )
-				return Parser<ppc>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
+				return Parser<ppc>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
 		case CPU_TYPE_POWERPC64:
 			if ( Parser<ppc64>::validFile(fileContent, bundleLoader) )
-				return Parser<ppc64>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
+				return Parser<ppc64>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
 	}
 	return NULL;

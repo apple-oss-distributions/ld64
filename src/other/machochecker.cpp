@@ -73,6 +73,26 @@ static uint64_t read_uleb128(const uint8_t*& p, const uint8_t* end)
 	return result;
 }
 
+
+static int64_t read_sleb128(const uint8_t*& p, const uint8_t* end)
+{
+	int64_t result = 0;
+	int bit = 0;
+	uint8_t byte;
+	do {
+		if (p == end)
+			throwf("malformed sleb128");
+		byte = *p++;
+		result |= ((byte & 0x7f) << bit);
+		bit += 7;
+	} while (byte & 0x80);
+	// sign extend negative numbers
+	if ( (byte & 0x40) != 0 )
+		result |= (-1LL) << bit;
+	return result;
+}
+
+
 template <typename A>
 class MachOChecker
 {
@@ -102,6 +122,7 @@ private:
 	void										checkSection(const macho_segment_command<P>* segCmd, const macho_section<P>* sect);
 	uint8_t										loadCommandSizeMask();
 	void										checkSymbolTable();
+	void										checkInitTerms();
 	void										checkIndirectSymbolTable();
 	void										checkRelocations();
 	void										checkExternalReloation(const macho_relocation_info<P>* reloc);
@@ -110,7 +131,13 @@ private:
 	bool										addressInWritableSegment(pint_t address);
 	bool										hasTextRelocInRange(pint_t start, pint_t end);
 	pint_t										segStartAddress(uint8_t segIndex);
-
+	bool										addressIsRebaseSite(pint_t addr);
+	bool										addressIsBindingSite(pint_t addr);
+	pint_t										getInitialStackPointer(const macho_thread_command<P>*);
+	pint_t										getEntryPoint(const macho_thread_command<P>*);
+	
+	
+	
 	const char*									fPath;
 	const macho_header<P>*						fHeader;
 	uint32_t									fLength;
@@ -126,8 +153,10 @@ private:
 	const macho_relocation_info<P>*				fExternalRelocations;
 	uint32_t									fExternalRelocationsCount;
 	bool										fWriteableSegmentWithAddrOver4G;
+	bool										fSlidableImage;
 	const macho_segment_command<P>*				fFirstSegment;
 	const macho_segment_command<P>*				fFirstWritableSegment;
+	const macho_segment_command<P>*				fTEXTSegment;
 	const macho_dyld_info_command<P>*			fDyldInfo;
 	uint32_t									fSectionCount;
 	std::vector<const macho_segment_command<P>*>fSegments;
@@ -231,11 +260,78 @@ template <> uint8_t MachOChecker<x86>::loadCommandSizeMask()	{ return 0x03; }
 template <> uint8_t MachOChecker<x86_64>::loadCommandSizeMask() { return 0x07; }
 template <> uint8_t MachOChecker<arm>::loadCommandSizeMask()	{ return 0x03; }
 
+
+template <>
+ppc::P::uint_t MachOChecker<ppc>::getInitialStackPointer(const macho_thread_command<ppc::P>* threadInfo)
+{
+	return threadInfo->thread_register(3);
+}
+
+template <>
+ppc64::P::uint_t MachOChecker<ppc64>::getInitialStackPointer(const macho_thread_command<ppc64::P>* threadInfo)
+{
+	return threadInfo->thread_register(3);
+}
+
+template <>
+x86::P::uint_t MachOChecker<x86>::getInitialStackPointer(const macho_thread_command<x86::P>* threadInfo)
+{
+	return threadInfo->thread_register(7);
+}
+
+template <>
+x86_64::P::uint_t MachOChecker<x86_64>::getInitialStackPointer(const macho_thread_command<x86_64::P>* threadInfo)
+{
+	return threadInfo->thread_register(7);
+}
+
+template <>
+arm::P::uint_t MachOChecker<arm>::getInitialStackPointer(const macho_thread_command<arm::P>* threadInfo)
+{
+	return threadInfo->thread_register(13);
+}
+
+
+
+
+
+template <>
+ppc::P::uint_t MachOChecker<ppc>::getEntryPoint(const macho_thread_command<ppc::P>* threadInfo)
+{
+	return threadInfo->thread_register(0);
+}
+
+template <>
+ppc64::P::uint_t MachOChecker<ppc64>::getEntryPoint(const macho_thread_command<ppc64::P>* threadInfo)
+{
+	return threadInfo->thread_register(0);
+}
+
+template <>
+x86::P::uint_t MachOChecker<x86>::getEntryPoint(const macho_thread_command<x86::P>* threadInfo)
+{
+	return threadInfo->thread_register(10);
+}
+
+template <>
+x86_64::P::uint_t MachOChecker<x86_64>::getEntryPoint(const macho_thread_command<x86_64::P>* threadInfo)
+{
+	return threadInfo->thread_register(16);
+}
+
+template <>
+arm::P::uint_t MachOChecker<arm>::getEntryPoint(const macho_thread_command<arm::P>* threadInfo)
+{
+	return threadInfo->thread_register(15);
+}
+
+
 template <typename A>
 MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, const char* path)
  : fHeader(NULL), fLength(fileLength), fStrings(NULL), fSymbols(NULL), fSymbolCount(0), fDynamicSymbolTable(NULL), fIndirectTableCount(0),
  fLocalRelocations(NULL),  fLocalRelocationsCount(0),  fExternalRelocations(NULL),  fExternalRelocationsCount(0),
- fWriteableSegmentWithAddrOver4G(false), fFirstSegment(NULL), fFirstWritableSegment(NULL), fDyldInfo(NULL), fSectionCount(0)
+ fWriteableSegmentWithAddrOver4G(false), fSlidableImage(false), fFirstSegment(NULL), fFirstWritableSegment(NULL), 
+ fTEXTSegment(NULL), fDyldInfo(NULL), fSectionCount(0)
 {
 	// sanity check
 	if ( ! validFile(fileContent) )
@@ -255,6 +351,8 @@ MachOChecker<A>::MachOChecker(const uint8_t* fileContent, uint32_t fileLength, c
 	checkRelocations();
 	
 	checkSymbolTable();
+	
+	checkInitTerms();
 }
 
 
@@ -270,6 +368,18 @@ void MachOChecker<A>::checkMachHeader()
 		throw "invalid bits in mach_header flags";
 	if ( (flags & MH_NO_REEXPORTED_DYLIBS) && (fHeader->filetype() != MH_DYLIB) ) 
 		throw "MH_NO_REEXPORTED_DYLIBS bit of mach_header flags only valid for dylibs";
+	
+	switch ( fHeader->filetype() ) {
+		case MH_EXECUTE:
+			fSlidableImage = ( flags & MH_PIE );
+			break;
+		case MH_DYLIB:
+		case MH_BUNDLE:
+			fSlidableImage = true;
+			break;
+		default:
+			throw "not a mach-o file type supported by this tool";
+	}
 }
 
 template <typename A>
@@ -277,6 +387,7 @@ void MachOChecker<A>::checkLoadCommands()
 {
 	// check that all load commands fit within the load command space file
 	const macho_encryption_info_command<P>* encryption_info = NULL;
+	const macho_thread_command<P>* threadInfo = NULL;
 	const uint8_t* const endOfFile = (uint8_t*)fHeader + fLength;
 	const uint8_t* const endOfLoadCommands = (uint8_t*)fHeader + sizeof(macho_header<P>) + fHeader->sizeofcmds();
 	const uint32_t cmd_count = fHeader->ncmds();
@@ -294,7 +405,6 @@ void MachOChecker<A>::checkLoadCommands()
 		switch ( cmd->cmd()	) {
 			case macho_segment_command<P>::CMD:
 			case LC_SYMTAB:
-			case LC_UNIXTHREAD:
 			case LC_DYSYMTAB:
 			case LC_LOAD_DYLIB:
 			case LC_ID_DYLIB:
@@ -315,6 +425,7 @@ void MachOChecker<A>::checkLoadCommands()
 			case LC_VERSION_MIN_MACOSX:
 			case LC_VERSION_MIN_IPHONEOS:
 			case LC_FUNCTION_STARTS:
+			case LC_RPATH:
 				break;
 			case LC_DYLD_INFO:
 			case LC_DYLD_INFO_ONLY:
@@ -328,6 +439,11 @@ void MachOChecker<A>::checkLoadCommands()
 				if ( fHeader->flags() & MH_NO_REEXPORTED_DYLIBS )
 					throw "MH_NO_REEXPORTED_DYLIBS bit of mach_header flags should not be set in an image with LC_SUB_LIBRARY or LC_SUB_UMBRELLA";
 				break;
+			case LC_UNIXTHREAD:
+				if ( fHeader->filetype() != MH_EXECUTE )
+					throw "LC_UNIXTHREAD can only be used in MH_EXECUTE file types";
+				threadInfo = (macho_thread_command<P>*)cmd;
+				break;
 			default:
 				throwf("load command #%d is an unknown kind 0x%X", i, cmd->cmd());
 		}
@@ -339,6 +455,7 @@ void MachOChecker<A>::checkLoadCommands()
 	std::vector<std::pair<pint_t, pint_t> > segmentAddressRanges;
 	std::vector<std::pair<pint_t, pint_t> > segmentFileOffsetRanges;
 	const macho_segment_command<P>* linkEditSegment = NULL;
+	const macho_segment_command<P>* stackSegment = NULL;
 	for (uint32_t i = 0; i < cmd_count; ++i) {
 		if ( cmd->cmd() == macho_segment_command<P>::CMD ) {
 			const macho_segment_command<P>* segCmd = (const macho_segment_command<P>*)cmd;
@@ -389,32 +506,37 @@ void MachOChecker<A>::checkLoadCommands()
 			if ( endOffset > fLength )
 				throw "segment fileoff+filesize does not fit in file";
 				
-			// keep LINKEDIT segment 
+			// record special segments
 			if ( strcmp(segCmd->segname(), "__LINKEDIT") == 0 )
 				linkEditSegment = segCmd;
+			else if ( strcmp(segCmd->segname(), "__UNIXSTACK") == 0 )
+				stackSegment = segCmd;			
 
 			// cache interesting segments
 			if ( fFirstSegment == NULL )
 				fFirstSegment = segCmd;
+			if ( (fTEXTSegment == NULL) && (strcmp(segCmd->segname(), "__TEXT") == 0) )
+				fTEXTSegment = segCmd;
 			if ( (segCmd->initprot() & VM_PROT_WRITE) != 0 ) {
 				if ( fFirstWritableSegment == NULL )
 					fFirstWritableSegment = segCmd;
 				if ( segCmd->vmaddr() > 0x100000000ULL )
 					fWriteableSegmentWithAddrOver4G = true;
 			}
-	
+				
 			// check section ranges
 			const macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
 			const macho_section<P>* const sectionsEnd = &sectionsStart[segCmd->nsects()];
 			for(const macho_section<P>* sect = sectionsStart; sect < sectionsEnd; ++sect) {
-				// check all sections are within segment
+				// check all non-zero sized sections are within segment
 				if ( sect->addr() < startAddr )
 					throwf("section %s vm address not within segment", sect->sectname());
 				if ( (sect->addr()+sect->size()) > endAddr )
 					throwf("section %s vm address not within segment", sect->sectname());
 				if ( ((sect->flags() & SECTION_TYPE) != S_ZEROFILL) 
 					&& ((sect->flags() & SECTION_TYPE) != S_THREAD_LOCAL_ZEROFILL) 
-					&& (segCmd->filesize() != 0) ) {
+					&& (segCmd->filesize() != 0) 
+					&& (sect->size() != 0) ) {
 					if ( sect->offset() < startOffset )
 						throwf("section %s file offset not within segment", sect->sectname());
 					if ( (sect->offset()+sect->size()) > endOffset )
@@ -430,6 +552,45 @@ void MachOChecker<A>::checkLoadCommands()
 	// verify there was a LINKEDIT segment
 	if ( linkEditSegment == NULL )
 		throw "no __LINKEDIT segment";
+	
+	// verify there was an executable __TEXT segment and load commands are in it
+	if ( fTEXTSegment == NULL )
+		throw "no __TEXT segment";
+	if ( fTEXTSegment->initprot() != (VM_PROT_READ|VM_PROT_EXECUTE) )
+		throw "__TEXT segment does not have r-x init permissions";
+	//if ( fTEXTSegment->maxprot() != (VM_PROT_READ|VM_PROT_EXECUTE|VM_PROT_WRITE) )
+	//	throw "__TEXT segment does not have rwx max permissions";
+	if ( fTEXTSegment->fileoff() != 0 )
+		throw "__TEXT segment does not start at mach_header";
+	if ( fTEXTSegment->filesize() < (sizeof(macho_header<P>)+fHeader->sizeofcmds()) )
+		throw "__TEXT segment smaller than load commands";
+	
+	// verify if custom stack used, that stack is in __UNIXSTACK segment
+	if ( threadInfo != NULL ) {
+		pint_t initialSP = getInitialStackPointer(threadInfo);
+		if ( initialSP != 0 ) {
+			if ( stackSegment == NULL )
+				throw "LC_UNIXTHREAD specifics custom initial stack pointer, but no __UNIXSTACK segment";
+			if ( (initialSP < stackSegment->vmaddr()) || (initialSP > (stackSegment->vmaddr()+stackSegment->vmsize())) )
+				throw "LC_UNIXTHREAD specifics custom initial stack pointer which does not point into __UNIXSTACK segment";
+		}
+	}
+	
+	// verify __UNIXSTACK is zero fill 
+	if ( stackSegment != NULL ) {
+		 if ( (stackSegment->filesize() != 0) || (stackSegment->fileoff() != 0) )
+			throw "__UNIXSTACK is not a zero-fill segment";
+		 if ( stackSegment->vmsize() < 4096 )
+			throw "__UNIXSTACK segment is too small";
+	}
+	
+	// verify entry point is in __TEXT segment 
+	if ( threadInfo != NULL ) {
+		pint_t initialPC = getEntryPoint(threadInfo);
+		if ( (initialPC < fTEXTSegment->vmaddr()) ||  (initialPC >= (fTEXTSegment->vmaddr()+fTEXTSegment->vmsize())) ) 
+			throwf("entry point 0x%0llX is outside __TEXT segment", (long long)initialPC);
+	}
+	
 	
 	// checks for executables
 	bool isStaticExecutable = false;
@@ -583,8 +744,15 @@ void MachOChecker<A>::checkSection(const macho_segment_command<P>* segCmd, const
 			throwf("section offset should be zero for zero-fill section %s", sect->sectname());
 	}
 	
+	// check section's segment name matches segment
+//	if ( strncmp(sect->segname(), segCmd->segname(), 16) != 0 )
+//		throwf("section %s in segment %s has wrong segment name", sect->sectname(), segCmd->segname());
+	
 	// more section tests here
 }
+
+
+
 
 template <typename A>
 void MachOChecker<A>::checkIndirectSymbolTable()
@@ -629,6 +797,8 @@ void MachOChecker<A>::checkIndirectSymbolTable()
 }
 
 
+
+
 template <typename A>
 void MachOChecker<A>::checkSymbolTable()
 {
@@ -671,6 +841,62 @@ void MachOChecker<A>::checkSymbolTable()
 			}
 		}
 	}
+}
+
+
+template <typename A>
+void MachOChecker<A>::checkInitTerms()
+{
+	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((uint8_t*)fHeader + sizeof(macho_header<P>));
+	const uint32_t cmd_count = fHeader->ncmds();
+	const macho_load_command<P>* cmd = cmds;
+	for (uint32_t i = 0; i < cmd_count; ++i) {
+		if ( cmd->cmd() == macho_segment_command<P>::CMD ) {
+			const macho_segment_command<P>* segCmd = (const macho_segment_command<P>*)cmd;
+			const macho_section<P>* const sectionsStart = (macho_section<P>*)((char*)segCmd + sizeof(macho_segment_command<P>));
+			const macho_section<P>* const sectionsEnd = &sectionsStart[segCmd->nsects()];
+			for(const macho_section<P>* sect = sectionsStart; sect < sectionsEnd; ++sect) {
+				// make sure all magic sections that use indirect symbol table fit within it
+				uint32_t count;
+				pint_t* arrayStart;
+				pint_t* arrayEnd;
+				const char* kind = "initializer";
+				switch ( sect->flags() & SECTION_TYPE ) {
+					case S_MOD_TERM_FUNC_POINTERS:
+						kind = "terminator";
+						// fall through
+					case S_MOD_INIT_FUNC_POINTERS:
+						count = sect->size() / sizeof(pint_t);
+						if ( (count*sizeof(pint_t)) != sect->size() )
+							throwf("%s section size is not an even multiple of element size", sect->sectname());
+						if ( (sect->addr() % sizeof(pint_t)) != 0 )
+							throwf("%s section size is not pointer size aligned", sect->sectname());
+						// check each pointer in array points within TEXT
+						arrayStart = (pint_t*)((char*)fHeader + sect->offset());
+						arrayEnd = (pint_t*)((char*)fHeader + sect->offset() + sect->size());
+						for (pint_t* p=arrayStart; p < arrayEnd; ++p) {
+							pint_t pointer = P::getP(*p);
+							if ( (pointer < fTEXTSegment->vmaddr()) ||  (pointer >= (fTEXTSegment->vmaddr()+fTEXTSegment->vmsize())) ) 
+								throwf("%s 0x%08llX points outside __TEXT segment", kind, (long long)pointer);
+						}
+						// check each pointer in array will be rebased and not bound
+						if ( fSlidableImage ) {
+							pint_t sectionBeginAddr = sect->addr();
+							pint_t sectionEndddr = sect->addr() + sect->size();
+							for(pint_t addr = sectionBeginAddr; addr < sectionEndddr; addr += sizeof(pint_t)) {
+								if ( addressIsBindingSite(addr) )
+									throwf("%s at 0x%0llX has binding to external symbol", kind, (long long)addr);
+								if ( ! addressIsRebaseSite(addr) )
+									throwf("%s at 0x%0llX is not rebased", kind, (long long)addr);
+							}
+						}
+						break;
+				}
+			}
+		}
+		cmd = (const macho_load_command<P>*)(((uint8_t*)cmd)+cmd->cmdsize());
+	}
+
 }
 
 
@@ -1052,6 +1278,200 @@ bool MachOChecker<A>::hasTextRelocInRange(pint_t rangeStart, pint_t rangeEnd)
 	}
 }
 
+template <typename A>
+bool MachOChecker<A>::addressIsRebaseSite(pint_t targetAddr)
+{
+	// look at local relocs
+	const macho_relocation_info<P>* const localRelocsEnd = &fLocalRelocations[fLocalRelocationsCount];
+	for (const macho_relocation_info<P>* reloc = fLocalRelocations; reloc < localRelocsEnd; ++reloc) {
+		pint_t relocAddress = reloc->r_address() + this->relocBase();
+		if ( relocAddress == targetAddr )
+			return true;
+	}	
+	// look rebase info
+	if ( fDyldInfo != NULL ) {
+		const uint8_t* p = (uint8_t*)fHeader + fDyldInfo->rebase_off();
+		const uint8_t* end = &p[fDyldInfo->rebase_size()];
+		
+		uint8_t type = 0;
+		uint64_t segOffset = 0;
+		uint32_t count;
+		uint32_t skip;
+		int segIndex;
+		pint_t segStartAddr = 0;
+		pint_t addr;
+		bool done = false;
+		while ( !done && (p < end) ) {
+			uint8_t immediate = *p & REBASE_IMMEDIATE_MASK;
+			uint8_t opcode = *p & REBASE_OPCODE_MASK;
+			++p;
+			switch (opcode) {
+				case REBASE_OPCODE_DONE:
+					done = true;
+					break;
+				case REBASE_OPCODE_SET_TYPE_IMM:
+					type = immediate;
+					break;
+				case REBASE_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+					segIndex = immediate;
+					segStartAddr = segStartAddress(segIndex);
+					segOffset = read_uleb128(p, end);
+					break;
+				case REBASE_OPCODE_ADD_ADDR_ULEB:
+					segOffset += read_uleb128(p, end);
+					break;
+				case REBASE_OPCODE_ADD_ADDR_IMM_SCALED:
+					segOffset += immediate*sizeof(pint_t);
+					break;
+				case REBASE_OPCODE_DO_REBASE_IMM_TIMES:
+					for (int i=0; i < immediate; ++i) {
+						addr = segStartAddr+segOffset;
+						if ( addr == targetAddr )
+							return true;
+						//printf("%-7s %-16s 0x%08llX  %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName);
+						segOffset += sizeof(pint_t);
+					}
+					break;
+				case REBASE_OPCODE_DO_REBASE_ULEB_TIMES:
+					count = read_uleb128(p, end);
+					for (uint32_t i=0; i < count; ++i) {
+						addr = segStartAddr+segOffset;
+						if ( addr == targetAddr )
+							return true;
+						//printf("%-7s %-16s 0x%08llX  %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName);
+						segOffset += sizeof(pint_t);
+					}
+					break;
+				case REBASE_OPCODE_DO_REBASE_ADD_ADDR_ULEB:
+					addr = segStartAddr+segOffset;
+					if ( addr == targetAddr )
+						return true;
+					//printf("%-7s %-16s 0x%08llX  %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName);
+					segOffset += read_uleb128(p, end) + sizeof(pint_t);
+					break;
+				case REBASE_OPCODE_DO_REBASE_ULEB_TIMES_SKIPPING_ULEB:
+					count = read_uleb128(p, end);
+					skip = read_uleb128(p, end);
+					for (uint32_t i=0; i < count; ++i) {
+						addr = segStartAddr+segOffset;
+						if ( addr == targetAddr )
+							return true;
+						//printf("%-7s %-16s 0x%08llX  %s\n", segName, sectionName(segIndex, segStartAddr+segOffset), segStartAddr+segOffset, typeName);
+						segOffset += skip + sizeof(pint_t);
+					}
+					break;
+				default:
+					throwf("bad rebase opcode %d", *p);
+			}
+		}	
+	}
+	return false;
+}
+
+
+template <typename A>
+bool MachOChecker<A>::addressIsBindingSite(pint_t targetAddr)
+{
+	// look at external relocs
+	const macho_relocation_info<P>* const externRelocsEnd = &fExternalRelocations[fExternalRelocationsCount];
+	for (const macho_relocation_info<P>* reloc = fExternalRelocations; reloc < externRelocsEnd; ++reloc) {
+		pint_t relocAddress = reloc->r_address() + this->relocBase();
+		if ( relocAddress == targetAddr )
+			return true;
+	}	
+	// look bind info
+	if ( fDyldInfo != NULL ) {
+		const uint8_t* p = (uint8_t*)fHeader + fDyldInfo->bind_off();
+		const uint8_t* end = &p[fDyldInfo->bind_size()];
+		
+		uint8_t type = 0;
+		uint64_t segOffset = 0;
+		uint32_t count;
+		uint32_t skip;
+		uint8_t flags;
+		const char* symbolName = NULL;
+		int libraryOrdinal = 0;
+		int segIndex;
+		int64_t addend = 0;
+		pint_t segStartAddr = 0;
+		pint_t addr;
+		bool done = false;
+		while ( !done && (p < end) ) {
+			uint8_t immediate = *p & BIND_IMMEDIATE_MASK;
+			uint8_t opcode = *p & BIND_OPCODE_MASK;
+			++p;
+			switch (opcode) {
+				case BIND_OPCODE_DONE:
+					done = true;
+					break;
+				case BIND_OPCODE_SET_DYLIB_ORDINAL_IMM:
+					libraryOrdinal = immediate;
+					break;
+				case BIND_OPCODE_SET_DYLIB_ORDINAL_ULEB:
+					libraryOrdinal = read_uleb128(p, end);
+					break;
+				case BIND_OPCODE_SET_DYLIB_SPECIAL_IMM:
+					// the special ordinals are negative numbers
+					if ( immediate == 0 )
+						libraryOrdinal = 0;
+					else {
+						int8_t signExtended = BIND_OPCODE_MASK | immediate;
+						libraryOrdinal = signExtended;
+					}
+					break;
+				case BIND_OPCODE_SET_SYMBOL_TRAILING_FLAGS_IMM:
+					symbolName = (char*)p;
+					while (*p != '\0')
+						++p;
+					++p;
+					break;
+				case BIND_OPCODE_SET_TYPE_IMM:
+					type = immediate;
+					break;
+				case BIND_OPCODE_SET_ADDEND_SLEB:
+					addend = read_sleb128(p, end);
+					break;
+				case BIND_OPCODE_SET_SEGMENT_AND_OFFSET_ULEB:
+					segIndex = immediate;
+					segStartAddr = segStartAddress(segIndex);
+					segOffset = read_uleb128(p, end);
+					break;
+				case BIND_OPCODE_ADD_ADDR_ULEB:
+					segOffset += read_uleb128(p, end);
+					break;
+				case BIND_OPCODE_DO_BIND:
+					if ( (segStartAddr+segOffset) == targetAddr )
+						return true;
+					segOffset += sizeof(pint_t);
+					break;
+				case BIND_OPCODE_DO_BIND_ADD_ADDR_ULEB:
+					if ( (segStartAddr+segOffset) == targetAddr )
+						return true;
+					segOffset += read_uleb128(p, end) + sizeof(pint_t);
+					break;
+				case BIND_OPCODE_DO_BIND_ADD_ADDR_IMM_SCALED:
+					if ( (segStartAddr+segOffset) == targetAddr )
+						return true;
+					segOffset += immediate*sizeof(pint_t) + sizeof(pint_t);
+					break;
+				case BIND_OPCODE_DO_BIND_ULEB_TIMES_SKIPPING_ULEB:
+					count = read_uleb128(p, end);
+					skip = read_uleb128(p, end);
+					for (uint32_t i=0; i < count; ++i) {
+						if ( (segStartAddr+segOffset) == targetAddr )
+							return true;
+						segOffset += skip + sizeof(pint_t);
+					}
+					break;
+				default:
+					throwf("bad bind opcode %d", *p);
+			}
+		}	
+	}
+	return false;
+}
+
+
 static void check(const char* path)
 {
 	struct stat stat_buf;
@@ -1139,28 +1559,34 @@ static void check(const char* path)
 
 int main(int argc, const char* argv[])
 {
-	try {
-		for(int i=1; i < argc; ++i) {
-			const char* arg = argv[i];
-			if ( arg[0] == '-' ) {
-				if ( strcmp(arg, "-no_content") == 0 ) {
-					
-				}
-				else {
-					throwf("unknown option: %s\n", arg);
-				}
+	bool progress = false;
+	int result = 0;
+	for(int i=1; i < argc; ++i) {
+		const char* arg = argv[i];
+		if ( arg[0] == '-' ) {
+			if ( strcmp(arg, "-progress") == 0 ) {
+				progress = true;
 			}
 			else {
-				check(arg);
+				throwf("unknown option: %s\n", arg);
 			}
 		}
-	}
-	catch (const char* msg) {
-		fprintf(stderr, "machocheck failed: %s\n", msg);
-		return 1;
+		else {
+			bool success = true;
+			try {
+				check(arg);
+			}
+			catch (const char* msg) {
+				fprintf(stderr, "machocheck failed: %s %s\n", arg, msg);
+				result = 1;
+				success = false;
+			}
+			if ( success && progress )
+				printf("ok: %s\n", arg);
+		}
 	}
 	
-	return 0;
+	return result;
 }
 
 

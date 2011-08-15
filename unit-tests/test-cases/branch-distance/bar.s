@@ -1,5 +1,7 @@
 
     .text
+	.align 4
+
 #if __thumb__
 	.thumb_func _bar
 	.code 16

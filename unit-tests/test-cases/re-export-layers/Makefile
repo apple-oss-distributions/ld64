@@ -28,12 +28,28 @@ include ${TESTROOT}/include/common.makefile
 #
 
 
-run: all
 
-all:
+all: all-${ARCH}
+
+all-i386: all-new all-old
+all-x86_64: all-new all-old
+all-armv6: all-new 
+all-armv7: all-new 
 
 
-# -reexport_library for 10.4
+all-new:	
+	# -reexport_library for 10.5 and later
+	${CC} ${CCFLAGS} -dynamiclib baz.c -o libbaz.dylib  
+	${FAIL_IF_BAD_MACHO} libbaz.dylib
+	${CC} ${CCFLAGS} -dynamiclib bar.c -o libbar.dylib -Wl,-reexport_library,libbaz.dylib 
+	${FAIL_IF_BAD_MACHO} libbar.dylib
+	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo.dylib -Wl,-reexport_library,libbar.dylib 
+	${FAIL_IF_BAD_MACHO} libfoo.dylib
+	${CC} ${CCFLAGS} main.c libfoo.dylib -o main
+	${PASS_IFF_GOOD_MACHO} main
+
+all-old:
+	# -reexport_library for 10.4
 	${CC} ${CCFLAGS} -dynamiclib baz.c -o libbaz.dylib  -mmacosx-version-min=10.4
 	${FAIL_IF_BAD_MACHO} libbaz.dylib
 	${CC} ${CCFLAGS} -dynamiclib bar.c -o libbar.dylib -Wl,-reexport_library,libbaz.dylib -mmacosx-version-min=10.4
@@ -43,16 +59,6 @@ all:
 	${CC} ${CCFLAGS} main.c libfoo.dylib -o main
 	${FAIL_IF_BAD_MACHO} main
 
-	
-# -reexport_library for 10.5 and later
-	${CC} ${CCFLAGS} -dynamiclib baz.c -o libbaz.dylib  
-	${FAIL_IF_BAD_MACHO} libbaz.dylib
-	${CC} ${CCFLAGS} -dynamiclib bar.c -o libbar.dylib -Wl,-reexport_library,libbaz.dylib 
-	${FAIL_IF_BAD_MACHO} libbar.dylib
-	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo.dylib -Wl,-reexport_library,libbar.dylib 
-	${FAIL_IF_BAD_MACHO} libfoo.dylib
-	${CC} ${CCFLAGS} main.c libfoo.dylib -o main
-	${PASS_IFF_GOOD_MACHO} main
 
 
 clean:

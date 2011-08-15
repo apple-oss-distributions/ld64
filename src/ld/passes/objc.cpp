@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2010-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -918,6 +918,7 @@ MethodListAtom<A>::MethodListAtom(ld::Internal& state, const ld::Atom* baseMetho
 			symbolTableNotIn, false, false, false, ld::Atom::Alignment(3)), _file(NULL), _methodCount(0) 
 {
 	unsigned int fixupCount = 0;
+	std::set<const ld::Atom*> baseMethodListMethodNameAtoms;
 	// if base class has method list, then associate new method list with file defining class
 	if ( baseMethodList != NULL ) {
 		_file = baseMethodList->file();
@@ -925,6 +926,14 @@ MethodListAtom<A>::MethodListAtom(ld::Internal& state, const ld::Atom* baseMetho
 		_methodCount = MethodList<A>::count(state, baseMethodList);
 		deadAtoms.insert(baseMethodList);
 		fixupCount = baseMethodList->fixupsEnd() - baseMethodList->fixupsBegin();
+		for (ld::Fixup::iterator fit=baseMethodList->fixupsBegin(); fit != baseMethodList->fixupsEnd(); ++fit) {
+			if ( (fit->offsetInAtom - 8) % (3*sizeof(pint_t)) == 0 ) {
+				assert(fit->binding == ld::Fixup::bindingsIndirectlyBound && "malformed method list");
+				const ld::Atom* target = state.indirectBindingTable[fit->u.bindingIndex];
+				assert(target->contentType() == ld::Atom::typeCString && "malformed method list");
+				baseMethodListMethodNameAtoms.insert(target);
+			}
+		}
 	}
 	for (std::vector<const ld::Atom*>::const_iterator ait=categories->begin(); ait != categories->end(); ++ait) {
 		const ld::Atom* categoryMethodListAtom;
@@ -950,6 +959,7 @@ MethodListAtom<A>::MethodListAtom(ld::Internal& state, const ld::Atom* baseMetho
 	// copy fixups and adjust offsets (in reverse order to simulator objc runtime)
 	_fixups.reserve(fixupCount);
 	uint32_t slide = 0;
+	std::set<const ld::Atom*> categoryMethodNameAtoms;
 	for (std::vector<const ld::Atom*>::const_reverse_iterator rit=categories->rbegin(); rit != categories->rend(); ++rit) {
 		const ld::Atom* categoryMethodListAtom;
 		if ( meta )
@@ -961,8 +971,24 @@ MethodListAtom<A>::MethodListAtom(ld::Internal& state, const ld::Atom* baseMetho
 				ld::Fixup fixup = *fit;
 				fixup.offsetInAtom += slide;
 				_fixups.push_back(fixup);
-				//if ( fixup.binding == ld::Fixup::bindingDirectlyBound )
-				//	fprintf(stderr, "offset=0x%08X, name=%s\n", fixup.offsetInAtom, fixup.u.target->name());
+				if ( (fixup.offsetInAtom - 8) % (3*sizeof(pint_t)) == 0 ) {
+					// <rdar://problem/8642343> warning when a method is overridden in a category in the same link unit
+					assert(fixup.binding == ld::Fixup::bindingsIndirectlyBound && "malformed category method list");
+					const ld::Atom* target = state.indirectBindingTable[fixup.u.bindingIndex];
+					assert(target->contentType() == ld::Atom::typeCString && "malformed method list");
+					// this objc pass happens after cstrings are coalesced, so we can just compare the atom addres instead of its content
+					if ( baseMethodListMethodNameAtoms.count(target) != 0 ) {
+						warning("%s method '%s' in category from %s overrides method from class in %s", 
+							(meta ? "meta" : "instance"), target->rawContentPointer(),
+							categoryMethodListAtom->file()->path(), baseMethodList->file()->path() );
+					}
+					if ( categoryMethodNameAtoms.count(target) != 0 ) {
+						warning("%s method '%s' in category from %s conflicts with same method from another category", 
+							(meta ? "meta" : "instance"), target->rawContentPointer(),
+							categoryMethodListAtom->file()->path());
+					}
+					categoryMethodNameAtoms.insert(target);
+				}
 			}
 			slide += 3*sizeof(pint_t) * MethodList<A>::count(state, categoryMethodListAtom);
 		}

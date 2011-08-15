@@ -12,6 +12,6 @@ __attribute__((visibility("hidden"),weak)) void foo()
 int main()
 {
    foo();
-   
+   return 0;
 }
 

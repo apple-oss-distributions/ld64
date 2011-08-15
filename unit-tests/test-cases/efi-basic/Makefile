@@ -59,7 +59,7 @@ all:
 	libtool -static -o LibTest1.lib LibTest1.obj
 	${CC} -arch $(ARCH)  -o MtocTest1.obj $(LOCAL_CC_FLAGS) -c MtocTest.c 
 	libtool -static -o MtocTest1.lib MtocTest1.obj	
-	ld -arch $(ARCH)  -o MtocTest1.macho  -u __ModuleEntryPoint -e __ModuleEntryPoint $(LD_ARG) -preload -segalign 0x20 -pie -seg1addr 0x240 -map MtocTest1.map LibTest1.lib MtocTest1.lib
+	${LD} -arch $(ARCH)  -o MtocTest1.macho  -u __ModuleEntryPoint -e __ModuleEntryPoint $(LD_ARG) -preload -segalign 0x20 -pie -seg1addr 0x240 -map MtocTest1.map LibTest1.lib MtocTest1.lib
 	/usr/local/efi/bin/mtoc -subsystem application -align 0x20 -d MtocTest1.macho MtocTest1.macho MtocTest1.pecoff
 	otool -rR MtocTest1.macho > otool-reloc.log
 	otool -l MtocTest1.macho > otool-load.log 

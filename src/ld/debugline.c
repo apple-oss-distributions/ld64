@@ -152,6 +152,7 @@ line_file (struct line_reader_data *lnd, uint64_t n)
   size_t filelen, dirlen;
   uint64_t dir;
   char * result;
+  const char * dirpath;
 
   /* I'm not sure if this is actually an error.  */
   if (n == 0
@@ -168,9 +169,14 @@ line_file (struct line_reader_data *lnd, uint64_t n)
   else if (dir > lnd->numdir)
     return NULL;
 
-  dirlen = strlen ((const char *) lnd->dirnames[dir - 1]);
+  dirpath = (const char *)lnd->dirnames[dir - 1];
+  dirlen = strlen (dirpath);
+  if ( dirpath[dirlen-1] == '/' )
+    --dirlen;
+  if ( (dirpath[dirlen-1] == '.') && (dirpath[dirlen-2] == '/') )
+    dirlen -= 2;
   result = malloc (dirlen + filelen + 2);
-  memcpy (result, lnd->dirnames[dir - 1], dirlen);
+  memcpy (result, dirpath, dirlen);
   result[dirlen] = '/';
   memcpy (result + dirlen + 1, lnd->filenames[n - 1], filelen);
   result[dirlen + 1 + filelen] = '\0';

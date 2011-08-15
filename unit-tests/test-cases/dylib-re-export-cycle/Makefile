@@ -30,9 +30,15 @@ SHELL = bash # use bash shell so we can redirect just stderr
 # <rdar://problem/5277857> OpenGL.framework and X11 both have a libGL.dylib which can cause ld to segfault if both are found
 #
 
-run: all
+all: all-${ARCH}
 
-all: 
+all-i386: all-mac
+all-x86_64: all-mac
+all-armv6: all-good
+all-armv7: all-good
+
+
+all-mac: 
 	mkdir -p other
 	${CC} foo.c -dynamiclib -o other/libfoo.dylib -mmacosx-version-min=10.4
 	${CC} bar.c -dynamiclib -o libbar.dylib other/libfoo.dylib -sub_library libfoo -mmacosx-version-min=10.4
@@ -40,7 +46,8 @@ all:
 	${CC} main.c libfoo.dylib -o main -L. 2>errmsg || true
 	grep "cycle" errmsg | ${PASS_IFF_STDIN}
 
-
+all-good:
+	${PASS_IFF} true
 
 
 clean:

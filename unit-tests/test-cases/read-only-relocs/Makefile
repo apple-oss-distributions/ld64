@@ -1,4 +1,4 @@
-##
+ ##
 # Copyright (c) 2006-2007 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
@@ -50,6 +50,10 @@ ifeq (${ARCH},x86_64)
 	RELOC_FAIL =  
 	XRELOCS_NEEDED =  ${FAIL_IF_STDIN}
 	LRELOCS_NEEDED =  ${FAIL_IF_STDIN}
+endif
+ifeq (${FILEARCH},arm)
+	NO_PIC =  -mdynamic-no-pic
+	STATIC =  -static
 endif
 
 
