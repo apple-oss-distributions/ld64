@@ -23,17 +23,18 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
+SHELL = bash # use bash shell so we can redirect just stderr
+
+
 #
-# Check that main executable can use TLVs with -dead_strip
+# Check that warning under -fatal_warnings causes error
 #
 
 run: all
 
 all:
-	clang ${CCFLAGS} main.c -o main -dead_strip -mmacosx-version-min=10.7
-	otool -lv main | grep S_THREAD_LOCAL_VARIABLES | ${FAIL_IF_EMPTY}
-	otool -lv main | egrep 'S_THREAD_LOCAL_REGULAR|S_THREAD_LOCAL_ZEROFILL' | ${FAIL_IF_EMPTY}
-	${PASS_IFF_GOOD_MACHO} main
+	${PASS_IFF_ERROR} ${CC} ${CCFLAGS} main.c -o main -pagezero_size 123 -Wl,-fatal_warnings  2>msgs.txt
+
 
 clean:
-	rm  main
+	rm -f main msgs.txt

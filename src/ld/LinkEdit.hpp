@@ -1063,7 +1063,6 @@ private:
 
 	mutable std::vector<uint64_t>				_32bitPointerLocations;
 	mutable std::vector<uint64_t>				_64bitPointerLocations;
-	mutable std::vector<uint64_t>				_ppcHi16Locations;
 	mutable std::vector<uint64_t>				_thumbLo16Locations;
 	mutable std::vector<uint64_t>				_thumbHi16Locations[16];
 	mutable std::vector<uint64_t>				_armLo16Locations;
@@ -1146,36 +1145,6 @@ void SplitSegInfoAtom<arm>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind ki
 }
 
 
-template <>
-void SplitSegInfoAtom<ppc>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind, uint32_t extra) const
-{
-	switch (kind) {
-		case ld::Fixup::kindStorePPCPicHigh16AddLow:
-			_ppcHi16Locations.push_back(address);
-			break;
-		case ld::Fixup::kindStoreBigEndian32:
-			_32bitPointerLocations.push_back(address);
-			break;
-		default:
-			warning("codegen at address 0x%08llX prevents image from working in dyld shared cache", address);
-			break;
-	}
-}
-
-
-template <>
-void SplitSegInfoAtom<ppc64>::addSplitSegInfo(uint64_t address, ld::Fixup::Kind kind, uint32_t extra) const
-{
-	switch (kind) {
-		case ld::Fixup::kindStorePPCPicHigh16AddLow:
-			_ppcHi16Locations.push_back(address);
-			break;
-		default:
-			warning("codegen at address 0x%08llX prevents image from working in dyld shared cache", address);
-			break;
-	}
-}
-
 
 template <typename A>
 void SplitSegInfoAtom<A>::uleb128EncodeAddresses(const std::vector<uint64_t>& locations) const
@@ -1231,14 +1200,6 @@ void SplitSegInfoAtom<A>::encode() const
 		this->_encodedData.append_byte(0); // terminator
 	}
 
-	if ( _ppcHi16Locations.size() != 0 ) {
-		this->_encodedData.append_byte(3);
-		//fprintf(stderr, "type 3:\n");
-		std::sort(_ppcHi16Locations.begin(), _ppcHi16Locations.end());
-		this->uleb128EncodeAddresses(_ppcHi16Locations);
-		this->_encodedData.append_byte(0); // terminator
-	}
-
 	if ( _thumbLo16Locations.size() != 0 ) {
 		this->_encodedData.append_byte(5);
 		//fprintf(stderr, "type 5:\n");
@@ -1286,7 +1247,6 @@ void SplitSegInfoAtom<A>::encode() const
 	// clean up temporaries
 	_32bitPointerLocations.clear();
 	_64bitPointerLocations.clear();
-	_ppcHi16Locations.clear();
 }
 
 

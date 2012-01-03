@@ -65,7 +65,7 @@ public:
 	uint32_t					encryptedTextStartOffset()	{ return _encryptedTEXTstartOffset; }
 	uint32_t					encryptedTextEndOffset()	{ return _encryptedTEXTendOffset; }
 	int							compressedOrdinalForAtom(const ld::Atom* target);
-	
+	uint64_t					fileSize() const { return _fileSize; }
 	
 	
 	bool						hasWeakExternalSymbols;
@@ -209,10 +209,6 @@ private:
 	void						rangeCheckARMBranch24(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
 																							const ld::Fixup* fixup);
 	void						rangeCheckThumbBranch22(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
-																							const ld::Fixup* fixup);
-	void						rangeCheckPPCBranch24(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
-																							const ld::Fixup* fixup);
-	void						rangeCheckPPCBranch14(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
 																							const ld::Fixup* fixup);
 	uint64_t					sectionOffsetOf(const ld::Internal& state, const ld::Fixup* fixup);
 	uint64_t					tlvTemplateOffsetOf(const ld::Internal& state, const ld::Fixup* fixup);

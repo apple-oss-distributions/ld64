@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
- * Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2009-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -33,17 +33,17 @@
 #include <map>
 
 #include "ld.hpp"
-#include "order_file.h"
+#include "order.h"
 
 namespace ld {
 namespace passes {
-namespace order_file {
+namespace order {
 
 //
 // The purpose of this pass is to take the graph of all Atoms and produce an ordered
 // sequence of atoms.  The constraints are that: 1) all Atoms of the same Segment must
 // be contiguous, 2)  all Atoms of the same Section must be contigous, 3) Atoms specified
-// in an order_file are sequenced as in the order_file and before Atoms not specified,
+// in an order are sequenced as in the order file and before Atoms not specified,
 // 4) Atoms in the same section from the same .o file should be contiguous and sequenced
 // in the same order they were in the .o file, 5) Atoms in the same Section but which came
 // from different .o files should be sequenced in the same order that the .o files
@@ -53,9 +53,9 @@ namespace order_file {
 // as it is constructed. Add each atom has an objectAddress() method. Then
 // sorting is just sorting by section, then by file ordinal, then by object address.
 //
-// If an order_file is specified, it gets more complicated.  First, an override-ordinal map
+// If an -order_file is specified, it gets more complicated.  First, an override-ordinal map
 // is created.  It causes the sort routine to ignore the value returned by ordinal() and objectAddress() 
-// and use the override value instead.  Next some Atoms must be layed out consecutively
+// and use the override value instead.  Next some Atoms must be laid out consecutively
 // (e.g. hand written assembly that does not end with return, but rather falls into
 // the next label).  This is modeled in via a kindNoneFollowOn fixup.  The use of
 // kindNoneFollowOn fixups produces "clusters" of atoms that must stay together.
@@ -98,7 +98,7 @@ private:
 	void				buildOrdinalOverrideMap();
 	const ld::Atom*		follower(const ld::Atom* atom);
 	static bool			matchesObjectFile(const ld::Atom* atom, const char* objectFileLeafName);
-			bool		orderableSection(const ld::Internal::FinalSection*);
+			bool		possibleToOrder(const ld::Internal::FinalSection*);
 	
 	const Options&						_options;
 	ld::Internal&						_state;
@@ -132,7 +132,7 @@ bool Layout::Comparer::operator()(const ld::Atom* left, const ld::Atom* right)
 	if ( right->contentType() == ld::Atom::typeSectionStart )
 		return false;
 
-	// if a -order_file is specified, then sorting is altered to sort those symbols first
+	// if an -order_file is specified, then sorting is altered to sort those symbols first
 	if ( _layout._haveOrderFile ) {
 		AtomToOrdinal::const_iterator leftPos  = _layout._ordinalOverrideMap.find(left);
 		AtomToOrdinal::const_iterator rightPos = _layout._ordinalOverrideMap.find(right);
@@ -191,8 +191,10 @@ bool Layout::Comparer::operator()(const ld::Atom* left, const ld::Atom* right)
 #endif
 	
 	// sort by .o order
-	uint32_t leftFileOrdinal = left->file()->ordinal();
-	uint32_t rightFileOrdinal = right->file()->ordinal();
+	const ld::File* leftFile = left->file();
+	const ld::File* rightFile = right->file();
+	uint32_t leftFileOrdinal = (leftFile != NULL) ? leftFile->ordinal() : 0;
+	uint32_t rightFileOrdinal = (rightFile != NULL) ? rightFile->ordinal() : 0;
 	if ( leftFileOrdinal != rightFileOrdinal )
 		return leftFileOrdinal< rightFileOrdinal;
 
@@ -233,9 +235,9 @@ bool Layout::matchesObjectFile(const ld::Atom* atom, const char* objectFileLeafN
 }
 
 
-bool Layout::orderableSection(const ld::Internal::FinalSection* sect)
+bool Layout::possibleToOrder(const ld::Internal::FinalSection* sect)
 {
-	// atoms in only some sections are ordered 
+	// atoms in only some sections can have order_file applied
 	switch ( sect->type() ) {
 		case ld::Section::typeUnclassified:
 		case ld::Section::typeCode:
@@ -261,8 +263,8 @@ void Layout::buildNameTable()
 {
 	for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
 		ld::Internal::FinalSection* sect = *sit;
-		// atoms in some special sections are never ordered 
-		if ( ! orderableSection(sect) )
+		// some sections are not worth scanning for names
+		if ( ! possibleToOrder(sect) )
 			continue;
 		for (std::vector<const ld::Atom*>::iterator ait=sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 			const ld::Atom* atom = *ait;
@@ -339,11 +341,15 @@ const ld::Atom* Layout::follower(const ld::Atom* atom)
 
 void Layout::buildFollowOnTables()
 {
+	// if no -order_file, then skip building follow on table
+	if ( ! _haveOrderFile )
+		return;
+
 	// first make a pass to find all follow-on references and build start/next maps
 	// which are a way to represent clusters of atoms that must layout together
 	for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
 		ld::Internal::FinalSection* sect = *sit;
-		if ( !orderableSection(sect) ) 
+		if ( !possibleToOrder(sect) ) 
 			continue;
 		for (std::vector<const ld::Atom*>::iterator ait=sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 			const ld::Atom* atom = *ait;
@@ -425,6 +431,20 @@ void Layout::buildFollowOnTables()
 	}
 }
 
+
+class InSet
+{
+public:
+	InSet(const std::set<const ld::Atom*>& theSet) : _set(theSet)  {}
+
+	bool operator()(const ld::Atom* atom) const {
+		return ( _set.count(atom) != 0 );
+	}
+private:
+	const std::set<const ld::Atom*>&  _set;
+};
+
+
 void Layout::buildOrdinalOverrideMap()
 {
 	// if no -order_file, then skip building override map
@@ -438,9 +458,21 @@ void Layout::buildOrdinalOverrideMap()
 	// with the start/next maps of follow-on atoms we can process the order file and produce override ordinals
 	uint32_t index = 0;
 	uint32_t matchCount = 0;
+	std::set<const ld::Atom*> moveToData;
 	for(Options::OrderedSymbolsIterator it = _options.orderedSymbolsBegin(); it != _options.orderedSymbolsEnd(); ++it) {
 		const ld::Atom* atom = this->findAtom(*it);
 		if ( atom != NULL ) {
+			// <rdar://problem/8612550> When order file used on data, turn ordered zero fill symbols into zero data
+			switch ( atom->section().type() ) {
+				case ld::Section::typeZeroFill:
+				case ld::Section::typeTentativeDefs:
+					if ( atom->size() <= 512 ) 
+						moveToData.insert(atom);
+					break;
+				default:
+					break;
+			}
+		
 			AtomToAtom::iterator start = _followOnStarts.find(atom);
 			if ( start != _followOnStarts.end() ) {
 				// this symbol for the order file corresponds to an atom that is in a cluster that must lay out together
@@ -477,6 +509,25 @@ void Layout::buildOrdinalOverrideMap()
 	}
 
 
+	// <rdar://problem/8612550> When order file used on data, turn ordered zero fill symbols into zeroed data
+	if ( ! moveToData.empty() ) {
+		for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
+			ld::Internal::FinalSection* sect = *sit;
+			switch ( sect->type() ) {
+				case ld::Section::typeZeroFill:
+				case ld::Section::typeTentativeDefs:
+					sect->atoms.erase(std::remove_if(sect->atoms.begin(), sect->atoms.end(), InSet(moveToData)), sect->atoms.end());
+					break;
+				case ld::Section::typeUnclassified:
+					if ( (strcmp(sect->sectionName(), "__data") == 0) && (strcmp(sect->segmentName(), "__DATA") == 0) )
+						sect->atoms.insert(sect->atoms.end(), moveToData.begin(), moveToData.end());
+					break;
+				default:
+					break;
+			}
+		}
+	}
+
 }
 
 void Layout::doPass()
@@ -484,42 +535,15 @@ void Layout::doPass()
 	// handle .o files that cannot have their atoms rearranged
 	this->buildFollowOnTables();
 
-	//
+	// assign new ordinal value to all ordered atoms
 	this->buildOrdinalOverrideMap();
-
 
 	// sort atoms in each section
 	for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
 		ld::Internal::FinalSection* sect = *sit;
-		if ( orderableSection(sect) ) {
-			std::sort(sect->atoms.begin(), sect->atoms.end(), _comparer);
-		}
-		else {
-			// bubble sort any typeSectionStart atom to the beginning
-			bool moving = false;
-			for (int i=sect->atoms.size()-1; i >= 0; --i) {
-				if ( moving ) {
-					const ld::Atom* temp = sect->atoms[i];
-					sect->atoms[i] = sect->atoms[i+1];
-					sect->atoms[i+1] = temp;
-				}
-				if ( sect->atoms[i]->contentType() == ld::Atom::typeSectionStart ) 
-					moving = true;
-			}
-			// bubble sort any typeSectionEnd atom to the end
-			moving = false;
-			for (unsigned int i=sect->atoms.size(); i < sect->atoms.size(); ++i) {
-				if ( moving ) {
-					const ld::Atom* temp = sect->atoms[i];
-					sect->atoms[i] = sect->atoms[i-1];
-					sect->atoms[i-1] = temp;
-				}
-				if ( sect->atoms[i]->contentType() == ld::Atom::typeSectionEnd ) 
-					moving = true;
-			}
-		}
+		std::sort(sect->atoms.begin(), sect->atoms.end(), _comparer);
 	}
-	
+
 	//fprintf(stderr, "Sorted atoms:\n");
 	//for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
 	//	ld::Internal::FinalSection* sect = *sit;

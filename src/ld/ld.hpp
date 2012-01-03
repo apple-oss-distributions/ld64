@@ -318,16 +318,11 @@ struct Fixup
 					kindStoreARMLoad12,
 					kindStoreARMLow16, kindStoreARMHigh16, 
 					kindStoreThumbLow16, kindStoreThumbHigh16, 
-					// PowerPC specific store kinds
-					kindStorePPCBranch24, kindStorePPCBranch14,
-					kindStorePPCPicLow14, kindStorePPCPicLow16, kindStorePPCPicHigh16AddLow, 
-					kindStorePPCAbsLow14, kindStorePPCAbsLow16, kindStorePPCAbsHigh16AddLow, kindStorePPCAbsHigh16, 
 					// dtrace probes
 					kindDtraceExtra,
 					kindStoreX86DtraceCallSiteNop, kindStoreX86DtraceIsEnableSiteClear,
 					kindStoreARMDtraceCallSiteNop, kindStoreARMDtraceIsEnableSiteClear,
 					kindStoreThumbDtraceCallSiteNop, kindStoreThumbDtraceIsEnableSiteClear,
-					kindStorePPCDtraceCallSiteNop, kindStorePPCDtraceIsEnableSiteClear,
 					// lazy binding
 					kindLazyTarget, kindSetLazyOffset,
 					// pointer store combinations
@@ -350,8 +345,6 @@ struct Fixup
 					kindStoreTargetAddressARMBranch24,		// kindSetTargetAddress + kindStoreARMBranch24
 					kindStoreTargetAddressThumbBranch22,	// kindSetTargetAddress + kindStoreThumbBranch22
 					kindStoreTargetAddressARMLoad12,		// kindSetTargetAddress + kindStoreARMLoad12
-					// PowerPC value calculation and store combinations
-					kindStoreTargetAddressPPCBranch24,		// kindSetTargetAddress + kindStorePPCBranch24
 			};
 
 	union {

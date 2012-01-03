@@ -89,8 +89,21 @@ static bool gotFixup(const Options& opts, ld::Internal& internal, const ld::Atom
 			}
 			if ( targetOfGOT->scope() == ld::Atom::scopeGlobal ) {	
 				// cannot do LEA optimization if target is weak exported symbol
-				if ( (targetOfGOT->definition() == ld::Atom::definitionRegular) && (targetOfGOT->combine() == ld::Atom::combineByName) )
-					*optimizable = false;
+				if ( (targetOfGOT->definition() == ld::Atom::definitionRegular) && (targetOfGOT->combine() == ld::Atom::combineByName) ) {
+					switch ( opts.outputKind() ) {
+						case Options::kDynamicExecutable:
+						case Options::kDynamicLibrary:
+						case Options::kDynamicBundle:
+						case Options::kKextBundle:
+							*optimizable = false;
+							break;
+						case Options::kStaticExecutable:
+						case Options::kDyld:
+						case Options::kPreload:
+						case Options::kObjectFile:
+							break;
+					}
+				}
 				// cannot do LEA optimization if target is interposable
 				if ( opts.interposable(targetOfGOT->name()) ) 
 					*optimizable = false;

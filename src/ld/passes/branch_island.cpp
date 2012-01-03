@@ -59,42 +59,6 @@ public:
 static bool _s_log = false;
 static ld::Section _s_text_section("__TEXT", "__text", ld::Section::typeCode);
 
-class PPCBranchIslandAtom : public ld::Atom {
-public:
-											PPCBranchIslandAtom(const char* nm, const ld::Atom* target, TargetAndOffset finalTarget)
-				: ld::Atom(_s_text_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
-							ld::Atom::scopeLinkageUnit, ld::Atom::typeBranchIsland, 
-							ld::Atom::symbolTableIn, false, false, false, ld::Atom::Alignment(2)), 
-				_name(nm),
-				_target(target),
-				_finalTarget(finalTarget) { }
-
-	virtual const ld::File*					file() const					{ return NULL; }
-	virtual bool							translationUnitSource(const char** dir, const char**) const 
-																			{ return false; }
-	virtual const char*						name() const					{ return _name; }
-	virtual uint64_t						size() const					{ return 4; }
-	virtual uint64_t						objectAddress() const			{ return 0; }
-	virtual void							copyRawContent(uint8_t buffer[]) const {
-		int64_t displacement = _target->finalAddress() - this->finalAddress();
-		const int64_t bl_sixteenMegLimit = 0x00FFFFFF;
-		if ( _target->contentType() == ld::Atom::typeBranchIsland ) {
-			// try optimizing away intermediate islands
-			int64_t skipToFinalDisplacement = _finalTarget.atom->finalAddress() + _finalTarget.offset - this->finalAddress();
-			if ( (skipToFinalDisplacement > bl_sixteenMegLimit) && (skipToFinalDisplacement < (-bl_sixteenMegLimit)) ) {
-				displacement = skipToFinalDisplacement;
-			}
-		}
-		int32_t branchInstruction = 0x48000000 | ((uint32_t)displacement & 0x03FFFFFC);
-		OSWriteBigInt32(buffer, 0, branchInstruction);
-	}
-	virtual void							setScope(Scope)					{ }
-
-private:
-	const char*								_name;
-	const ld::Atom*							_target;
-	TargetAndOffset							_finalTarget;
-};
 
 
 class ARMtoARMBranchIslandAtom : public ld::Atom {
@@ -303,10 +267,6 @@ static ld::Atom* makeBranchIsland(const Options& opts, ld::Fixup::Kind kind, int
 	}
 
 	switch ( kind ) {
-		case ld::Fixup::kindStorePPCBranch24:
-		case ld::Fixup::kindStoreTargetAddressPPCBranch24:
-			return new PPCBranchIslandAtom(name, nextTarget, finalTarget);
-			break;
 		case ld::Fixup::kindStoreARMBranch24:
 		case ld::Fixup::kindStoreThumbBranch22:
 		case ld::Fixup::kindStoreTargetAddressARMBranch24:
@@ -337,10 +297,6 @@ static ld::Atom* makeBranchIsland(const Options& opts, ld::Fixup::Kind kind, int
 static uint64_t textSizeWhenMightNeedBranchIslands(const Options& opts, bool seenThumbBranch)
 {
 	switch ( opts.architecture() ) {
-		case CPU_TYPE_POWERPC:
-		case CPU_TYPE_POWERPC64:
-			return 16000000;
-			break;
 		case CPU_TYPE_ARM:
 			if ( ! seenThumbBranch )
 				return 32000000;  // ARM can branch +/- 32MB
@@ -358,10 +314,6 @@ static uint64_t textSizeWhenMightNeedBranchIslands(const Options& opts, bool see
 static uint64_t maxDistanceBetweenIslands(const Options& opts, bool seenThumbBranch)
 {
 	switch ( opts.architecture() ) {
-		case CPU_TYPE_POWERPC:
-		case CPU_TYPE_POWERPC64:
-				return 14*1024*1024;
-			break;
 		case CPU_TYPE_ARM:
 			if ( ! seenThumbBranch )
 				return 30*1024*1024;	// 2MB of branch islands per 32MB
@@ -405,10 +357,8 @@ void doPass(const Options& opts, ld::Internal& state)
 	if ( opts.outputKind() == Options::kObjectFile )
 		return;
 
-	// only PowerPC and ARM need branch islands
+	// only ARM needs branch islands
 	switch ( opts.architecture() ) {
-		case CPU_TYPE_POWERPC:
-		case CPU_TYPE_POWERPC64:
 		case CPU_TYPE_ARM:
 			break;
 		default:
@@ -506,8 +456,6 @@ void doPass(const Options& opts, ld::Internal& state)
 				case ld::Fixup::kindAddAddend:
 					addend = fit->u.addend;
 					break;
-				case ld::Fixup::kindStorePPCBranch24:
-				case ld::Fixup::kindStoreTargetAddressPPCBranch24:
 				case ld::Fixup::kindStoreARMBranch24:
 				case ld::Fixup::kindStoreThumbBranch22:
 				case ld::Fixup::kindStoreTargetAddressARMBranch24:

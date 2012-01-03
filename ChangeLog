@@ -1,4 +1,88 @@
 
+-------- tagged ld64-128.1
+
+2011-09-13    Nick Kledzik    <kledzik@apple.com>
+
+    <rdar://problem/10111122> Enable dyld to be put into the dyld shared cache
+
+2011-09-13    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/10100056> Fix "using ld_classic" warning for i386 kexts
+
+2011-09-13    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/10052396> LTO many have eliminated need for some undefines
+
+-------- tagged ld64-128
+
+2011-09-08    Nick Kledzik    <kledzik@apple.com>
+
+	Rework 8924157 fix to sort all sections
+
+2011-09-07    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/10089743> ER: -current_version should allow 64-bit a.b.c.d.e tuple
+
+2011-09-06    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/10038370> -mdynamic-no-pic broke with movw of weak thumb symbol
+
+2011-09-01    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/10057157> Turn crash into a warning if __dso_handle is defined in user code
+	Added test case: unit-tests/test-cases/dso_handle
+
+2011-08-31    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/6780050> Add -fatal_warnings
+
+2011-08-30    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8482298> Support .weak_def_can_be_hidden via LTO interface
+
+2011-08-29    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/10043807> improve performance of zerofill->data ordering
+
+2011-08-29    Nick Kledzik    <kledzik@apple.com>
+
+	Implement -print_statistics
+
+2011-08-25    Nick Kledzik    <kledzik@apple.com>
+
+	check for overlaps between pinned segments and regular segments
+
+2011-08-23    Nick Kledzik    <kledzik@apple.com>
+
+	do got elimination more aggressively in static and preload mode
+
+2011-08-22    Nick Kledzik    <kledzik@apple.com>
+
+	enable __dso_handle in -preload
+
+2011-08-22    Nick Kledzik    <kledzik@apple.com>
+
+	fix section$end to sort to end of __mod_init_func section
+
+2011-08-18    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/9737570> __constructor section removed with -dead_strip
+
+2011-08-11    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8828975> remove ld support for PowerPC
+
+2011-08-11    Nick Kledzik    <kledzik@apple.com>
+
+	Fix spurious -segaddr alignment warning
+
+-------- tagged ld64-127.3
+
+2011-08-31    Nick Kledzik    <kledzik@apple.com>
+
+	<rdar://problem/8924157> [regression] C++ Initializers from archives not sorted
+	Added test case: unit-tests/test-cases/archive-init-order
+
 -------- tagged ld64-127.2
 
 2011-08-15    Nick Kledzik    <kledzik@apple.com>

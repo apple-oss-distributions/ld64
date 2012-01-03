@@ -30,7 +30,6 @@
 #include <mach-o/fat.h>
 #include <mach-o/stab.h>
 #include <mach-o/reloc.h>
-#include <mach-o/ppc/reloc.h>
 #include <mach-o/x86_64/reloc.h>
 #include <mach-o/arm/reloc.h>
 #include <mach-o/compact_unwind_encoding.h>
@@ -1279,8 +1278,13 @@ public:
 	uint32_t		version() const							INLINE { return fields.version; }
 	void			set_version(uint32_t value)				INLINE { E::set32(fields.version, value); }
 
-	uint32_t		reserved() const						INLINE { return fields.reserved; }
-	void			set_reserved(uint32_t value)			INLINE { E::set32(fields.reserved, value); }
+#ifdef LC_SOURCE_VERSION
+	uint32_t		sdk() const								INLINE { return fields.sdk; }
+	void			set_sdk(uint32_t value)					INLINE { E::set32(fields.sdk, value); }
+#else
+	uint32_t		sdk() const								INLINE { return fields.reserved; }
+	void			set_sdk(uint32_t value)					INLINE { E::set32(fields.reserved, value); }
+#endif
 
 	typedef typename P::E		E;
 private:

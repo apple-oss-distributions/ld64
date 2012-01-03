@@ -89,7 +89,6 @@ private:
 #include "stub_x86_classic.hpp"
 #include "stub_arm.hpp"
 #include "stub_arm_classic.hpp"
-#include "stub_ppc_classic.hpp"
 
 
 
@@ -116,7 +115,6 @@ const ld::Atom* Pass::stubableFixup(const ld::Fixup* fixup, ld::Internal& state)
 	if ( fixup->binding == ld::Fixup::bindingsIndirectlyBound ) {
 		const ld::Atom* target = state.indirectBindingTable[fixup->u.bindingIndex];
 		switch ( fixup->kind ) {
-			case ld::Fixup::kindStoreTargetAddressPPCBranch24:
 			case ld::Fixup::kindStoreTargetAddressX86BranchPCRel32:
 			case ld::Fixup::kindStoreTargetAddressARMBranch24:
 			case ld::Fixup::kindStoreTargetAddressThumbBranch22:
@@ -177,15 +175,6 @@ ld::Atom* Pass::makeStub(const ld::Atom& target, bool weakImport)
 	}
 
 	switch ( _architecture ) {
-		case CPU_TYPE_POWERPC: 
-			if ( _pic )
-				return new ld::passes::stubs::ppc::classic::StubPICAtom(*this, target, forLazyDylib, false, weakImport);
-			else
-				return new ld::passes::stubs::ppc::classic::StubNoPICAtom(*this, target, forLazyDylib, false, weakImport);
-			break;
-		case CPU_TYPE_POWERPC64: 
-			return new ld::passes::stubs::ppc::classic::StubPICAtom(*this, target, forLazyDylib, true, weakImport);
-			break;
 		case CPU_TYPE_I386:
 			if ( usingCompressedLINKEDIT() && !forLazyDylib )
 				return new ld::passes::stubs::x86::StubAtom(*this, target, stubToGlobalWeakDef, stubToResolver, weakImport);
@@ -304,9 +293,7 @@ void Pass::process(ld::Internal& state)
 				if ( _options.outputKind() != Options::kDynamicLibrary ) 
 					throwf("resolver functions (%s) can only be used in dylibs", atom->name());
 				if ( !_options.makeCompressedDyldInfo() ) {
-					if ( _options.architecture() == CPU_TYPE_POWERPC )
-						throwf("resolver functions (%s) not supported for PowerPC", atom->name());
-					else if ( _options.architecture() == CPU_TYPE_ARM )
+					if ( _options.architecture() == CPU_TYPE_ARM )
 						throwf("resolver functions (%s) can only be used when targeting iOS 4.2 or later", atom->name());
 					else
 						throwf("resolver functions (%s) can only be used when targeting Mac OS X 10.6 or later", atom->name());

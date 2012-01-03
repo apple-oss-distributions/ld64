@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-*
  *
- * Copyright (c) 2005-2010 Apple Inc. All rights reserved.
+ * Copyright (c) 2005-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -74,7 +74,7 @@ extern "C" double log2 ( double );
 #include "passes/tlvp.h"
 #include "passes/huge.h"
 #include "passes/compact_unwind.h"
-#include "passes/order_file.h"
+#include "passes/order.h"
 #include "passes/branch_island.h"
 #include "passes/branch_shim.h"
 #include "passes/objc.h"
@@ -87,14 +87,31 @@ extern "C" double log2 ( double );
 #include "parsers/opaque_section_file.h"
 
 
+struct PerformanceStatistics {
+	uint64_t						startTool;
+	uint64_t						startInputFileProcessing;
+	uint64_t						startResolver;
+	uint64_t						startDylibs;
+	uint64_t						startPasses;
+	uint64_t						startOutput;
+	uint64_t						startDone;
+	vm_statistics_data_t			vmStart;
+	vm_statistics_data_t			vmEnd;
+};
+
+
+
+
+
 class InternalState : public ld::Internal
 {
 public:
-											InternalState(const Options& opts) : _options(opts) { }
+											InternalState(const Options& opts) : _options(opts), _atomsOrderedInSections(false) { }
 	virtual	ld::Internal::FinalSection*		addAtom(const ld::Atom& atom);
 	virtual ld::Internal::FinalSection*		getFinalSection(const ld::Section&);
 	
 	void									sortSections();
+	void									markAtomsOrdered() { _atomsOrderedInSections = true; }
 	virtual									~InternalState() {}
 private:
 
@@ -134,6 +151,7 @@ private:
 
 	SectionInToOut			_sectionInToFinalMap;
 	const Options&			_options;
+	bool					_atomsOrderedInSections;
 };
 
 ld::Section	InternalState::FinalSection::_s_DATA_data( "__DATA", "__data",  ld::Section::typeUnclassified);
@@ -440,32 +458,28 @@ static void validateFixups(const ld::Atom& atom)
 ld::Internal::FinalSection* InternalState::addAtom(const ld::Atom& atom)
 {
 	ld::Internal::FinalSection* fs = this->getFinalSection(atom.section());
-
-	// <rdar://problem/8612550> When order file used on data, turn ordered zero fill symbols into zero data
-	switch ( atom.section().type() ) {
-		case ld::Section::typeZeroFill:
-		case ld::Section::typeTentativeDefs:
-			if ( (atom.symbolTableInclusion() == ld::Atom::symbolTableIn) 
-					&& (atom.size() <= 512) && (_options.orderedSymbolsCount() != 0) ) {
-				for(Options::OrderedSymbolsIterator it = _options.orderedSymbolsBegin(); it != _options.orderedSymbolsEnd(); ++it) {
-					if ( (it->objectFileName == NULL) && (strcmp(it->symbolName, atom.name()) == 0) ) {
-						// found in order file, move to __data section
-						fs = getFinalSection(InternalState::FinalSection::_s_DATA_data);\
-						//fprintf(stderr, "moved %s to __data section\n", atom.name());
-						break;
-					}
-				}
-			}
-			break;
-		default:
-			break;
-	}
-	
 	//fprintf(stderr, "InternalState::doAtom(%p), name=%s, sect=%s, finalsect=%p\n", &atom, atom.name(), atom.section().sectionName(), fs);
 #ifndef NDEBUG
 	validateFixups(atom);
 #endif
-	fs->atoms.push_back(&atom);
+	if ( _atomsOrderedInSections ) {
+		// make sure this atom is placed before any trailing section$end$ atom
+		if ( (fs->atoms.size() > 1) && (fs->atoms.back()->contentType() == ld::Atom::typeSectionEnd) ) {
+			// last atom in section$end$ atom, insert before it
+			const ld::Atom* endAtom = fs->atoms.back();
+			fs->atoms.pop_back();
+			fs->atoms.push_back(&atom);
+			fs->atoms.push_back(endAtom);
+		}
+		else {
+			// not end atom, just append new atom
+			fs->atoms.push_back(&atom);
+		}
+	}
+	else {
+		// normal case
+		fs->atoms.push_back(&atom);
+	}
 	return fs;
 }
 
@@ -552,6 +566,49 @@ void InternalState::sortSections()
 	
 }
 
+static char* commatize(uint64_t in, char* out)
+{
+	char* result = out;
+	char rawNum[30];
+	sprintf(rawNum, "%llu", in);
+	const int rawNumLen = strlen(rawNum);
+	for(int i=0; i < rawNumLen-1; ++i) {
+		*out++ = rawNum[i];
+		if ( ((rawNumLen-i) % 3) == 1 )
+			*out++ = ',';
+	}
+	*out++ = rawNum[rawNumLen-1];
+	*out = '\0';
+	return result;
+}
+
+static void printTime(const char* msg, uint64_t partTime, uint64_t totalTime)
+{
+	static uint64_t sUnitsPerSecond = 0;
+	if ( sUnitsPerSecond == 0 ) {
+		struct mach_timebase_info timeBaseInfo;
+		if ( mach_timebase_info(&timeBaseInfo) == KERN_SUCCESS ) {
+			sUnitsPerSecond = 1000000000ULL * timeBaseInfo.denom / timeBaseInfo.numer;
+			//fprintf(stderr, "sUnitsPerSecond=%llu\n", sUnitsPerSecond);
+		}
+	}
+	if ( partTime < sUnitsPerSecond ) {
+		uint32_t milliSecondsTimeTen = (partTime*10000)/sUnitsPerSecond;
+		uint32_t milliSeconds = milliSecondsTimeTen/10;
+		uint32_t percentTimesTen = (partTime*1000)/totalTime;
+		uint32_t percent = percentTimesTen/10;
+		fprintf(stderr, "%24s: % 4d.%d milliseconds (% 4d.%d%%)\n", msg, milliSeconds, milliSecondsTimeTen-milliSeconds*10, percent, percentTimesTen-percent*10);
+	}
+	else {
+		uint32_t secondsTimeTen = (partTime*10)/sUnitsPerSecond;
+		uint32_t seconds = secondsTimeTen/10;
+		uint32_t percentTimesTen = (partTime*1000)/totalTime;
+		uint32_t percent = percentTimesTen/10;
+		fprintf(stderr, "%24s: % 4d.%d seconds (% 4d.%d%%)\n", msg, seconds, secondsTimeTen-seconds*10, percent, percentTimesTen-percent*10);
+	}
+}
+
+
 static void getVMInfo(vm_statistics_data_t& info)
 {
 	mach_msg_type_number_t count = sizeof(vm_statistics_data_t) / sizeof(natural_t);
@@ -564,23 +621,20 @@ static void getVMInfo(vm_statistics_data_t& info)
 
 int main(int argc, const char* argv[])
 {
-#if DEBUG
-	usleep(1000000);
-#endif
 	const char* archName = NULL;
 	bool showArch = false;
 	bool archInferred = false;
 	try {
-		vm_statistics_data_t vmStart;
-		vm_statistics_data_t vmEnd;
-		getVMInfo(vmStart);
-	
+		PerformanceStatistics statistics;
+		statistics.startTool = mach_absolute_time();
+		
 		// create object to track command line arguments
 		Options options(argc, argv);
+		InternalState state(options);
 		
-		// gather stats
+		// gather vm stats
 		if ( options.printStatistics() )
-			getVMInfo(vmStart);
+			getVMInfo(statistics.vmStart);
 
 		// update strings for error messages
 		showArch = options.printArchPrefix();
@@ -588,46 +642,71 @@ int main(int argc, const char* argv[])
 		archInferred = (options.architecture() == 0);
 		
 		// open and parse input files
+		statistics.startInputFileProcessing = mach_absolute_time();
 		ld::tool::InputFiles inputFiles(options, &archName);
 		
 		// load and resolve all references
-		InternalState state(options);
+		statistics.startResolver = mach_absolute_time();
 		ld::tool::Resolver resolver(options, inputFiles, state);
 		resolver.resolve();
 				
 		// add dylibs used
+		statistics.startDylibs = mach_absolute_time();
 		inputFiles.dylibs(state);
 	
 		// do initial section sorting so passes have rough idea of the layout
 		state.sortSections();
 
 		// run passes
+		statistics.startPasses = mach_absolute_time();
 		ld::passes::objc::doPass(options, state);
 		ld::passes::stubs::doPass(options, state);
 		ld::passes::huge::doPass(options, state);
 		ld::passes::got::doPass(options, state);
 		ld::passes::tlvp::doPass(options, state);
 		ld::passes::dylibs::doPass(options, state);	// must be after stubs and GOT passes
-		ld::passes::order_file::doPass(options, state);
+		ld::passes::order::doPass(options, state);
+		state.markAtomsOrdered();
 		ld::passes::branch_shim::doPass(options, state);	// must be after stubs 
-		ld::passes::branch_island::doPass(options, state);	// must be after stubs and order_file pass
+		ld::passes::branch_island::doPass(options, state);	// must be after stubs and order pass
 		ld::passes::dtrace::doPass(options, state);
-		ld::passes::compact_unwind::doPass(options, state);  // must be after order-file pass
+		ld::passes::compact_unwind::doPass(options, state);  // must be after order pass
  		
 		// sort final sections
 		state.sortSections();
 
 		// write output file
+		statistics.startOutput = mach_absolute_time();
 		ld::tool::OutputFile out(options);
 		out.write(state);
+		statistics.startDone = mach_absolute_time();
 		
 		// print statistics
 		//mach_o::relocatable::printCounts();
 		if ( options.printStatistics() ) {
-			getVMInfo(vmEnd);
-			fprintf(stderr, "pageins=%u, pageouts=%u, faults=%u\n", vmEnd.pageins-vmStart.pageins,
-										vmEnd.pageouts-vmStart.pageouts, vmEnd.faults-vmStart.faults);
-			
+			getVMInfo(statistics.vmEnd);
+			uint64_t totalTime = statistics.startDone - statistics.startTool;
+			printTime("ld total time", totalTime, totalTime);
+			printTime(" option parsing time", statistics.startInputFileProcessing  -	statistics.startTool,				totalTime);
+			printTime(" object file processing", statistics.startResolver			 -	statistics.startInputFileProcessing,totalTime);
+			printTime(" resolve symbols", statistics.startDylibs				 -	statistics.startResolver,			totalTime);
+			printTime(" build atom list", statistics.startPasses				 -	statistics.startDylibs,				totalTime);
+			printTime(" passess", statistics.startOutput				 -	statistics.startPasses,				totalTime);
+			printTime(" write output", statistics.startDone				 -	statistics.startOutput,				totalTime);
+			fprintf(stderr, "pageins=%u, pageouts=%u, faults=%u\n", 
+								statistics.vmEnd.pageins-statistics.vmStart.pageins,
+								statistics.vmEnd.pageouts-statistics.vmStart.pageouts, 
+								statistics.vmEnd.faults-statistics.vmStart.faults);
+			char temp[40];
+			fprintf(stderr, "processed %3u object files,  totaling %15s bytes\n", inputFiles._totalObjectLoaded, commatize(inputFiles._totalObjectSize, temp));
+			fprintf(stderr, "processed %3u archive files, totaling %15s bytes\n", inputFiles._totalArchivesLoaded, commatize(inputFiles._totalArchiveSize, temp));
+			fprintf(stderr, "processed %3u dylib files\n", inputFiles._totalDylibsLoaded);
+			fprintf(stderr, "wrote output file            totaling %15s bytes\n", commatize(out.fileSize(), temp));
+		}
+		// <rdar://problem/6780050> Would like linker warning to be build error.
+		if ( options.errorBecauseOfWarnings() ) {
+			fprintf(stderr, "ld: fatal warning(s) induced error (-fatal_warnings)\n");
+			return 1;
 		}
 	}
 	catch (const char* msg) {

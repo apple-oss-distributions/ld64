@@ -156,7 +156,8 @@ public:
 	bool						bindAtLoad() const { return fBindAtLoad; }
 	NameSpace					nameSpace() const { return fNameSpace; }
 	const char*					installPath() const;			// only for kDynamicLibrary
-	uint32_t					currentVersion() const { return fDylibCurrentVersion; }		// only for kDynamicLibrary
+	uint64_t					currentVersion() const { return fDylibCurrentVersion; }		// only for kDynamicLibrary
+	uint32_t					currentVersion32() const;		// only for kDynamicLibrary
 	uint32_t					compatibilityVersion() const { return fDylibCompatVersion; }	// only for kDynamicLibrary
 	const char*					entryName() const { return fEntryName; }		// only for kDynamicExecutable or kStaticExecutable
 	const char*					executablePath();
@@ -293,6 +294,7 @@ public:
 	bool						forceNotWeak(const char* symbolName) const;
 	bool						forceWeakNonWildCard(const char* symbolName) const;
 	bool						forceNotWeakNonWildcard(const char* symbolName) const;
+	bool						errorBecauseOfWarnings() const;
 
 private:
 	class CStringEquals
@@ -335,7 +337,8 @@ private:
 	FileInfo					findFramework(const char* rootName, const char* suffix);
 	bool						checkForFile(const char* format, const char* dir, const char* rootName,
 											 FileInfo& result) const;
-	uint32_t					parseVersionNumber(const char*);
+	uint64_t					parseVersionNumber64(const char*);
+	uint32_t					parseVersionNumber32(const char*);
 	void						parseSectionOrderFile(const char* segment, const char* section, const char* path);
 	void						parseOrderFile(const char* path, bool cstring);
 	void						addSection(const char* segment, const char* section, const char* path);
@@ -384,7 +387,7 @@ private:
 	bool								fDeadStrip;
 	NameSpace							fNameSpace;
 	uint32_t							fDylibCompatVersion;
-	uint32_t							fDylibCurrentVersion;
+	uint64_t							fDylibCurrentVersion;
 	const char*							fDylibInstallName;
 	const char*							fFinalName;
 	const char*							fEntryName;

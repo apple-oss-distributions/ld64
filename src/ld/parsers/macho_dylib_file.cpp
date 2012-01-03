@@ -856,60 +856,6 @@ public:
 
 
 template <>
-bool Parser<ppc>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
-{
-	const macho_header<P>* header = (const macho_header<P>*)fileContent;
-	if ( header->magic() != MH_MAGIC )
-		return false;
-	if ( header->cputype() != CPU_TYPE_POWERPC )
-		return false;
-	switch ( header->filetype() ) {
-		case MH_DYLIB:
-		case MH_DYLIB_STUB:
-			return true;
-		case MH_BUNDLE:
-			if ( executableOrDyliborBundle )
-				return true;
-			else
-				throw "can't link with bundle (MH_BUNDLE) only dylibs (MH_DYLIB)";
-		case MH_EXECUTE:
-			if ( executableOrDyliborBundle )
-				return true;
-			else
-				throw "can't link with a main executable";
-		default:
-			return false;
-	}
-}
-
-template <>
-bool Parser<ppc64>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
-{
-	const macho_header<P>* header = (const macho_header<P>*)fileContent;
-	if ( header->magic() != MH_MAGIC_64 )
-		return false;
-	if ( header->cputype() != CPU_TYPE_POWERPC64 )
-		return false;
-	switch ( header->filetype() ) {
-		case MH_DYLIB:
-		case MH_DYLIB_STUB:
-			return true;
-		case MH_BUNDLE:
-			if ( executableOrDyliborBundle )
-				return true;
-			else
-				throw "can't link with bundle (MH_BUNDLE) only dylibs (MH_DYLIB)";
-		case MH_EXECUTE:
-			if ( executableOrDyliborBundle )
-				return true;
-			else
-				throw "can't link with a main executable";
-		default:
-			return false;
-	}
-}
-
-template <>
 bool Parser<x86>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
 {
 	const macho_header<P>* header = (const macho_header<P>*)fileContent;
@@ -1011,14 +957,6 @@ ld::dylib::File* parse(const uint8_t* fileContent, uint64_t fileLength,
 		case CPU_TYPE_ARM:
 			if ( Parser<arm>::validFile(fileContent, bundleLoader) )
 				return Parser<arm>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
-			break;
-		case CPU_TYPE_POWERPC:
-			if ( Parser<ppc>::validFile(fileContent, bundleLoader) )
-				return Parser<ppc>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
-			break;
-		case CPU_TYPE_POWERPC64:
-			if ( Parser<ppc64>::validFile(fileContent, bundleLoader) )
-				return Parser<ppc64>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
 	}
 	return NULL;

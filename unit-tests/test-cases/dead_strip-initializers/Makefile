@@ -24,16 +24,24 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Check that main executable can use TLVs with -dead_strip
+# Sanity check -dead_strip does not remove initializers and terminators
 #
+
 
 run: all
 
 all:
-	clang ${CCFLAGS} main.c -o main -dead_strip -mmacosx-version-min=10.7
-	otool -lv main | grep S_THREAD_LOCAL_VARIABLES | ${FAIL_IF_EMPTY}
-	otool -lv main | egrep 'S_THREAD_LOCAL_REGULAR|S_THREAD_LOCAL_ZEROFILL' | ${FAIL_IF_EMPTY}
-	${PASS_IFF_GOOD_MACHO} main
+	${CXX} ${CCFLAGS} main.cxx other.cxx -dead_strip -o main
+	${FAIL_IF_BAD_MACHO} main
+	nm main | grep dead_door_knob | ${FAIL_IF_STDIN}
+	nm main | grep ctr | ${FAIL_IF_EMPTY}
+	nm main | grep dtr | ${FAIL_IF_EMPTY}
+	${CXX} ${CCFLAGS} -static main.cxx other.cxx -dead_strip -nostdlib -e _main -o main-static -Wl,-new_linker
+	${FAIL_IF_BAD_MACHO} main-static
+	nm main-static | grep dead_door_knob | ${FAIL_IF_STDIN}
+	nm main-static | grep ctr | ${FAIL_IF_EMPTY}
+	nm main-static | grep dtr | ${FAIL_IF_EMPTY}
+	${PASS_IFF_GOOD_MACHO} main-static
 
 clean:
-	rm  main
+	rm -rf main main-static

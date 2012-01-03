@@ -24,16 +24,25 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Check that main executable can use TLVs with -dead_strip
+# Check the order of functions from archives.
 #
 
 run: all
 
 all:
-	clang ${CCFLAGS} main.c -o main -dead_strip -mmacosx-version-min=10.7
-	otool -lv main | grep S_THREAD_LOCAL_VARIABLES | ${FAIL_IF_EMPTY}
-	otool -lv main | egrep 'S_THREAD_LOCAL_REGULAR|S_THREAD_LOCAL_ZEROFILL' | ${FAIL_IF_EMPTY}
+	${CC} ${CCFLAGS} foo.c -c -o foo.o 
+	${CC} ${CCFLAGS} foo2.c -c -o foo2.o 
+	${CC} ${CCFLAGS} foo3.c -c -o foo3.o 
+	${CC} ${CCFLAGS} bar.c -c -o bar.o 
+	${CC} ${CCFLAGS} bar2.c -c -o bar2.o 
+	${CC} ${CCFLAGS} bar3.c -c -o bar3.o 
+	libtool -static foo.o foo2.o foo3.o -o libfoo.a
+	libtool -static bar3.o bar2.o bar.o -o libbar.a
+	${CC} ${CCFLAGS} main.c -lbar -lfoo -L. -o main -Wl,-map,main.map
+	grep anon main.map | awk '{ print $$4}' > main-actual.txt
+	sort main-actual.txt > main-should.txt
+	diff main-actual.txt main-should.txt
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:
-	rm  main
+	rm -rf *.o *.a main main.map main*.txt

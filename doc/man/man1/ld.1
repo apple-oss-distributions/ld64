@@ -515,6 +515,8 @@ Prints the version of the linker.
 Normally i386 main executables will be marked so that the Mac OS X 10.7 and later kernel 
 will only allow pages with the x-bit to execute instructions. This option overrides that
 behavior and allows instructions on any page to be executed.
+.It Fl fatal_warnings
+Causes the linker to exit with a non-zero value if any warnings were emitted.
 .It Fl no_eh_labels
 Normally in -r mode, the linker produces .eh labels on all FDEs in the __eh_frame section.
 This option suppresses those labels.  Those labels are not needed by the Mac OS X 10.6
@@ -576,7 +578,7 @@ Specifies the minimum space for future expansion of the load commands.  Only use
 install_name_tool to alter the load commands later. Size is a hexadecimal number.
 .It Fl headerpad_max_install_names
 Automatically adds space for future expansion of load commands such that all paths could expand to MAXPATHLEN. 
-Only useful if intend to run install_name_tool to alter the load commands later. Size is a hexadecimal number.
+Only useful if intend to run install_name_tool to alter the load commands later.
 .It Fl bind_at_load
 Sets a bit in the mach header of the resulting binary which tells dyld to bind all symbols when the binary is loaded, rather than lazily.
 .It Fl force_flat_namespace

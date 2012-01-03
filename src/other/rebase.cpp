@@ -650,13 +650,7 @@ void Rebaser<ppc>::doLocalRelocation(const macho_relocation_info<P>* reloc)
 		}
 	}
 	else {
-		macho_scattered_relocation_info<P>* sreloc = (macho_scattered_relocation_info<P>*)reloc;
-		if ( sreloc->r_type() == PPC_RELOC_PB_LA_PTR ) {
-			sreloc->set_r_value( sreloc->r_value() + fSlide );
-		}
-		else {
-			throw "cannot rebase final linked image with scattered relocations";
-		}
+		throw "cannot rebase final linked image with scattered relocations";
 	}
 }
 

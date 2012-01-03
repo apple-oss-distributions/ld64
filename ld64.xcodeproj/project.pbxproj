@@ -49,7 +49,7 @@
 		F97F5029070D0BB200B9FCD7 /* ld.1 in copy man page */ = {isa = PBXBuildFile; fileRef = F97F5028070D0BB200B9FCD7 /* ld.1 */; };
 		F98498A310AE2159009E9878 /* compact_unwind.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9BA963310A2545C0097A440 /* compact_unwind.cpp */; };
 		F98498A410AE2159009E9878 /* got.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9AB1063107D380700E54C9E /* got.cpp */; };
-		F9849E3610B38EF5009E9878 /* order_file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9849E3410B38EF5009E9878 /* order_file.cpp */; };
+		F9849E3610B38EF5009E9878 /* order.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9849E3410B38EF5009E9878 /* order.cpp */; };
 		F984A38210BB4B0D009E9878 /* branch_island.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F984A38010BB4B0D009E9878 /* branch_island.cpp */; };
 		F989D30D106826020014B60C /* OutputFile.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F989D30B106826020014B60C /* OutputFile.cpp */; };
 		F9A3DDD30ED762E400C590B9 /* PruneTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9A3DDD20ED762E400C590B9 /* PruneTrie.cpp */; };
@@ -251,9 +251,8 @@
 		F971EED306D5ACF60041D381 /* ObjectDump */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ObjectDump; sourceTree = BUILT_PRODUCTS_DIR; };
 		F971EED706D5AD240041D381 /* ObjectDump.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ObjectDump.cpp; path = src/other/ObjectDump.cpp; sourceTree = "<group>"; };
 		F97F5028070D0BB200B9FCD7 /* ld.1 */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text.man; name = ld.1; path = doc/man/man1/ld.1; sourceTree = "<group>"; };
-		F984963310AB9318009E9878 /* stub_ppc_classic.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = stub_ppc_classic.hpp; sourceTree = "<group>"; };
-		F9849E3410B38EF5009E9878 /* order_file.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = order_file.cpp; sourceTree = "<group>"; };
-		F9849E3510B38EF5009E9878 /* order_file.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = order_file.h; sourceTree = "<group>"; };
+		F9849E3410B38EF5009E9878 /* order.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = order.cpp; sourceTree = "<group>"; };
+		F9849E3510B38EF5009E9878 /* order.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = order.h; sourceTree = "<group>"; };
 		F984A13B10B614CF009E9878 /* stub_arm_classic.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = stub_arm_classic.hpp; sourceTree = "<group>"; };
 		F984A38010BB4B0D009E9878 /* branch_island.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = branch_island.cpp; sourceTree = "<group>"; };
 		F984A38110BB4B0D009E9878 /* branch_island.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = branch_island.h; sourceTree = "<group>"; };
@@ -399,8 +398,8 @@
 				F984A38110BB4B0D009E9878 /* branch_island.h */,
 				F9AA44DA1294885F00CB8390 /* branch_shim.cpp */,
 				F9AA44DB1294885F00CB8390 /* branch_shim.h */,
-				F9849E3410B38EF5009E9878 /* order_file.cpp */,
-				F9849E3510B38EF5009E9878 /* order_file.h */,
+				F9849E3410B38EF5009E9878 /* order.cpp */,
+				F9849E3510B38EF5009E9878 /* order.h */,
 				F9BA963310A2545C0097A440 /* compact_unwind.cpp */,
 				F9BA963410A2545C0097A440 /* compact_unwind.h */,
 				F9AA67B410570C41003E3539 /* dtrace_dof.h */,
@@ -432,7 +431,6 @@
 				F9BA8A7E1096150F0097A440 /* stub_x86_classic.hpp */,
 				F989D0391062E6350014B60C /* stub_x86_64.hpp */,
 				F92D9C2710657AAB00FF369B /* stub_x86_64_classic.hpp */,
-				F984963310AB9318009E9878 /* stub_ppc_classic.hpp */,
 			);
 			path = stubs;
 			sourceTree = "<group>";
@@ -702,7 +700,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
-			shellScript = "\nif [ -n \"${RC_PURPLE}\" ]; then\n\techo \"here\"\n\tmkdir -p  ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer/\n\tmv ${DSTROOT}/usr ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer\nfi\n";
+			shellScript = "\nif [ -n \"${DT_TOOLCHAIN_DIR}\" ]\nthen\n\tmkdir -p  \"${DSTROOT}/${DT_TOOLCHAIN_DIR}\"\n\tmv ${DSTROOT}/usr \"${DSTROOT}/${DT_TOOLCHAIN_DIR}\"\nelse\n\tif [ -n \"${RC_PURPLE}\" ]\n\tthen\n\t\tmkdir -p  ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer/\n\t\tmv ${DSTROOT}/usr ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer\n\tfi\nfi\n\n";
 			showEnvVarsInLog = 0;
 		};
 		F9E8DB4D11921594007B4D6A /* make config.h */ = {
@@ -745,7 +743,7 @@
 				F98498A310AE2159009E9878 /* compact_unwind.cpp in Sources */,
 				F98498A410AE2159009E9878 /* got.cpp in Sources */,
 				F9BA955E10A233000097A440 /* huge.cpp in Sources */,
-				F9849E3610B38EF5009E9878 /* order_file.cpp in Sources */,
+				F9849E3610B38EF5009E9878 /* order.cpp in Sources */,
 				F984A38210BB4B0D009E9878 /* branch_island.cpp in Sources */,
 				F9A4DB9110F816FF00BD8423 /* objc.cpp in Sources */,
 				F9AE20FF1107D1440007ED5D /* dylibs.cpp in Sources */,
@@ -873,7 +871,7 @@
 				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
-				DEAD_CODE_STRIPPING = NO;
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_DYNAMIC_NO_PIC = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -928,6 +926,7 @@
 				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_DYNAMIC_NO_PIC = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1106,6 +1105,7 @@
 				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
+				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_DYNAMIC_NO_PIC = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;

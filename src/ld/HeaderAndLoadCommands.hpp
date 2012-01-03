@@ -519,33 +519,15 @@ uint32_t HeaderAndLoadCommandsAtom<A>::flags() const
 	return bits;
 }
 
-template <> uint32_t HeaderAndLoadCommandsAtom<ppc>::magic() const		{ return MH_MAGIC; }
-template <> uint32_t HeaderAndLoadCommandsAtom<ppc64>::magic() const		{ return MH_MAGIC_64; }
 template <> uint32_t HeaderAndLoadCommandsAtom<x86>::magic() const		{ return MH_MAGIC; }
 template <> uint32_t HeaderAndLoadCommandsAtom<x86_64>::magic() const	{ return MH_MAGIC_64; }
 template <> uint32_t HeaderAndLoadCommandsAtom<arm>::magic() const		{ return MH_MAGIC; }
 
-template <> uint32_t HeaderAndLoadCommandsAtom<ppc>::cpuType() const	{ return CPU_TYPE_POWERPC; }
-template <> uint32_t HeaderAndLoadCommandsAtom<ppc64>::cpuType() const	{ return CPU_TYPE_POWERPC64; }
 template <> uint32_t HeaderAndLoadCommandsAtom<x86>::cpuType() const	{ return CPU_TYPE_I386; }
 template <> uint32_t HeaderAndLoadCommandsAtom<x86_64>::cpuType() const	{ return CPU_TYPE_X86_64; }
 template <> uint32_t HeaderAndLoadCommandsAtom<arm>::cpuType() const	{ return CPU_TYPE_ARM; }
 
 
-template <>
-uint32_t HeaderAndLoadCommandsAtom<ppc>::cpuSubType() const
-{
-	return _state.cpuSubType;
-}
-
-template <>
-uint32_t HeaderAndLoadCommandsAtom<ppc64>::cpuSubType() const
-{
-	if ( (_options.outputKind() == Options::kDynamicExecutable) && (_options.macosxVersionMin() >= ld::mac10_5) )
-		return (CPU_SUBTYPE_POWERPC_ALL | 0x80000000);
-	else
-		return CPU_SUBTYPE_POWERPC_ALL;
-}
 
 template <>
 uint32_t HeaderAndLoadCommandsAtom<x86>::cpuSubType() const
@@ -973,7 +955,7 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyDylibIDLoadCommand(uint8_t* p) const
 	cmd->set_cmdsize(sz);
 	cmd->set_name_offset();
 	cmd->set_timestamp(1);	// needs to be some constant value that is different than DylibLoadCommandsAtom uses
-	cmd->set_current_version(_options.currentVersion());
+	cmd->set_current_version(_options.currentVersion32());
 	cmd->set_compatibility_version(_options.compatibilityVersion());
 	strcpy((char*)&p[sizeof(macho_dylib_command<P>)], _options.installPath());
 	return p + sz;
@@ -1024,62 +1006,18 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p) const
 		cmd->set_cmd(LC_VERSION_MIN_MACOSX);
 		cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
 		cmd->set_version((uint32_t)macVersion);
-		cmd->set_reserved(0);
+		cmd->set_sdk(0);
 	}
 	else {
 		cmd->set_cmd(LC_VERSION_MIN_IPHONEOS);
 		cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
 		cmd->set_version((uint32_t)iOSVersion);
-		cmd->set_reserved(0);
+		cmd->set_sdk(0);
 	}
 	return p + sizeof(macho_version_min_command<P>);
 }
 
 
-template <>
-uint32_t HeaderAndLoadCommandsAtom<ppc>::threadLoadCommandSize() const
-{
-	return this->alignedSize(16 + 40*4);	// base size + PPC_THREAD_STATE_COUNT * 4
-}
-
-
-template <>
-uint8_t* HeaderAndLoadCommandsAtom<ppc>::copyThreadsLoadCommand(uint8_t* p) const
-{
-	assert(_state.entryPoint != NULL);
-	pint_t start = _state.entryPoint->finalAddress(); 
-	macho_thread_command<ppc::P>* cmd = (macho_thread_command<ppc::P>*)p;
-	cmd->set_cmd(LC_UNIXTHREAD);
-	cmd->set_cmdsize(threadLoadCommandSize());
-	cmd->set_flavor(1);				// PPC_THREAD_STATE
-	cmd->set_count(40);				// PPC_THREAD_STATE_COUNT;
-	cmd->set_thread_register(0, start);
-	if ( _options.hasCustomStack() )
-		cmd->set_thread_register(3, _options.customStackAddr());	// r1
-	return p + threadLoadCommandSize();
-}
-
-template <>
-uint32_t HeaderAndLoadCommandsAtom<ppc64>::threadLoadCommandSize() const
-{
-	return this->alignedSize(16 + 76*4);	// base size + PPC_THREAD_STATE64_COUNT * 4
-}
-
-template <>
-uint8_t* HeaderAndLoadCommandsAtom<ppc64>::copyThreadsLoadCommand(uint8_t* p) const
-{
-	assert(_state.entryPoint != NULL);
-	pint_t start = _state.entryPoint->finalAddress(); 
-	macho_thread_command<ppc::P>* cmd = (macho_thread_command<ppc::P>*)p;
-	cmd->set_cmd(LC_UNIXTHREAD);
-	cmd->set_cmdsize(threadLoadCommandSize());
-	cmd->set_flavor(5);				// PPC_THREAD_STATE64
-	cmd->set_count(76);				// PPC_THREAD_STATE64_COUNT;
-	cmd->set_thread_register(0, start);
-	if ( _options.hasCustomStack() )
-		cmd->set_thread_register(3, _options.customStackAddr());	// r1
-	return p + threadLoadCommandSize();
-}
 
 template <>
 uint32_t HeaderAndLoadCommandsAtom<x86>::threadLoadCommandSize() const

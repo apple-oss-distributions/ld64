@@ -1066,9 +1066,6 @@ void MachOChecker<ppc>::checkLocalReloation(const macho_relocation_info<P>* relo
 	
 	}
 	else {
-		// ignore pair relocs
-		if ( reloc->r_type() == PPC_RELOC_PAIR ) 
-			return;
 		// FIX
 		if ( ! this->addressInWritableSegment(reloc->r_address() + this->relocBase()) )
 			throwf("local relocation address 0x%08X not in writable segment", reloc->r_address());

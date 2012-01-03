@@ -1153,16 +1153,8 @@ void doPass(const Options& opts, ld::Internal& state)
 				state.addAtom(*new ObjCImageInfoAtom<x86>(state.objcObjectConstraint, compaction, 
 							state.hasObjcReplacementClasses, opts.objCABIVersion2POverride() ? true : false));
 				break;
-			case CPU_TYPE_POWERPC:
-				state.addAtom(*new ObjCImageInfoAtom<ppc>(state.objcObjectConstraint, compaction, 
-							state.hasObjcReplacementClasses, false));
-				break;
 			case CPU_TYPE_ARM:
 				state.addAtom(*new ObjCImageInfoAtom<arm>(state.objcObjectConstraint, compaction, 
-							state.hasObjcReplacementClasses, true));
-				break;
-			case CPU_TYPE_POWERPC64:
-				state.addAtom(*new ObjCImageInfoAtom<ppc64>(state.objcObjectConstraint, compaction, 
 							state.hasObjcReplacementClasses, true));
 				break;
 			default:
@@ -1184,9 +1176,6 @@ void doPass(const Options& opts, ld::Internal& state)
 			case CPU_TYPE_ARM:
 				// disable optimization until fully tested
 				//OptimizeCategories<arm>::doit(opts, state);
-				break;
-			case CPU_TYPE_POWERPC64:
-			case CPU_TYPE_POWERPC:
 				break;
 			default:
 				assert(0 && "unknown objc arch");

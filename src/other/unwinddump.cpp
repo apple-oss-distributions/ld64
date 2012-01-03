@@ -104,8 +104,6 @@ private:
 };
 
 
-template <>	 const char*	UnwindPrinter<ppc>::archName()		{ return "ppc"; }
-template <>	 const char*	UnwindPrinter<ppc64>::archName()	{ return "ppc64"; }
 template <>	 const char*	UnwindPrinter<x86>::archName()		{ return "i386"; }
 template <>	 const char*	UnwindPrinter<x86_64>::archName()	{ return "x86_64"; }
 template <>	 const char*	UnwindPrinter<arm>::archName()		{ return "arm"; }

@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2010 Apple Inc. All rights reserved.
+# Copyright (c) 2010-2011 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,8 +23,10 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
+
 #
 # <rdar://problem/7438246> LTO with 'dead code strip' can't ignore unused functions with undefined references
+# <rdar://problem/10052396> LTO many have eliminated need for some undefines
 #
 
 run: all
@@ -32,7 +34,8 @@ run: all
 all:
 	${CC} ${CCFLAGS} -flto bar.c  -c -o bar.o
 	${CC} ${CCFLAGS} -flto main.c -c -o main.o 
-	${CC} ${CCFLAGS} -dead_strip main.o bar.o -o main
+	${CC} ${CCFLAGS} main.o bar.o -o main
+	${CC} ${CCFLAGS} main.o bar.o -o main -dead_strip 
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:
