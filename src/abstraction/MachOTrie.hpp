@@ -360,8 +360,10 @@ static inline void processExportNode(const uint8_t* const start, const uint8_t* 
 			++edgeStrLen;
 		}
 		cummulativeString[curStrOffset+edgeStrLen] = *s++;
-		uint32_t childNodeOffet = read_uleb128(s, end);
-		processExportNode(start, start+childNodeOffet, end, cummulativeString, curStrOffset+edgeStrLen, output);	
+		uint32_t childNodeOffset = read_uleb128(s, end);
+		if (childNodeOffset == 0)
+			throw "malformed trie, childNodeOffset==0";
+		processExportNode(start, start+childNodeOffset, end, cummulativeString, curStrOffset+edgeStrLen, output);
 	}
 }
 

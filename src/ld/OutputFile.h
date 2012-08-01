@@ -74,6 +74,7 @@ public:
 	bool						_noReExportedDylibs;
 	bool						hasThreadLocalVariableDefinitions;
 	bool						pieDisabled;
+	bool						hasDataInCode;
 	ld::Internal::FinalSection*	headerAndLoadCommandsSection;
 	ld::Internal::FinalSection*	rebaseSection;
 	ld::Internal::FinalSection*	bindingSection;
@@ -82,6 +83,8 @@ public:
 	ld::Internal::FinalSection*	exportSection;
 	ld::Internal::FinalSection*	splitSegInfoSection;
 	ld::Internal::FinalSection*	functionStartsSection;
+	ld::Internal::FinalSection*	dataInCodeSection;
+	ld::Internal::FinalSection*	dependentDRsSection;
 	ld::Internal::FinalSection*	symbolTableSection;
 	ld::Internal::FinalSection*	stringPoolSection;
 	ld::Internal::FinalSection*	localRelocationsSection;
@@ -137,6 +140,8 @@ public:
 	};
 	
 private:
+	void						writeAtoms(ld::Internal& state, uint8_t* wholeBuffer);
+	void						computeContentUUID(ld::Internal& state, uint8_t* wholeBuffer);
 	void						buildDylibOrdinalMapping(ld::Internal&);
 	bool						hasOrdinalForInstallPath(const char* path, int* ordinal);
 	void						addLoadCommands(ld::Internal& state);
@@ -243,6 +248,8 @@ private:
 	const bool								_hasSectionRelocations;
 	const bool								_hasSplitSegInfo;
 	const bool								_hasFunctionStartsInfo;
+	const bool								_hasDataInCodeInfo;
+	const bool								_hasDependentDRInfo;
 		  bool								_hasDynamicSymbolTable;
 		  bool								_hasLocalRelocations;
 		  bool								_hasExternalRelocations;
@@ -280,6 +287,8 @@ public:
 	class LinkEditAtom*						_exportInfoAtom;
 	class LinkEditAtom*						_splitSegInfoAtom;
 	class LinkEditAtom*						_functionStartsAtom;
+	class LinkEditAtom*						_dataInCodeAtom;
+	class LinkEditAtom*						_dependentDRInfoAtom;
 };
 
 } // namespace tool 

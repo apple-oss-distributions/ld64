@@ -77,9 +77,9 @@ class File : public ld::File
 {
 public:
 								File(const char* segmentName, const char* sectionName, const char* pth, 
-									const uint8_t fileContent[], uint64_t fileLength, uint32_t ord, 
+									const uint8_t fileContent[], uint64_t fileLength, Ordinal ord, 
 									const char* symbolName="dof")
-									: ld::File(pth, 0, ord),
+									: ld::File(pth, 0, ord, Other),
 									  _atom(*this, symbolName, fileContent, fileLength), 
 									  _section(segmentName, sectionName, ld::Section::typeDtraceDOF) { }
 	virtual						~File() {}
@@ -299,7 +299,7 @@ void doPass(const Options& opts, ld::Internal& internal)
 			sectionNamesUsed.insert(sectionName);
 			char symbolName[strlen(providerName)+64];
 			sprintf(symbolName, "__dtrace_dof_for_provider_%s", providerName);
-			File* f = new File("__TEXT", sectionName, "dtrace", p, dofSectionSize, 0, symbolName);
+			File* f = new File("__TEXT", sectionName, "dtrace", p, dofSectionSize, ld::File::Ordinal::NullOrdinal(), symbolName);
 			if ( log ) {
 				fprintf(stderr, "libdtrace created DOF of size %ld\n", dofSectionSize);
 			}

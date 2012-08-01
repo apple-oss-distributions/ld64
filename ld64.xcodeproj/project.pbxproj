@@ -43,6 +43,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		B3B672421406D42800A376BB /* Snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B3B672411406D42800A376BB /* Snapshot.cpp */; };
 		F9023C4E06D5A272001BBF46 /* ld.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9023C3F06D5A254001BBF46 /* ld.cpp */; };
 		F933E3D9092E855B0083EAC8 /* ObjectDump.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F971EED706D5AD240041D381 /* ObjectDump.cpp */; };
 		F93CB248116E69EB003233B8 /* tlvp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F93CB246116E69EB003233B8 /* tlvp.cpp */; };
@@ -76,6 +77,7 @@
 		F9BA955E10A233000097A440 /* huge.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9BA955C10A233000097A440 /* huge.cpp */; };
 		F9C0D4BD06DD28D2001C7193 /* Options.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9C0D48A06DD1E1B001C7193 /* Options.cpp */; };
 		F9C12EA30ED63DE7005BC69D /* dyldinfo.1 in install man page */ = {isa = PBXBuildFile; fileRef = F9C12E9F0ED63DB1005BC69D /* dyldinfo.1 */; };
+		F9CC24191461FB4300A92174 /* blob.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9CC24141461FB4300A92174 /* blob.cpp */; };
 		F9EA72D5097454FF008B4F1D /* machochecker.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9EA72D4097454FF008B4F1D /* machochecker.cpp */; };
 		F9EA7584097882F3008B4F1D /* debugline.c in Sources */ = {isa = PBXBuildFile; fileRef = F9EA7582097882F3008B4F1D /* debugline.c */; };
 		F9EA75BC09788857008B4F1D /* debugline.c in Sources */ = {isa = PBXBuildFile; fileRef = F9EA7582097882F3008B4F1D /* debugline.c */; };
@@ -239,7 +241,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
-		C02A29DE0953B26E001FB8C1 /* ChangeLog */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text; path = ChangeLog; sourceTree = "<group>"; };
+		B3B672411406D42800A376BB /* Snapshot.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = Snapshot.cpp; path = src/ld/Snapshot.cpp; sourceTree = "<group>"; };
+		B3B672441406D44300A376BB /* Snapshot.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Snapshot.h; path = src/ld/Snapshot.h; sourceTree = "<group>"; };
+		B3C7A09914295B9C005FC714 /* compile_stubs */ = {isa = PBXFileReference; lastKnownFileType = text.script.csh; path = compile_stubs; sourceTree = "<group>"; };
 		F9023C3906D5A23E001BBF46 /* ld */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ld; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9023C3F06D5A254001BBF46 /* ld.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ld.cpp; path = src/ld/ld.cpp; sourceTree = "<group>"; };
 		F92D9C2710657AAB00FF369B /* stub_x86_64_classic.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = stub_x86_64_classic.hpp; sourceTree = "<group>"; };
@@ -311,6 +315,12 @@
 		F9C0D48A06DD1E1B001C7193 /* Options.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = Options.cpp; path = src/ld/Options.cpp; sourceTree = "<group>"; };
 		F9C0D48B06DD1E1B001C7193 /* Options.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = Options.h; path = src/ld/Options.h; sourceTree = "<group>"; };
 		F9C12E9F0ED63DB1005BC69D /* dyldinfo.1 */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.man; name = dyldinfo.1; path = doc/man/man1/dyldinfo.1; sourceTree = "<group>"; };
+		F9CC24141461FB4300A92174 /* blob.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = blob.cpp; sourceTree = "<group>"; };
+		F9CC24151461FB4300A92174 /* blob.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = blob.h; sourceTree = "<group>"; };
+		F9CC24161461FB4300A92174 /* endian.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = endian.h; sourceTree = "<group>"; };
+		F9CC24171461FB4300A92174 /* memutils.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = memutils.h; sourceTree = "<group>"; };
+		F9CC24181461FB4300A92174 /* superblob.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = superblob.h; sourceTree = "<group>"; };
+		F9CCF761144CE1AD007CB524 /* create_configure */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.script.sh; name = create_configure; path = src/create_configure; sourceTree = "<group>"; };
 		F9EA72CB097454A6008B4F1D /* machocheck */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = machocheck; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9EA72D4097454FF008B4F1D /* machochecker.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = machochecker.cpp; path = src/other/machochecker.cpp; sourceTree = "<group>"; };
 		F9EA7582097882F3008B4F1D /* debugline.c */ = {isa = PBXFileReference; fileEncoding = 30; indentWidth = 2; lastKnownFileType = sourcecode.c.c; name = debugline.c; path = src/ld/debugline.c; sourceTree = "<group>"; tabWidth = 8; usesTabs = 1; };
@@ -368,7 +378,6 @@
 		F9023C2C06D5A227001BBF46 = {
 			isa = PBXGroup;
 			children = (
-				C02A29DE0953B26E001FB8C1 /* ChangeLog */,
 				F9B813A80EC27B6300F94C13 /* abstraction */,
 				F9B813AD0EC27B8500F94C13 /* ld */,
 				F9B813B00EC27B9E00F94C13 /* other */,
@@ -492,11 +501,14 @@
 				F989D7E91072DEC20014B60C /* HeaderAndLoadCommands.hpp */,
 				F989D3AA10684F5B0014B60C /* LinkEdit.hpp */,
 				F989D44B10694F2E0014B60C /* LinkEditClassic.hpp */,
+				F9CC24131461FB4300A92174 /* code-sign-blobs */,
 				F9AA650B1051BD2B003E3539 /* passes */,
 				F9AA65861051E750003E3539 /* parsers */,
 				F933DC37092A82480083EAC8 /* Architectures.hpp */,
 				F9EA7582097882F3008B4F1D /* debugline.c */,
 				F9EA7583097882F3008B4F1D /* debugline.h */,
+				B3B672411406D42800A376BB /* Snapshot.cpp */,
+				B3B672441406D44300A376BB /* Snapshot.h */,
 			);
 			name = ld;
 			sourceTree = "<group>";
@@ -504,6 +516,8 @@
 		F9B813B00EC27B9E00F94C13 /* other */ = {
 			isa = PBXGroup;
 			children = (
+				B3C7A09914295B9C005FC714 /* compile_stubs */,
+				F9CCF761144CE1AD007CB524 /* create_configure */,
 				F9EA72D4097454FF008B4F1D /* machochecker.cpp */,
 				F971EED706D5AD240041D381 /* ObjectDump.cpp */,
 				F9BA515B0ECE58AA00D1D62E /* dyldinfo.cpp */,
@@ -515,6 +529,19 @@
 			name = other;
 			sourceTree = "<group>";
 		};
+		F9CC24131461FB4300A92174 /* code-sign-blobs */ = {
+			isa = PBXGroup;
+			children = (
+				F9CC24141461FB4300A92174 /* blob.cpp */,
+				F9CC24151461FB4300A92174 /* blob.h */,
+				F9CC24161461FB4300A92174 /* endian.h */,
+				F9CC24171461FB4300A92174 /* memutils.h */,
+				F9CC24181461FB4300A92174 /* superblob.h */,
+			);
+			name = "code-sign-blobs";
+			path = "src/ld/code-sign-blobs";
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -522,7 +549,8 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F933D91B09291AC90083EAC8 /* Build configuration list for PBXNativeTarget "ld" */;
 			buildPhases = (
-				F9E8DB4D11921594007B4D6A /* make config.h */,
+				F9E8DB4D11921594007B4D6A /* make configure.h */,
+				B3C7A09714295B60005FC714 /* make compile_stub string */,
 				F9023C3606D5A23E001BBF46 /* Sources */,
 				F9023C3706D5A23E001BBF46 /* Frameworks */,
 				F97F5025070D0B6300B9FCD7 /* copy man page */,
@@ -542,6 +570,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F933D91F09291AC90083EAC8 /* Build configuration list for PBXNativeTarget "ObjectDump" */;
 			buildPhases = (
+				F9CCF773144CE304007CB524 /* make configure.h */,
 				F971EED006D5ACF60041D381 /* Sources */,
 				F971EED106D5ACF60041D381 /* Frameworks */,
 			);
@@ -558,6 +587,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F9A3DDCF0ED762C100C590B9 /* Build configuration list for PBXNativeTarget "libprunetrie" */;
 			buildPhases = (
+				F9CCF781144CE3DF007CB524 /* make configure.h */,
 				F9A3DDC70ED762B700C590B9 /* Sources */,
 				F9A3DE140ED76D7700C590B9 /* CopyFiles */,
 			);
@@ -574,6 +604,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F9B670050DDA176100E6D0DA /* Build configuration list for PBXNativeTarget "unwinddump" */;
 			buildPhases = (
+				F9CCF77C144CE36B007CB524 /* make configure.h */,
 				F9B670020DDA176100E6D0DA /* Sources */,
 				F9B670040DDA176100E6D0DA /* Frameworks */,
 				F9B813870EC2659600F94C13 /* install man page */,
@@ -591,6 +622,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F9BA516D0ECE58DA00D1D62E /* Build configuration list for PBXNativeTarget "dyldinfo" */;
 			buildPhases = (
+				F9CCF76B144CE2AD007CB524 /* make configure.h */,
 				F9BA515E0ECE58BE00D1D62E /* Sources */,
 				F9BA515F0ECE58BE00D1D62E /* Frameworks */,
 				F9C12EA50ED63E05005BC69D /* install man page */,
@@ -608,6 +640,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F9EA72CF097454D5008B4F1D /* Build configuration list for PBXNativeTarget "machocheck" */;
 			buildPhases = (
+				F9CCF76F144CE2D6007CB524 /* make configure.h */,
 				F9EA72C8097454A6008B4F1D /* Sources */,
 				F9EA72C9097454A6008B4F1D /* Frameworks */,
 			);
@@ -624,6 +657,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = F9EC77F00A2F8616002A3E39 /* Build configuration list for PBXNativeTarget "rebase" */;
 			buildPhases = (
+				F9CCF765144CE244007CB524 /* make configure.h */,
 				F9EC77EB0A2F85F6002A3E39 /* Sources */,
 				F9EC77EC0A2F85F6002A3E39 /* Frameworks */,
 				F9B1A25E0A3A44CB00DA8FAB /* install man page */,
@@ -674,6 +708,23 @@
 /* End PBXProject section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		B3C7A09714295B60005FC714 /* make compile_stub string */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/compile_stubs",
+			);
+			name = "make compile_stub string";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/compile_stubs.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/csh;
+			shellScript = "echo \"static const char *compile_stubs = \" > $DERIVED_FILE_DIR/compile_stubs.h\ncat compile_stubs | sed s/\\\"/\\\\\\\\\\\"/g | sed s/^/\\\"/ | sed s/\\$/\\\\\\\\n\\\"/ >> $DERIVED_FILE_DIR/compile_stubs.h\necho \";\" >> $DERIVED_FILE_DIR/compile_stubs.h";
+			showEnvVarsInLog = 0;
+		};
 		F96D5367094A2754008E9EE8 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -685,7 +736,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/csh;
-			shellScript = "# Let tests set MACOSX_DEPLOYMENT_TARGET as they need\nunsetenv MACOSX_DEPLOYMENT_TARGET\n\n# make linker relative libLTO.dylib\nmkdir -p ${BUILD_DIR}/lib\nln -sf /Developer/usr/lib/libLTO.dylib ${BUILD_DIR}/lib/libLTO.dylib\n\n# always use new linker\nsetenv LD_NO_CLASSIC_LINKER\nsetenv LD_NO_CLASSIC_LINKER_STATIC\n\n# run full test suite\n\"$SRCROOT\"/unit-tests/run-all-unit-tests\n\nexit 0";
+			shellScript = "# Let tests set MACOSX_DEPLOYMENT_TARGET as they need\nunsetenv MACOSX_DEPLOYMENT_TARGET\n\n# make linker relative libLTO.dylib\nmkdir -p ${BUILD_DIR}/lib\nln -sf /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/libLTO.dylib ${BUILD_DIR}/lib/libLTO.dylib\n\n# always use new linker\nsetenv LD_NO_CLASSIC_LINKER\nsetenv LD_NO_CLASSIC_LINKER_STATIC\n\n# run full test suite\n\"$SRCROOT\"/unit-tests/run-all-unit-tests\n\nexit 0";
 			showEnvVarsInLog = 0;
 		};
 		F9871A3413340B4600DB3F24 /* Platform install */ = {
@@ -700,23 +751,119 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
-			shellScript = "\nif [ -n \"${DT_TOOLCHAIN_DIR}\" ]\nthen\n\tmkdir -p  \"${DSTROOT}/${DT_TOOLCHAIN_DIR}\"\n\tmv ${DSTROOT}/usr \"${DSTROOT}/${DT_TOOLCHAIN_DIR}\"\nelse\n\tif [ -n \"${RC_PURPLE}\" ]\n\tthen\n\t\tmkdir -p  ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer/\n\t\tmv ${DSTROOT}/usr ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer\n\tfi\nfi\n\n";
+			shellScript = "\nif [ -n \"${DT_TOOLCHAIN_DIR}\" ]\nthen\n\tmkdir -p  \"${DSTROOT}/${DT_TOOLCHAIN_DIR}\"\n\tmv ${DSTROOT}/usr \"${DSTROOT}/${DT_TOOLCHAIN_DIR}\"\nelse\n\tif [ -n \"${RC_PURPLE}\" ]\n\tthen\n\t\tmkdir -p  ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer/\n\t\tmv ${DSTROOT}/usr ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer\n\telse\n\t\tmkdir -p  ${DSTROOT}/Developer/usr/bin\n\t\tcp ${DSTROOT}/usr/bin/ld  ${DSTROOT}/Developer/usr/bin\n\tfi\nfi\n\n";
 			showEnvVarsInLog = 0;
 		};
-		F9E8DB4D11921594007B4D6A /* make config.h */ = {
+		F9CCF765144CE244007CB524 /* make configure.h */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 			);
 			inputPaths = (
 			);
-			name = "make config.h";
+			name = "make configure.h";
 			outputPaths = (
 				"$(DERIVED_FILE_DIR)/configure.h",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "echo \"\" > ${DERIVED_FILE_DIR}/configure.h\n\nif [ -n \"${IPHONEOS_DEPLOYMENT_TARGET}\" ]; then\n\techo \"#define DEFAULT_IPHONEOS_MIN_VERSION \\\"${IPHONEOS_DEPLOYMENT_TARGET}\\\"\" >> ${DERIVED_FILE_DIR}/configure.h\nelse\n  if [ -n \"${MACOSX_DEPLOYMENT_TARGET}\" ]; then\n\techo \"#define DEFAULT_MACOSX_MIN_VERSION \\\"${MACOSX_DEPLOYMENT_TARGET}\\\"\" >> ${DERIVED_FILE_DIR}/configure.h\n  fi\nfi\n";
+			shellScript = "${SRCROOT}/src/create_configure\n";
+			showEnvVarsInLog = 0;
+		};
+		F9CCF76B144CE2AD007CB524 /* make configure.h */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "make configure.h";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/configure.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "${SRCROOT}/src/create_configure\n";
+			showEnvVarsInLog = 0;
+		};
+		F9CCF76F144CE2D6007CB524 /* make configure.h */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "make configure.h";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/configure.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "${SRCROOT}/src/create_configure\n";
+			showEnvVarsInLog = 0;
+		};
+		F9CCF773144CE304007CB524 /* make configure.h */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "make configure.h";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/configure.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "${SRCROOT}/src/create_configure\n";
+			showEnvVarsInLog = 0;
+		};
+		F9CCF77C144CE36B007CB524 /* make configure.h */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "make configure.h";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/configure.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "${SRCROOT}/src/create_configure\n";
+			showEnvVarsInLog = 0;
+		};
+		F9CCF781144CE3DF007CB524 /* make configure.h */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "make configure.h";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/configure.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "${SRCROOT}/src/create_configure\n";
+			showEnvVarsInLog = 0;
+		};
+		F9E8DB4D11921594007B4D6A /* make configure.h */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "make configure.h";
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/configure.h",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "${SRCROOT}/src/create_configure\n";
 			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
@@ -749,6 +896,8 @@
 				F9AE20FF1107D1440007ED5D /* dylibs.cpp in Sources */,
 				F93CB248116E69EB003233B8 /* tlvp.cpp in Sources */,
 				F9AA44DC1294885F00CB8390 /* branch_shim.cpp in Sources */,
+				B3B672421406D42800A376BB /* Snapshot.cpp in Sources */,
+				F9CC24191461FB4300A92174 /* blob.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -867,8 +1016,6 @@
 		F933D91C09291AC90083EAC8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1)";
-				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
@@ -892,7 +1039,7 @@
 				GCC_WARN_MISSING_PARENTHESES = YES;
 				GCC_WARN_NON_VIRTUAL_DESTRUCTOR = NO;
 				GCC_WARN_PEDANTIC = NO;
-				GCC_WARN_SHADOW = YES;
+				GCC_WARN_SHADOW = NO;
 				GCC_WARN_SIGN_COMPARE = YES;
 				GCC_WARN_TYPECHECK_CALLS_TO_PRINTF = YES;
 				GCC_WARN_UNINITIALIZED_AUTOS = NO;
@@ -903,6 +1050,7 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
+					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/include",
 				);
@@ -910,7 +1058,10 @@
 				LINKER_DISPLAYS_MANGLED_NAMES = NO;
 				MACOSX_DEPLOYMENT_TARGET = "";
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
-				OTHER_LDFLAGS = "-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib";
+				OTHER_LDFLAGS = (
+					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
+					"-Wl,-exported_symbol,__mh_execute_header",
+				);
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;
 				SECTORDER_FLAGS = "";
@@ -922,8 +1073,6 @@
 		F933D91D09291AC90083EAC8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1)";
-				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
@@ -962,13 +1111,14 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
+					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/include",
 				);
 				INSTALL_PATH = /usr/bin;
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
 				OTHER_LDFLAGS = (
-					"-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib",
+					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
 				PREBINDING = NO;
@@ -985,8 +1135,6 @@
 		F933D92009291AC90083EAC8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1)";
-				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1006,7 +1154,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
-				OTHER_LDFLAGS = "-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib";
+				OTHER_LDFLAGS = "@$(DERIVED_SOURCES_DIR)/LTO_option.txt";
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
@@ -1033,7 +1181,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
-				OTHER_LDFLAGS = "-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib";
+				OTHER_LDFLAGS = "@$(DERIVED_SOURCES_DIR)/LTO_option.txt";
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
@@ -1048,6 +1196,8 @@
 		F933D92409291AC90083EAC8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1)";
+				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
 			};
@@ -1056,6 +1206,8 @@
 		F933D92509291AC90083EAC8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1)";
+				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
 			};
@@ -1082,6 +1234,8 @@
 		F9849FF810B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1)";
+				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
 			};
@@ -1101,8 +1255,6 @@
 		F9849FFA10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				ARCHS = "$(ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1)";
-				ARCHS_STANDARD_64_BIT_PRE_XCODE_3_1 = x86_64;
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
@@ -1140,13 +1292,14 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
+					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/include",
 				);
 				INSTALL_PATH = /usr/bin;
 				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
 				OTHER_LDFLAGS = (
-					"-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib",
+					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
 				PREBINDING = NO;
@@ -1213,7 +1366,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
-				OTHER_LDFLAGS = "-Wl,-lazy_library,/Developer/usr/lib/libLTO.dylib";
+				OTHER_LDFLAGS = "@$(DERIVED_SOURCES_DIR)/LTO_option.txt";
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;

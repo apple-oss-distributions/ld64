@@ -70,7 +70,7 @@ template <typename A>
 class File : public ld::relocatable::File
 {
 public:
-											File(const char* p, time_t mTime, const uint8_t* content, uint32_t ord) :
+											File(const char* p, time_t mTime, const uint8_t* content, ld::File::Ordinal ord) :
 												ld::relocatable::File(p,mTime,ord), _fileContent(content),
 												_sectionsArray(NULL), _atomsArray(NULL),
 												_sectionsArrayCount(0), _atomsArrayCount(0),
@@ -80,7 +80,7 @@ public:
 												_dwarfDebugLineSect(NULL), _dwarfDebugStringSect(NULL), 
 												_objConstraint(ld::File::objcConstraintNone),
 												_cpuSubType(0),
-												_ojcReplacmentClass(false),  _canScatterAtoms(false) {}
+												_canScatterAtoms(false) {}
 	virtual									~File();
 
 	// overrides of ld::File
@@ -89,7 +89,6 @@ public:
 																					{ return false; }
 	
 	// overrides of ld::relocatable::File 
-	virtual bool										objcReplacementClasses() const	{ return _ojcReplacmentClass; }
 	virtual ObjcConstraint								objCConstraint() const			{ return _objConstraint; }
 	virtual uint32_t									cpuSubType() const				{ return _cpuSubType; }
 	virtual DebugInfoKind								debugInfo() const				{ return _debugInfoKind; }
@@ -124,7 +123,6 @@ private:
 	const macho_section<P>*					_dwarfDebugStringSect;
 	ld::File::ObjcConstraint				_objConstraint;
 	uint32_t								_cpuSubType;
-	bool									_ojcReplacmentClass;
 	bool									_canScatterAtoms;
 };
 
@@ -861,8 +859,9 @@ public:
 																cpu_subtype_t subtype=0);
 	static const char*								fileKind(const uint8_t* fileContent);
 	static bool										hasObjC2Categories(const uint8_t* fileContent);
+	static bool										hasObjC1Categories(const uint8_t* fileContent);
 	static ld::relocatable::File*					parse(const uint8_t* fileContent, uint64_t fileLength, 
-															const char* path, time_t modTime, uint32_t ordinal,
+															const char* path, time_t modTime, ld::File::Ordinal ordinal,
 															 const ParserOptions& opts) {
 																Parser p(fileContent, fileLength, path, modTime, 
 																		ordinal, opts.convertUnwindInfo);
@@ -972,6 +971,7 @@ public:
 	void											addDtraceExtraInfos(const SourceLocation& src, const char* provider);
 	const char*										scanSymbolTableForAddress(uint64_t addr);
 	bool											convertUnwindInfo() { return _convertUnwindInfo; }
+	bool											hasDataInCodeLabels() { return _hasDataInCodeLabels; }
 
 	
 	void							addFixups(const SourceLocation& src, ld::Fixup::Kind kind, const TargetDesc& target);
@@ -1048,7 +1048,7 @@ private:
 
 													Parser(const uint8_t* fileContent, uint64_t fileLength, 
 															const char* path, time_t modTime, 
-															uint32_t ordinal, bool convertUnwindInfo);
+															ld::File::Ordinal ordinal, bool convertUnwindInfo);
 	ld::relocatable::File*							parse(const ParserOptions& opts);
 	uint8_t											loadCommandSizeMask();
 	bool											parseLoadCommands();
@@ -1075,7 +1075,7 @@ private:
 	uint32_t									_fileLength;
 	const char*									_path;
 	time_t										_modTime;
-	uint32_t									_ordinal;
+	ld::File::Ordinal							_ordinal;
 	
 	// filled in by parseLoadCommands()
 	File<A>*									_file;
@@ -1102,6 +1102,7 @@ private:
 	bool										_AppleObjc; // FSF has objc that uses different data layout
 	bool										_overlappingSymbols;
 	bool										_convertUnwindInfo;
+	bool										_hasDataInCodeLabels;
 	unsigned int								_stubsSectionNum;
 	const macho_section<P>*						_stubsMachOSection;
 	std::vector<const char*>					_dtraceProviderInfo;
@@ -1112,7 +1113,7 @@ private:
 
 template <typename A>
 Parser<A>::Parser(const uint8_t* fileContent, uint64_t fileLength, const char* path, time_t modTime, 
-					uint32_t ordinal, bool convertDUI)
+					ld::File::Ordinal ordinal, bool convertDUI)
 		: _fileContent(fileContent), _fileLength(fileLength), _path(path), _modTime(modTime),
 			_ordinal(ordinal), _file(NULL),
 			_symbols(NULL), _symbolCount(0), _strings(NULL), _stringsSize(0),
@@ -1122,7 +1123,7 @@ Parser<A>::Parser(const uint8_t* fileContent, uint64_t fileLength, const char* p
 			_EHFrameSection(NULL), _compactUnwindSection(NULL), _absoluteSection(NULL),
 			_tentativeDefinitionCount(0), _absoluteSymbolCount(0),
 			_symbolsInSections(0), _hasLongBranchStubs(false),  _AppleObjc(false),
-			_overlappingSymbols(false), _convertUnwindInfo(convertDUI), 
+			_overlappingSymbols(false), _convertUnwindInfo(convertDUI), _hasDataInCodeLabels(false), 
 			_stubsSectionNum(0), _stubsMachOSection(NULL)
 {
 }
@@ -1207,9 +1208,9 @@ const char* Parser<arm>::fileKind(const uint8_t* fileContent)
 		return NULL;
 	if ( header->cputype() != CPU_TYPE_ARM )
 		return NULL;
-	for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
-		if ( t->subType == (cpu_subtype_t)header->cpusubtype() ) {
-			return t->subTypeName;
+	for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
+		if ( (t->cpuType == CPU_TYPE_ARM) && ((cpu_subtype_t)header->cpusubtype() == t->cpuSubType) ) {
+			return t->archName;
 		}
 	}
 	return "arm???";
@@ -1233,6 +1234,35 @@ bool Parser<A>::hasObjC2Categories(const uint8_t* fileContent)
 				if ( (sect->size() > 0) 
 					&& (strcmp(sect->sectname(), "__objc_catlist") == 0)
 					&& (strcmp(sect->segname(), "__DATA") == 0) ) {
+						return true;
+				}
+			}
+		}
+		cmd = (const macho_load_command<P>*)(((char*)cmd)+cmd->cmdsize());
+		if ( cmd > cmdsEnd )
+			throwf("malformed mach-o file, load command #%d is outside size of load commands", i);
+	}
+	return false;
+}
+
+
+template <typename A>
+bool Parser<A>::hasObjC1Categories(const uint8_t* fileContent)
+{
+	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	const uint32_t cmd_count = header->ncmds();
+	const macho_load_command<P>* const cmds = (macho_load_command<P>*)((char*)header + sizeof(macho_header<P>));
+	const macho_load_command<P>* const cmdsEnd = (macho_load_command<P>*)((char*)header + sizeof(macho_header<P>) + header->sizeofcmds());
+	const macho_load_command<P>* cmd = cmds;
+	for (uint32_t i = 0; i < cmd_count; ++i) {
+		if ( cmd->cmd() == macho_segment_command<P>::CMD ) {
+			const macho_segment_command<P>*	segment = (macho_segment_command<P>*)cmd;
+			const macho_section<P>* sectionsStart = (macho_section<P>*)((char*)segment + sizeof(macho_segment_command<P>));
+			for (uint32_t si=0; si < segment->nsects(); ++si) {
+				const macho_section<P>* sect = &sectionsStart[si];
+				if ( (sect->size() > 0) 
+					&& (strcmp(sect->sectname(), "__category") == 0)
+					&& (strcmp(sect->segname(), "__OBJC") == 0) ) {
 						return true;
 				}
 			}
@@ -1724,6 +1754,7 @@ void Parser<A>::prescanSymbolTable()
 	_tentativeDefinitionCount = 0;
 	_absoluteSymbolCount = 0;
 	_symbolsInSections = 0;
+	_hasDataInCodeLabels = false;
 	for (uint32_t i=0; i < this->_symbolCount; ++i) {
 		const macho_nlist<P>& sym =	symbolFromIndex(i);
 		// ignore stabs
@@ -1769,9 +1800,12 @@ void Parser<A>::prescanSymbolTable()
 			continue;
 		
 		// 'L' labels do not denote atom breaks
-		if ( symbolName[0] == 'L' )
+		if ( symbolName[0] == 'L' ) {
+			// <rdar://problem/9218847> Formalize data in code with L$start$ labels
+			if ( strncmp(symbolName, "L$start$", 8) == 0 ) 
+				_hasDataInCodeLabels = true;
 			continue;
-		
+		}
 		// how many def syms in each section
 		if ( sym.n_sect() > _machOSectionsCount )
 			throw "bad n_sect in symbol table";
@@ -1986,8 +2020,6 @@ void Parser<A>::makeSections()
 					_file->_objConstraint = ld::File::objcConstraintRetainReleaseOrGC;
 				else
 					_file->_objConstraint = ld::File::objcConstraintRetainRelease;
-				if ( (flags & 1) == 1 )
-					_file->_ojcReplacmentClass = true;
 				if ( sect->size() > 8 ) {
 					warning("section %s/%s has unexpectedly large size %llu in %s", 
 							sect->segname(), Section<A>::makeSectionName(sect), sect->size(), _file->path());
@@ -5532,6 +5564,7 @@ bool Section<x86>::addRelocFixup(class Parser<x86>& parser, const macho_relocati
 	
 
 
+#if SUPPORT_ARCH_arm_any
 template <>
 bool Section<arm>::addRelocFixup(class Parser<arm>& parser, const macho_relocation_info<P>* reloc)
 {
@@ -5984,6 +6017,7 @@ bool Section<arm>::addRelocFixup(class Parser<arm>& parser, const macho_relocati
 	}
 	return result;
 }
+#endif
 
 
 
@@ -6116,6 +6150,46 @@ void Section<A>::makeFixups(class Parser<A>& parser, const struct Parser<A>::CFI
 		}
 	}
 	
+	// <rdar://problem/9218847> track data-in-code
+	if ( parser.hasDataInCodeLabels() && (this->type() == ld::Section::typeCode) ) {
+		for (uint32_t i=0; i < parser.symbolCount(); ++i) {
+			const macho_nlist<P>& sym =	parser.symbolFromIndex(i);
+			// ignore stabs
+			if ( (sym.n_type() & N_STAB) != 0 )
+				continue;
+			// ignore non-definitions
+			if ( (sym.n_type() & N_TYPE) != N_SECT )
+				continue;
+
+			// 'L' labels do not denote atom breaks
+			const char* symbolName = parser.nameFromSymbol(sym);
+			if ( symbolName[0] == 'L' ) {
+				if ( strncmp(symbolName, "L$start$", 8) == 0 ) {
+					ld::Fixup::Kind kind = ld::Fixup::kindNone;
+					if ( strncmp(&symbolName[8], "data$", 5) == 0 )
+						kind = ld::Fixup::kindDataInCodeStartData;
+					else if ( strncmp(&symbolName[8], "code$", 5) == 0 )
+						kind = ld::Fixup::kindDataInCodeEnd;
+					else if ( strncmp(&symbolName[8], "jt8$", 4) == 0 )
+						kind = ld::Fixup::kindDataInCodeStartJT8;
+					else if ( strncmp(&symbolName[8], "jt16$", 4) == 0 )
+						kind = ld::Fixup::kindDataInCodeStartJT16;
+					else if ( strncmp(&symbolName[8], "jt32$", 4) == 0 )
+						kind = ld::Fixup::kindDataInCodeStartJT32;
+					else if ( strncmp(&symbolName[8], "jta32$", 4) == 0 )
+						kind = ld::Fixup::kindDataInCodeStartJTA32;
+					else 
+						warning("unknown L$start$ label %s in file %s", symbolName, this->file().path());
+					if ( kind != ld::Fixup::kindNone ) {
+						Atom<A>* inAtom = parser.findAtomByAddress(sym.n_value());
+						typename Parser<A>::SourceLocation src(inAtom, sym.n_value() - inAtom->objectAddress());
+						parser.addFixup(src, ld::Fixup::k1of1, kind);
+					}
+				}
+			}
+		}
+	}
+	
 	// add follow-on fixups for aliases
 	if ( _hasAliases ) {
 		for(Atom<A>* p = _beginAtoms; p < _endAtoms; ++p) {
@@ -6136,21 +6210,27 @@ void Section<A>::makeFixups(class Parser<A>& parser, const struct Parser<A>::CFI
 // main function used by linker to instantiate ld::Files
 //
 ld::relocatable::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
-								const char* path, time_t modTime, uint32_t ordinal, const ParserOptions& opts)
+							 const char* path, time_t modTime, ld::File::Ordinal ordinal, const ParserOptions& opts)
 {
 	switch ( opts.architecture ) {
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
 			if ( mach_o::relocatable::Parser<x86_64>::validFile(fileContent) )
 				return mach_o::relocatable::Parser<x86_64>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
 			break;
+#endif
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			if ( mach_o::relocatable::Parser<x86>::validFile(fileContent) )
 				return mach_o::relocatable::Parser<x86>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
 			break;
+#endif
+#if SUPPORT_ARCH_arm_any
 		case CPU_TYPE_ARM:
 			if ( mach_o::relocatable::Parser<arm>::validFile(fileContent, opts.objSubtypeMustMatch, opts.subType) )
 				return mach_o::relocatable::Parser<arm>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
 			break;
+#endif
 	}
 	return NULL;
 }
@@ -6228,6 +6308,17 @@ bool hasObjC2Categories(const uint8_t* fileContent)
 	}
 	return false;
 }				
+
+//
+// Used by archive reader when -ObjC option is specified
+//	
+bool hasObjC1Categories(const uint8_t* fileContent)
+{
+	if ( mach_o::relocatable::Parser<x86>::validFile(fileContent, false, 0) ) {
+		return mach_o::relocatable::Parser<x86>::hasObjC1Categories(fileContent);
+	}
+	return false;
+}
 
 
 

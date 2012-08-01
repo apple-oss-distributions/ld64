@@ -50,7 +50,6 @@ struct objc_image_info  {
 	uint32_t	flags;
 };
 
-#define OBJC_IMAGE_IS_REPLACEMENT		(1<<0)
 #define OBJC_IMAGE_SUPPORTS_GC			(1<<1)
 #define OBJC_IMAGE_REQUIRES_GC			(1<<2)
 #define OBJC_IMAGE_OPTIMIZED_BY_DYLD	(1<<3)
@@ -65,7 +64,7 @@ template <typename A>
 class ObjCImageInfoAtom : public ld::Atom {
 public:
 											ObjCImageInfoAtom(ld::File::ObjcConstraint objcConstraint, 
-															bool compaction, bool objcReplacementClasses, bool abi2);
+															bool compaction, bool abi2);
 
 	virtual const ld::File*					file() const					{ return NULL; }
 	virtual bool							translationUnitSource(const char** dir, const char**) const 
@@ -91,15 +90,13 @@ template <typename A> ld::Section ObjCImageInfoAtom<A>::_s_sectionABI2("__DATA",
 
 template <typename A>
 ObjCImageInfoAtom<A>::ObjCImageInfoAtom(ld::File::ObjcConstraint objcConstraint, bool compaction, 
-										bool objcReplacementClasses, bool abi2)
+										bool abi2)
 	: ld::Atom(abi2 ? _s_sectionABI2 : _s_sectionABI1, ld::Atom::definitionRegular, ld::Atom::combineNever,
 							ld::Atom::scopeLinkageUnit, ld::Atom::typeUnclassified, 
 							symbolTableNotIn, false, false, false, ld::Atom::Alignment(2))
 {  
 	
 	uint32_t value = 0;
-	if ( objcReplacementClasses ) 
-		value = OBJC_IMAGE_IS_REPLACEMENT;
 	switch ( objcConstraint ) {
 		case ld::File::objcConstraintNone:
 		case ld::File::objcConstraintRetainRelease:
@@ -143,7 +140,7 @@ public:
 	virtual void							setScope(Scope)					{ }
 	virtual void							copyRawContent(uint8_t buffer[]) const {
 		bzero(buffer, size());
-		A::P::E::set32(*((uint32_t*)(&buffer[0])), 24);
+		A::P::E::set32(*((uint32_t*)(&buffer[0])), 3*sizeof(pint_t)); // entry size
 		A::P::E::set32(*((uint32_t*)(&buffer[4])), _methodCount);
 	}
 	virtual ld::Fixup::iterator				fixupsBegin() const	{ return (ld::Fixup*)&_fixups[0]; }
@@ -775,6 +772,35 @@ private:
 	const std::set<const ld::Atom*>& _dead;
 };
 
+	struct AtomSorter
+	{	
+		bool operator()(const Atom* left, const Atom* right)
+		{
+			// sort by file ordinal, then object address, then zero size, then symbol name
+			// only file based atoms are supported (file() != NULL)
+			if (left==right) return false;
+			const File *leftf = left->file();
+			const File *rightf = right->file();
+			
+			if (leftf == rightf) {
+				if (left->objectAddress() != right->objectAddress()) {
+					return left->objectAddress() < right->objectAddress();
+				} else {
+					// for atoms in the same file with the same address, zero sized
+					// atoms must sort before nonzero sized atoms
+					if ((left->size() == 0 && right->size() > 0) || (left->size() > 0 && right->size() == 0))
+						return left->size() < right->size();
+					return strcmp(left->name(), right->name());
+				}
+			}
+			return  (leftf->ordinal() < rightf->ordinal());
+		}
+	};
+	
+	static void sortAtomVector(std::vector<const Atom*> &atoms) {
+		std::sort(atoms.begin(), atoms.end(), AtomSorter());
+	}
+
 template <typename A>
 void OptimizeCategories<A>::doit(const Options& opts, ld::Internal& state)
 {
@@ -798,6 +824,7 @@ void OptimizeCategories<A>::doit(const Options& opts, ld::Internal& state)
 	// build map of all classes in this image that have categories on them
 	typedef std::map<const ld::Atom*, std::vector<const ld::Atom*>*> CatMap;
 	CatMap classToCategories;
+	std::vector<const ld::Atom*> classOrder;
 	std::set<const ld::Atom*> deadAtoms;
 	ld::Internal::FinalSection* methodListSection = NULL;
 	for (std::vector<ld::Internal::FinalSection*>::iterator sit=state.sections.begin(); sit != state.sections.end(); ++sit) {
@@ -813,7 +840,7 @@ void OptimizeCategories<A>::doit(const Options& opts, ld::Internal& state)
 					continue;
 				}
 				assert(categoryAtom != NULL);
-				assert(categoryAtom->size() == Category<A>::size());
+				assert(categoryAtom->size() >= Category<A>::size());
 				// ignore categories also in __objc_nlcatlist
 				if ( nlcatListAtoms.count(categoryAtom) != 0 )
 					continue;
@@ -824,6 +851,7 @@ void OptimizeCategories<A>::doit(const Options& opts, ld::Internal& state)
 					CatMap::iterator pos = classToCategories.find(categoryOnClassAtom);
 					if ( pos == classToCategories.end() ) {
 						classToCategories[categoryOnClassAtom] = new std::vector<const ld::Atom*>();
+						classOrder.push_back(categoryOnClassAtom);
 					}
 					classToCategories[categoryOnClassAtom]->push_back(categoryAtom);
 					// mark category atom and catlist atom as dead
@@ -840,10 +868,11 @@ void OptimizeCategories<A>::doit(const Options& opts, ld::Internal& state)
 	// if found some categories
 	if ( classToCategories.size() != 0 ) {
 		assert(methodListSection != NULL);
+		sortAtomVector(classOrder);
 		// alter each class definition to have new method list which includes all category methods
-		for (CatMap::iterator it=classToCategories.begin(); it != classToCategories.end(); ++it) {
-			const ld::Atom* classAtom = it->first;
-			const std::vector<const ld::Atom*>* categories = it->second;
+		for (std::vector<const ld::Atom*>::iterator it = classOrder.begin(); it != classOrder.end(); it++) {
+			const ld::Atom* classAtom = *it;
+			const std::vector<const ld::Atom*>* categories = classToCategories[classAtom];
 			assert(categories->size() != 0);
 			// if any category adds instance methods, generate new merged method list, and replace
 			if ( OptimizeCategories<A>::hasInstanceMethods(state, categories) ) { 
@@ -1145,17 +1174,21 @@ void doPass(const Options& opts, ld::Internal& state)
 		
 		// add image info atom
 		switch ( opts.architecture() ) {
+#if SUPPORT_ARCH_x86_64
 			case CPU_TYPE_X86_64:
 				state.addAtom(*new ObjCImageInfoAtom<x86_64>(state.objcObjectConstraint, compaction, 
-								state.hasObjcReplacementClasses, true));
+								true));
 				break;
+#endif
+#if SUPPORT_ARCH_i386
 			case CPU_TYPE_I386:
 				state.addAtom(*new ObjCImageInfoAtom<x86>(state.objcObjectConstraint, compaction, 
-							state.hasObjcReplacementClasses, opts.objCABIVersion2POverride() ? true : false));
+							opts.objCABIVersion2POverride() ? true : false));
 				break;
+#endif
 			case CPU_TYPE_ARM:
 				state.addAtom(*new ObjCImageInfoAtom<arm>(state.objcObjectConstraint, compaction, 
-							state.hasObjcReplacementClasses, true));
+							true));
 				break;
 			default:
 				assert(0 && "unknown objc arch");
@@ -1165,18 +1198,24 @@ void doPass(const Options& opts, ld::Internal& state)
 	if ( opts.objcCategoryMerging() ) {
 		// optimize classes defined in this linkage unit by merging in categories also in this linkage unit
 		switch ( opts.architecture() ) {
+#if SUPPORT_ARCH_x86_64
 			case CPU_TYPE_X86_64:
 				OptimizeCategories<x86_64>::doit(opts, state);
 				break;
+#endif
+#if SUPPORT_ARCH_i386
 			case CPU_TYPE_I386:
 				// disable optimization until fully tested
-				//if ( opts.objCABIVersion2POverride() )
-				//	OptimizeCategories<x86>::doit(opts, state);
+				if ( opts.objCABIVersion2POverride() )
+                    OptimizeCategories<x86>::doit(opts, state);
 				break;
+#endif
+#if SUPPORT_ARCH_arm_any
 			case CPU_TYPE_ARM:
 				// disable optimization until fully tested
-				//OptimizeCategories<arm>::doit(opts, state);
+				OptimizeCategories<arm>::doit(opts, state);
 				break;
+#endif
 			default:
 				assert(0 && "unknown objc arch");
 		}	

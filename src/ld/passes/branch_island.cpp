@@ -412,9 +412,45 @@ void doPass(const Options& opts, ld::Internal& state)
 		return;
 	if (_s_log) fprintf(stderr, "ld:  __text section size=%llu, might need branch islands\n", totalTextSize);
 	
-	// figure out how many regions of branch islands will be needed
-	const uint32_t kBetweenRegions = maxDistanceBetweenIslands(opts, hasThumbBranches); // place regions of islands every 14MB in __text section
-	const int kIslandRegionsCount = totalTextSize / kBetweenRegions;
+	// Figure out how many regions of branch islands will be needed, and their locations.
+	// Construct a vector containing the atoms after which branch islands will be inserted,
+	// taking into account follow on fixups. No atom run without an island can exceed kBetweenRegions.
+	const uint64_t kBetweenRegions = maxDistanceBetweenIslands(opts, hasThumbBranches); // place regions of islands every 14MB in __text section
+	std::vector<const ld::Atom*> branchIslandInsertionPoints; // atoms in the atom list after which branch islands will be inserted
+	uint64_t previousIslandEndAddr = 0;
+	const ld::Atom *insertionPoint;
+	branchIslandInsertionPoints.reserve(totalTextSize/kBetweenRegions*2);
+	for (std::vector<const ld::Atom*>::iterator it=textSection->atoms.begin(); it != textSection->atoms.end(); it++) {
+		const ld::Atom* atom = *it;
+		// if we move past the next atom, will the run length exceed kBetweenRegions?
+		if ( atom->sectionOffset() + atom->size() - previousIslandEndAddr > kBetweenRegions ) {
+			// yes. Add the last known good location (atom) for inserting a branch island.
+			if ( insertionPoint == NULL )
+				throwf("Unable to insert branch island. No insertion point available.");
+			branchIslandInsertionPoints.push_back(insertionPoint);
+			previousIslandEndAddr = insertionPoint->sectionOffset()+insertionPoint->size();
+			insertionPoint = NULL;
+		}
+		// Can we insert an island after this atom? If so then keep track of it.
+		if ( !atom->hasFixupsOfKind(ld::Fixup::kindNoneFollowOn) )
+			insertionPoint = atom;
+	}
+	// add one more island after the last atom
+	if (insertionPoint != NULL)
+		branchIslandInsertionPoints.push_back(insertionPoint);
+	const int kIslandRegionsCount = branchIslandInsertionPoints.size();
+	if (_s_log) {
+		fprintf(stderr, "ld: will use %u branch island regions\n", kIslandRegionsCount);
+		for (std::vector<const ld::Atom*>::iterator it = branchIslandInsertionPoints.begin(); it != branchIslandInsertionPoints.end(); ++it) {
+			const ld::Atom* atom = *it;
+			const ld::File *file = atom->file();
+			fprintf(stderr, "ld: branch island will be inserted at 0x%llx after %s", atom->sectionOffset()+atom->size(), atom->name());
+			if (file) fprintf(stderr, " (%s)", atom->file()->path());
+			fprintf(stderr, "\n");
+		}
+	}
+
+
 	typedef std::map<TargetAndOffset,const ld::Atom*, TargetAndOffsetComparor> AtomToIsland;
     AtomToIsland* regionsMap[kIslandRegionsCount];
 	std::vector<const ld::Atom*>* regionsIslands[kIslandRegionsCount];
@@ -423,7 +459,6 @@ void doPass(const Options& opts, ld::Internal& state)
 		regionsIslands[i] = new std::vector<const ld::Atom*>();
 	}
 	unsigned int islandCount = 0;
-	if (_s_log) fprintf(stderr, "ld: will use %u branch island regions\n", kIslandRegionsCount);
 	
 	// create islands for branches in __text that are out of range
 	for (std::vector<const ld::Atom*>::iterator ait=textSection->atoms.begin(); ait != textSection->atoms.end(); ++ait) {
@@ -533,30 +568,25 @@ void doPass(const Options& opts, ld::Internal& state)
 		if ( _s_log ) fprintf(stderr, "ld: %u branch islands required in %u regions\n", islandCount, kIslandRegionsCount);
 		std::vector<const ld::Atom*> newAtomList;
 		newAtomList.reserve(textSection->atoms.size()+islandCount);
-		uint64_t islandRegionAddr = kBetweenRegions;;
-		int regionIndex = 0;
-		for (std::vector<const ld::Atom*>::iterator it=textSection->atoms.begin(); it != textSection->atoms.end(); it++) {
-			const ld::Atom* atom = *it;
-			if ( (atom->sectionOffset()+atom->size()) > islandRegionAddr ) {
-				std::vector<const ld::Atom*>* regionIslands = regionsIslands[regionIndex];
-				for (std::vector<const ld::Atom*>::iterator rit=regionIslands->begin(); rit != regionIslands->end(); rit++) {
-					const ld::Atom* islandAtom = *rit;
-					newAtomList.push_back(islandAtom);
-					if ( _s_log ) fprintf(stderr, "inserting island %s into __text section\n", islandAtom->name());
-				}
-				++regionIndex;
-				islandRegionAddr += kBetweenRegions;
+		
+		uint64_t regionIndex = 0;
+		for (std::vector<const ld::Atom*>::iterator ait=textSection->atoms.begin(); ait != textSection->atoms.end(); ait++) {
+			newAtomList.push_back(*ait);
+			// copy over atoms until we find an island insertion point
+			// Note that the last insertion point is the last atom, so this loop never moves the iterator to atoms.end().
+			while (*ait != branchIslandInsertionPoints[regionIndex]) {
+				ait++;
+				newAtomList.push_back(*ait);
 			}
-			newAtomList.push_back(atom);
-		}
-		// put any remaining islands at end of __text section
-		if ( regionIndex < kIslandRegionsCount ) {
+			
+			// insert the branch island atoms after the insertion point atom
 			std::vector<const ld::Atom*>* regionIslands = regionsIslands[regionIndex];
 			for (std::vector<const ld::Atom*>::iterator rit=regionIslands->begin(); rit != regionIslands->end(); rit++) {
 				const ld::Atom* islandAtom = *rit;
 				newAtomList.push_back(islandAtom);
 				if ( _s_log ) fprintf(stderr, "inserting island %s into __text section\n", islandAtom->name());
 			}
+			regionIndex++;
 		}
 		// swap in new list of atoms for __text section
 		textSection->atoms.clear();

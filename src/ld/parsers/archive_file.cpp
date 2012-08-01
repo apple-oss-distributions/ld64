@@ -62,7 +62,7 @@ public:
 														return File<A>::validFile(fileContent, fileLength, opts); }
 	static File<A>*									parse(const uint8_t* fileContent, uint64_t fileLength, 
 															const char* path, time_t mTime, 
-															uint32_t ordinal, const ParserOptions& opts) {
+															ld::File::Ordinal ordinal, const ParserOptions& opts) {
 															 return new File<A>(fileContent, fileLength, path, mTime,
 																			ordinal, opts);
 														}
@@ -77,7 +77,7 @@ public:
 																const mach_o::relocatable::ParserOptions& opts);
 													File(const uint8_t* fileContent, uint64_t fileLength,
 															const char* pth, time_t modTime, 
-															uint32_t ord, const ParserOptions& opts);
+															ld::File::Ordinal ord, const ParserOptions& opts);
 	virtual											~File() {}
 
 	// overrides of ld::File
@@ -98,7 +98,7 @@ private:
 	class Entry : ar_hdr
 	{
 	public:
-		const char*			name() const;
+		void				getName(char *, int) const;
 		time_t				modificationTime() const;
 		const uint8_t*		content() const;
 		uint32_t			contentSize() const;
@@ -108,6 +108,9 @@ private:
 		unsigned int		getLongNameSpace() const;
 
 	};
+
+	struct MemberState { ld::relocatable::File* file; const Entry *entry; bool logged; bool loaded; uint16_t index;};
+	bool											loadMember(MemberState& state, ld::File::AtomHandler& handler, const char *format, ...) const;
 
 	class CStringEquals
 	{
@@ -119,8 +122,6 @@ private:
 	typedef typename A::P							P;
 	typedef typename A::P::E						E;
 
-	struct MemberState { ld::relocatable::File* file; bool logged; bool loaded; };
-	
 	typedef std::map<const class Entry*, MemberState> MemberToStateMap;
 
 	const struct ranlib*							ranlibHashSearch(const char* name) const;
@@ -161,23 +162,21 @@ unsigned int File<A>::Entry::getLongNameSpace() const
 }
 
 template <typename A>
-const char* File<A>::Entry::name() const
+void File<A>::Entry::getName(char *buf, int bufsz) const
 {
 	if ( this->hasLongName() ) {
 		int len = this->getLongNameSpace();
-		static char longName[256];
-		strncpy(longName, ((char*)this)+sizeof(ar_hdr), len);
-		longName[len] = '\0';
-		return longName;
+		assert(bufsz >= len+1);
+		strncpy(buf, ((char*)this)+sizeof(ar_hdr), len);
+		buf[len] = '\0';
 	}
 	else {
-		static char shortName[20];
-		strncpy(shortName, this->ar_name, 16);
-		shortName[16] = '\0';
-		char* space = strchr(shortName, ' ');
+		assert(bufsz >= 16+1);
+		strncpy(buf, this->ar_name, 16);
+		buf[16] = '\0';
+		char* space = strchr(buf, ' ');
 		if ( space != NULL )
 			*space = '\0';
-		return shortName;
 	}
 }
 
@@ -256,7 +255,8 @@ bool File<A>::validFile(const uint8_t* fileContent, uint64_t fileLength, const m
 	const Entry* const start = (Entry*)&fileContent[8];
 	const Entry* const end = (Entry*)&fileContent[fileLength];
 	for (const Entry* p=start; p < end; p = p->next()) {
-		const char* memberName = p->name();
+		char memberName[256];
+		p->getName(memberName, sizeof(memberName));
 		// skip option table-of-content member
 		if ( (p==start) && ((strcmp(memberName, SYMDEF_SORTED) == 0) || (strcmp(memberName, SYMDEF) == 0)) )
 			continue;
@@ -270,7 +270,7 @@ bool File<A>::validFile(const uint8_t* fileContent, uint64_t fileLength, const m
 
 template <typename A>
 File<A>::File(const uint8_t fileContent[], uint64_t fileLength, const char* pth, time_t modTime, 
-					uint32_t ord, const ParserOptions& opts)
+					ld::File::Ordinal ord, const ParserOptions& opts)
  : ld::archive::File(strdup(pth), modTime, ord),
 	_archiveFileContent(fileContent), _archiveFilelength(fileLength), 
 	_tableOfContents(NULL), _tableOfContentCount(0), _tableOfContentStrings(NULL), 
@@ -283,7 +283,9 @@ File<A>::File(const uint8_t fileContent[], uint64_t fileLength, const char* pth,
 
 	if ( !_forceLoadAll ) {
 		const Entry* const firstMember = (Entry*)&_archiveFileContent[8];
-		if ( (strcmp(firstMember->name(), SYMDEF_SORTED) == 0) || (strcmp(firstMember->name(), SYMDEF) == 0) ) {
+		char memberName[256];
+		firstMember->getName(memberName, sizeof(memberName));
+		if ( (strcmp(memberName, SYMDEF_SORTED) == 0) || (strcmp(memberName, SYMDEF) == 0) ) {
 			const uint8_t* contents = firstMember->content();
 			uint32_t ranlibArrayLen = E::get32(*((uint32_t*)contents));
 			_tableOfContents = (const struct ranlib*)&contents[4];
@@ -308,7 +310,8 @@ bool File<x86>::memberHasObjCCategories(const Entry* member) const
 	}
 	else {
 		// i386 uses ObjC1 ABI which has .objc_category* global symbols
-		return false;
+    // <rdar://problem/11342022> strip -S on i386 pulls out .objc_category_name symbols from static frameworks
+		return mach_o::relocatable::hasObjC1Categories(member->content());
 	}
 }
 
@@ -325,12 +328,37 @@ bool File<A>::memberHasObjCCategories(const Entry* member) const
 template <typename A>
 typename File<A>::MemberState& File<A>::makeObjectFileForMember(const Entry* member) const
 {
+	uint16_t memberIndex = 0;
 	// in case member was instantiated earlier but not needed yet
 	typename MemberToStateMap::iterator pos = _instantiatedEntries.find(member);
-	if ( pos != _instantiatedEntries.end() )
-		return pos->second;
-
-	const char* memberName = member->name();
+	if ( pos == _instantiatedEntries.end() ) {
+		// Have to find the index of this member
+		const Entry* start;
+		uint16_t index;
+		if (_instantiatedEntries.size() == 0) {
+			start = (Entry*)&_archiveFileContent[8];
+			index = 1;
+		} else {
+			MemberState &lastKnown = _instantiatedEntries.rbegin()->second;
+			start = lastKnown.entry->next();
+			index = lastKnown.index+1;
+		}
+		for (const Entry* p=start; p <= member; p = p->next(), index++) {
+			MemberState state = {NULL, p, false, false, index};
+			_instantiatedEntries[p] = state;
+			if (member == p) {
+				memberIndex = index;
+			}
+		}
+	} else {
+		MemberState& state = pos->second;
+		if (state.file)
+			return state;
+		memberIndex = state.index;
+	}
+	assert(memberIndex != 0);
+	char memberName[256];
+	member->getName(memberName, sizeof(memberName));
 	char memberPath[strlen(this->path()) + strlen(memberName)+4];
 	strcpy(memberPath, this->path());
 	strcat(memberPath, "(");
@@ -344,23 +372,22 @@ typename File<A>::MemberState& File<A>::makeObjectFileForMember(const Entry* mem
 		if ( (member->content() + member->contentSize()) > (_archiveFileContent+_archiveFilelength) )
 			throwf("corrupt archive, member contents extends past end of file");										
 		const char* mPath = strdup(memberPath);
-		// offset the ordinals in this mach-o .o file, so that atoms layout in same order as in archive
-		uint32_t memberIndex = ((uint8_t*)member - _archiveFileContent)/sizeof(ar_hdr);
 		// see if member is mach-o file
+		ld::File::Ordinal ordinal = this->ordinal().archiveOrdinalWithMemberIndex(memberIndex);
 		ld::relocatable::File* result = mach_o::relocatable::parse(member->content(), member->contentSize(), 
 																	mPath, member->modificationTime(), 
-																	this->ordinal() + memberIndex, _objOpts);
+																	ordinal, _objOpts);
 		if ( result != NULL ) {
-			MemberState state = {result, false, false};
+			MemberState state = {result, member, false, false, memberIndex};
 			_instantiatedEntries[member] = state;
 			return _instantiatedEntries[member];
 		}
 		// see if member is llvm bitcode file
 		result = lto::parse(member->content(), member->contentSize(), 
-								mPath, member->modificationTime(), this->ordinal() + memberIndex, 
+								mPath, member->modificationTime(), 
 								_objOpts.architecture, _objOpts.subType, _logAllFiles);
 		if ( result != NULL ) {
-			MemberState state = {result, false, false};
+			MemberState state = {result, member, false, false, memberIndex};
 			_instantiatedEntries[member] = state;
 			return _instantiatedEntries[member];
 		}
@@ -374,6 +401,25 @@ typename File<A>::MemberState& File<A>::makeObjectFileForMember(const Entry* mem
 
 
 template <typename A>
+bool File<A>::loadMember(MemberState& state, ld::File::AtomHandler& handler, const char *format, ...) const
+{
+	bool didSomething = false;
+	if (!state.loaded) {
+		if ( _verboseLoad && !state.logged ) {
+			va_list	list;
+			va_start(list, format);
+			vprintf(format, list);
+			va_end(list);
+			state.logged = true;
+		}
+		state.loaded = true;
+		didSomething = state.file->forEachAtom(handler);
+	}
+	return didSomething;
+}
+
+
+template <typename A>
 bool File<A>::forEachAtom(ld::File::AtomHandler& handler) const
 {
 	bool didSome = false;
@@ -382,19 +428,12 @@ bool File<A>::forEachAtom(ld::File::AtomHandler& handler) const
 		const Entry* const start = (Entry*)&_archiveFileContent[8];
 		const Entry* const end = (Entry*)&_archiveFileContent[_archiveFilelength];
 		for (const Entry* p=start; p < end; p = p->next()) {
-			const char* memberName = p->name();
+			char memberName[256];
+			p->getName(memberName, sizeof(memberName));
 			if ( (p==start) && ((strcmp(memberName, SYMDEF_SORTED) == 0) || (strcmp(memberName, SYMDEF) == 0)) )
 				continue;
 			MemberState& state = this->makeObjectFileForMember(p);
-			if ( _verboseLoad ) {
-				if ( _forceLoadThis )
-					printf("-force_load forced load of %s(%s)\n", this->path(), memberName);
-				else
-					printf("-all_load forced load of %s(%s)\n", this->path(), memberName);
-				state.logged = true;
-			}
-			didSome |= state.file->forEachAtom(handler);
-			state.loaded = true;
+			didSome |= loadMember(state, handler, "%s forced load of %s(%s)\n", _forceLoadThis ? "-force_load" : "-all_load", this->path(), memberName);
 		}
 	}
 	else if ( _forceLoadObjC ) {
@@ -403,33 +442,28 @@ bool File<A>::forEachAtom(ld::File::AtomHandler& handler) const
 			if ( (strncmp(it->first, ".objc_c", 7) == 0) || (strncmp(it->first, "_OBJC_CLASS_$_", 14) == 0) ) {
 				const Entry* member = (Entry*)&_archiveFileContent[E::get32(it->second->ran_off)];
 				MemberState& state = this->makeObjectFileForMember(member);
-				if ( _verboseLoad && !state.logged ) {
-					printf("-ObjC forced load of %s(%s)\n", this->path(), member->name());
-					state.logged = true;
-				}
-				if ( ! state.loaded ) {
-					didSome |= state.file->forEachAtom(handler);
-					state.loaded = true;
-				}
+				char memberName[256];
+				member->getName(memberName, sizeof(memberName));
+				didSome |= loadMember(state, handler, "-ObjC forced load of %s(%s)\n", this->path(), memberName);
 			}
 		}
 		// ObjC2 has no symbols in .o files with categories but not classes, look deeper for those
 		const Entry* const start = (Entry*)&_archiveFileContent[8];
 		const Entry* const end = (Entry*)&_archiveFileContent[_archiveFilelength];
 		for (const Entry* member=start; member < end; member = member->next()) {
-			// only look at files not already instantiated
-			if ( _instantiatedEntries.count(member) == 0 ) {
-				//fprintf(stderr, "checking member %s\n", member->name());
+			char mname[256];
+			member->getName(mname, sizeof(mname));
+			// skip table-of-content member
+			if ( (member==start) && ((strcmp(mname, SYMDEF_SORTED) == 0) || (strcmp(mname, SYMDEF) == 0)) )
+				continue;
+			MemberState& state = this->makeObjectFileForMember(member);
+			// only look at files not already loaded
+			if ( ! state.loaded ) {
 				if ( this->memberHasObjCCategories(member) ) {
 					MemberState& state = this->makeObjectFileForMember(member);
-					if ( _verboseLoad && !state.logged ) {
-						printf("-ObjC forced load of %s(%s)\n", this->path(), member->name());
-						state.logged = true;
-					}
-					if ( ! state.loaded ) {
-						didSome |= state.file->forEachAtom(handler);
-						state.loaded = true;
-					}
+					char memberName[256];
+					member->getName(memberName, sizeof(memberName));
+					didSome |= loadMember(state, handler, "-ObjC forced load of %s(%s)\n", this->path(), memberName);
 				}
 			}
 		}
@@ -449,15 +483,9 @@ bool File<A>::justInTimeforEachAtom(const char* name, ld::File::AtomHandler& han
 	if ( result != NULL ) {
 		const Entry* member = (Entry*)&_archiveFileContent[E::get32(result->ran_off)];
 		MemberState& state = this->makeObjectFileForMember(member);
-		// only call handler for each member once
-		if ( ! state.loaded && !state.logged ) {
-			if ( _verboseLoad ) {
-				printf("%s forced load of %s(%s)\n", name, this->path(), member->name());
-				state.logged = true;
-			}
-			state.loaded = true;
-			return state.file->forEachAtom(handler);
-		}
+		char memberName[256];
+		member->getName(memberName, sizeof(memberName));
+		return loadMember(state, handler, "%s forced load of %s(%s)\n", name, this->path(), memberName);
 	}
 	//fprintf(stderr, "%s NOT found in archive %s\n", name, this->path());
 	return false;
@@ -499,12 +527,9 @@ bool File<A>::justInTimeDataOnlyforEachAtom(const char* name, ld::File::AtomHand
 			CheckIsDataSymbolHandler checker(name);
 			state.file->forEachAtom(checker);
 			if ( checker.symbolIsDataDefinition() ) {
-				if ( _verboseLoad && !state.logged ) {
-					printf("%s forced load of %s(%s)\n", name, this->path(), member->name());
-					state.logged = true;
-				}
-				state.loaded = true;
-				return state.file->forEachAtom(handler);
+				char memberName[256];
+				member->getName(memberName, sizeof(memberName));
+				return loadMember(state, handler, "%s forced load of %s(%s)\n", name, this->path(), memberName);
 			}
 		}
 	}
@@ -558,21 +583,27 @@ void File<A>::dumpTableOfContents()
 // main function used by linker to instantiate archive files
 //
 ld::archive::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
-				const char* path, time_t modTime, uint32_t ordinal, const ParserOptions& opts)
+				const char* path, time_t modTime, ld::File::Ordinal ordinal, const ParserOptions& opts)
 {
 	switch ( opts.objOpts.architecture ) {
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
 			if ( archive::Parser<x86_64>::validFile(fileContent, fileLength, opts.objOpts) )
 				return archive::Parser<x86_64>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
 			break;
+#endif
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			if ( archive::Parser<x86>::validFile(fileContent, fileLength, opts.objOpts) )
 				return archive::Parser<x86>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
 			break;
+#endif
+#if SUPPORT_ARCH_arm_any
 		case CPU_TYPE_ARM:
 			if ( archive::Parser<arm>::validFile(fileContent, fileLength, opts.objOpts) )
 				return archive::Parser<arm>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
 			break;
+#endif
 	}
 	return NULL;
 }

@@ -37,6 +37,7 @@
 #include "ld.hpp"
 #include "Architectures.hpp"
 #include "MachOFileAbstraction.hpp"
+#include "code-sign-blobs/superblob.h"
 
 namespace ld {
 namespace tool {
@@ -1249,7 +1250,6 @@ void SplitSegInfoAtom<A>::encode() const
 	_64bitPointerLocations.clear();
 }
 
-
 template <typename A>
 class FunctionStartsAtom : public LinkEditAtom
 {
@@ -1292,6 +1292,9 @@ void FunctionStartsAtom<A>::encode() const
 			std::vector<const ld::Atom*>& atoms = sect->atoms;
 			for (std::vector<const ld::Atom*>::iterator ait = atoms.begin(); ait != atoms.end(); ++ait) {
 				const ld::Atom* atom = *ait;
+				// <rdar://problem/10422823> filter out zero-length atoms, so LC_FUNCTION_STARTS address can't spill into next section
+				if ( atom->size() == 0 )
+					continue;
 				uint64_t nextAddr = atom->finalAddress();
 				if ( atom->isThumb() )
 					nextAddr |= 1; 
@@ -1309,6 +1312,194 @@ void FunctionStartsAtom<A>::encode() const
 	// align to pointer size
 	this->_encodedData.pad_to_size(sizeof(pint_t));		
 
+	this->_encoded = true;
+}
+
+
+// <rdar://problem/9218847> Need way to formalize data in code
+template <typename A>
+class DataInCodeAtom : public LinkEditAtom
+{
+public:
+												DataInCodeAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+													: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)) { }
+
+	// overrides of ld::Atom
+	virtual const char*							name() const		{ return "data-in-code info"; }
+	// overrides of LinkEditAtom
+	virtual void								encode() const;
+
+private:
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
+
+	struct FixupByAddressSorter
+	{
+		 bool operator()(const ld::Fixup* left, const ld::Fixup* right)
+		 {
+			  return (left->offsetInAtom < right->offsetInAtom);
+		 }
+	};
+
+	void encodeEntry(uint32_t startImageOffset, int len, ld::Fixup::Kind kind) const {
+		//fprintf(stderr, "encodeEntry(start=0x%08X, len=0x%04X, kind=%04X\n", startImageOffset, len, kind);
+		do {
+			macho_data_in_code_entry<P> entry;
+			entry.set_offset(startImageOffset);
+			entry.set_length(len);
+			switch ( kind ) {
+				case ld::Fixup::kindDataInCodeStartData:
+					entry.set_kind(1);
+					break;
+				case ld::Fixup::kindDataInCodeStartJT8:
+					entry.set_kind(2);
+					break;
+				case ld::Fixup::kindDataInCodeStartJT16:
+					entry.set_kind(3);
+					break;
+				case ld::Fixup::kindDataInCodeStartJT32:
+					entry.set_kind(4);
+					break;
+				case ld::Fixup::kindDataInCodeStartJTA32:
+					entry.set_kind(5);
+					break;
+				default:
+					assert(0 && "bad L$start$ label to encode");
+			}
+			uint8_t* bp = (uint8_t*)&entry;
+			this->_encodedData.append_byte(bp[0]);
+			this->_encodedData.append_byte(bp[1]);
+			this->_encodedData.append_byte(bp[2]);
+			this->_encodedData.append_byte(bp[3]);
+			this->_encodedData.append_byte(bp[4]);
+			this->_encodedData.append_byte(bp[5]);
+			this->_encodedData.append_byte(bp[6]);
+			this->_encodedData.append_byte(bp[7]);
+			// in rare case data range is huge, create multiple entries
+			len -= 0xFFF8;
+			startImageOffset += 0xFFF8;
+		} while ( len > 0 );
+	}
+
+	static ld::Section			_s_section;
+};
+
+template <typename A>
+ld::Section DataInCodeAtom<A>::_s_section("__LINKEDIT", "__dataInCode", ld::Section::typeLinkEdit, true);
+
+
+template <typename A>
+void DataInCodeAtom<A>::encode() const
+{
+	if ( this->_writer.hasDataInCode ) {
+		uint64_t mhAddress = 0;
+		for (std::vector<ld::Internal::FinalSection*>::iterator sit = _state.sections.begin(); sit != _state.sections.end(); ++sit) {
+			ld::Internal::FinalSection* sect = *sit;
+			if ( sect->type() == ld::Section::typeMachHeader )
+				mhAddress = sect->address;
+			if ( sect->type() != ld::Section::typeCode )
+				continue;
+			for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+				const ld::Atom*	atom = *ait;
+				// gather all code-in-data labels
+				std::vector<const ld::Fixup*> dataInCodeLabels;
+				for (ld::Fixup::iterator fit = atom->fixupsBegin(); fit != atom->fixupsEnd(); ++fit) {
+					switch ( fit->kind ) {
+						case ld::Fixup::kindDataInCodeStartData:
+						case ld::Fixup::kindDataInCodeStartJT8:
+						case ld::Fixup::kindDataInCodeStartJT16:
+						case ld::Fixup::kindDataInCodeStartJT32:
+						case ld::Fixup::kindDataInCodeStartJTA32:
+						case ld::Fixup::kindDataInCodeEnd:
+							dataInCodeLabels.push_back(fit);
+							break;
+						default:
+							break;
+					}
+				}
+				// to do: sort labels by address
+				std::sort(dataInCodeLabels.begin(), dataInCodeLabels.end(), FixupByAddressSorter());
+				
+				// convert to array of struct data_in_code_entry
+				ld::Fixup::Kind prevKind = ld::Fixup::kindDataInCodeEnd;
+				uint32_t prevOffset = 0;
+				for ( std::vector<const ld::Fixup*>::iterator sfit = dataInCodeLabels.begin(); sfit != dataInCodeLabels.end(); ++sfit) {
+					if ( ((*sfit)->kind != prevKind) && (prevKind != ld::Fixup::kindDataInCodeEnd) ) {
+						int len = (*sfit)->offsetInAtom - prevOffset;
+						if ( len == 0 )
+							warning("multiple L$start$ labels found at same address in %s at offset 0x%04X", atom->name(), prevOffset);
+						this->encodeEntry(atom->finalAddress()+prevOffset-mhAddress, (*sfit)->offsetInAtom - prevOffset, prevKind);
+					}
+					prevKind = (*sfit)->kind;
+					prevOffset = (*sfit)->offsetInAtom;
+				}
+				if ( prevKind != ld::Fixup::kindDataInCodeEnd ) {
+					// add entry if function ends with data
+					this->encodeEntry(atom->finalAddress()+prevOffset-mhAddress, atom->size() - prevOffset, prevKind);
+				}
+			}
+		}
+	}
+	
+	this->_encoded = true;
+}
+
+
+
+
+
+// <rdar://problem/7209249> linker needs to cache "Designated Requirements" in linked binary
+template <typename A>
+class DependentDRAtom : public LinkEditAtom
+{
+public:
+												DependentDRAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+													: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)) { }
+
+	// overrides of ld::Atom
+	virtual const char*							name() const		{ return "dependent dylib DR info"; }
+	// overrides of LinkEditAtom
+	virtual void								encode() const;
+
+private:
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
+
+	static ld::Section			_s_section;
+
+};
+
+template <typename A>
+ld::Section DependentDRAtom<A>::_s_section("__LINKEDIT", "__dependentDR", ld::Section::typeLinkEdit, true);
+
+
+template <typename A>
+void DependentDRAtom<A>::encode() const
+{
+	Security::SuperBlobCore<Security::SuperBlob<Security::kSecCodeMagicDRList>, Security::kSecCodeMagicDRList, uint32_t>::Maker maker;
+	
+	uint32_t index = 0;
+	for(std::vector<ld::dylib::File*>::iterator it=_state.dylibs.begin(); it != _state.dylibs.end(); ++it) {
+		const ld::dylib::File* dylib = *it;
+		Security::BlobCore* dylibDR = (Security::BlobCore*)dylib->codeSignatureDR();
+		void* dup = NULL;
+		if ( dylibDR != NULL ) {
+			// <rdar://problem/11315321> Maker takes ownership of every blob added
+			// We need to make a copy here because dylib still owns the pointer returned by codeSignatureDR()
+			dup = ::malloc(dylibDR->length());
+			::memcpy(dup, dylibDR, dylibDR->length());
+		}
+		maker.add(index, (Security::BlobCore*)dup);
+		++index;
+	}
+	
+	Security::SuperBlob<Security::kSecCodeMagicDRList>* topBlob = maker.make();
+	const uint8_t* data = (uint8_t*)topBlob->data();
+	for(size_t i=0; i < topBlob->length(); ++i)
+		_encodedData.append_byte(data[i]);
+	
 	this->_encoded = true;
 }
 

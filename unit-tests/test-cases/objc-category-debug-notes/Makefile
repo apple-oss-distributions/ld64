@@ -32,7 +32,7 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	${CC} ${CCFLAGS} test.m -g -o test -framework Foundation
+	${CC} ${CCFLAGS} test.m -g -o test -framework Foundation -Wno-objc-protocol-method-implementation
 	nm -ap test | grep GSYM | grep category | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} test
 	

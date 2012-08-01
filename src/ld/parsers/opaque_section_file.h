@@ -32,7 +32,7 @@
 namespace opaque_section {
 
 extern ld::File* parse(const char* segmentName, const char* sectionName, const char* path, 
-									const uint8_t fileContent[], uint64_t fileLength, uint32_t ordinal, 
+									const uint8_t fileContent[], uint64_t fileLength, 
 									const char* symbolName="opaque_section");
 
 

@@ -830,7 +830,25 @@ void dumper::dumpFixup(const ld::Fixup* ref)
 			break;
 		case ld::Fixup::kindSetLazyOffset:
 			printf("offset of lazy binding info for %s", referenceTargetAtomName(ref));
-			break;			
+			break;
+		case ld::Fixup::kindDataInCodeStartData:
+			printf("start of data in code");
+			break;
+		case ld::Fixup::kindDataInCodeStartJT8:
+			printf("start of jump table 8 data in code");
+			break;
+		case ld::Fixup::kindDataInCodeStartJT16:
+			printf("start of jump table 16 data in code");
+			break;
+		case ld::Fixup::kindDataInCodeStartJT32:
+			printf("start of jump table 32 data in code");
+			break;
+		case ld::Fixup::kindDataInCodeStartJTA32:
+			printf("start of jump table absolute 32 data in code");
+			break;
+		case ld::Fixup::kindDataInCodeEnd:
+			printf("end of data in code");
+			break;
 		case ld::Fixup::kindStoreTargetAddressLittleEndian32:
 			printf("store 32-bit little endian address of %s", referenceTargetAtomName(ref));
 			break;
@@ -1110,12 +1128,12 @@ static ld::relocatable::File* createReader(const char* path)
 		}
 	}
 
-	ld::relocatable::File* objResult = mach_o::relocatable::parse(p, fileLen, path, stat_buf.st_mtime, 0, objOpts);
+	ld::relocatable::File* objResult = mach_o::relocatable::parse(p, fileLen, path, stat_buf.st_mtime, ld::File::Ordinal::NullOrdinal(), objOpts);
 	if ( objResult != NULL )
 		return objResult;
 
 	// see if it is an llvm object file
-	objResult = lto::parse(p, fileLen, path, stat_buf.st_mtime, 0, sPreferredArch, sPreferredSubArch, false);
+	objResult = lto::parse(p, fileLen, path, stat_buf.st_mtime, sPreferredArch, sPreferredSubArch, false);
 	if ( objResult != NULL ) 
 		return objResult;
 
@@ -1183,24 +1201,20 @@ int main(int argc, const char* argv[])
 					sShowLineInfo = false;
 				}
 				else if ( strcmp(arg, "-arch") == 0 ) {
-					const char* arch = ++i<argc? argv[i]: "";
-					if ( strcmp(arch, "i386") == 0 )
-						sPreferredArch = CPU_TYPE_I386;
-					else if ( strcmp(arch, "x86_64") == 0 )
-						sPreferredArch = CPU_TYPE_X86_64;
-					else {
-						bool found = false;
-						for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
-							if ( strcmp(t->subTypeName,arch) == 0 ) {
-								sPreferredArch = CPU_TYPE_ARM;
-								sPreferredSubArch = t->subType;
-								found = true;
-								break;
-							}
+					const char* archName = argv[++i];
+					if ( archName == NULL )
+						throw "-arch missing architecture name";
+					bool found = false;
+					for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
+						if ( strcmp(t->archName,archName) == 0 ) {
+							sPreferredArch = t->cpuType;
+							if ( t->isSubType )
+								sPreferredSubArch = t->cpuSubType;
+							found = true;
 						}
-						if ( !found )
-							throwf("unknown architecture %s", arch);
 					}
+					if ( !found )
+						throwf("unknown architecture %s", archName);
 				}
 				else if ( strcmp(arg, "-only") == 0 ) {
 					sMatchName = ++i<argc? argv[i]: NULL;

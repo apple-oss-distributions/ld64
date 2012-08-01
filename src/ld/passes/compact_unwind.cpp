@@ -774,12 +774,16 @@ static void makeFinalLinkedImageCompactUnwindSection(const Options& opts, ld::In
 
 	// create atom that contains the whole compact unwind table
 	switch ( opts.architecture() ) {
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
 			state.addAtom(*new UnwindInfoAtom<x86_64>(entries, ehFrameSize));
 			break;
+#endif
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			state.addAtom(*new UnwindInfoAtom<x86>(entries, ehFrameSize));
 			break;
+#endif
 		default:
 			assert(0 && "no compact unwind for arch");
 	}	
@@ -876,12 +880,16 @@ static void makeCompactUnwindAtom(const Options& opts, ld::Internal& state, cons
 											uint32_t startOffset, uint32_t endOffset, uint32_t cui)
 {
 	switch ( opts.architecture() ) {
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
 			state.addAtom(*new CompactUnwindAtom<x86_64>(state, atom, startOffset, endOffset-startOffset, cui));
 			break;
+#endif
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			state.addAtom(*new CompactUnwindAtom<x86>(state, atom, startOffset, endOffset-startOffset, cui));
 			break;
+#endif
 	}
 }
 

@@ -55,8 +55,8 @@ all:
 	${CC} ${CCFLAGS} main.c libfoo_code.a -o main_code
 	nm -m main_code | grep _foo | grep __TEXT | ${FAIL_IF_STDIN}
 	# verify warning when code force to override tent
-	${CC} ${CCFLAGS} main.c -Wl,-force_load,libfoo_code.a -o main_code_force 2>main_code_force_warnings.txt
-	grep warning main_code_force_warnings.txt | ${FAIL_IF_EMPTY}
+	#${CC} ${CCFLAGS} main.c -Wl,-force_load,libfoo_code.a -o main_code_force 2>main_code_force_warnings.txt
+	#grep warning main_code_force_warnings.txt | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main_code
 
 clean:

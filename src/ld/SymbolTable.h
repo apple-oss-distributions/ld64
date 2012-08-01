@@ -93,6 +93,9 @@ private:
 
 	typedef std::map<IndirectBindingSlot, const char*> SlotToName;
 	typedef __gnu_cxx::hash_map<const char*, CStringToSlot*, __gnu_cxx::hash<const char*>, CStringEquals> NameToMap;
+    
+    typedef std::vector<const ld::Atom *> DuplicatedSymbolAtomList;
+    typedef std::map<const char *, DuplicatedSymbolAtomList * > DuplicateSymbols;
 	
 public:
 
@@ -126,17 +129,24 @@ public:
 	byNameIterator		begin()								{ return byNameIterator(_byNameTable.begin(),_indirectBindingTable); }
 	byNameIterator		end()								{ return byNameIterator(_byNameTable.end(),_indirectBindingTable); }
 	void				printStatistics();
-	static const char*		demangle(const char* sym);
 	
 	// from ld::IndirectBindingTable
 	virtual const char*			indirectName(IndirectBindingSlot slot) const;
 	virtual const ld::Atom*		indirectAtom(IndirectBindingSlot slot) const;
+    
+    // Prints the duplicated symbols to stderr and throws. Only valid to call if hasDuplicateSymbols() returns true.
+    void                checkDuplicateSymbols() const;
+
 
 private:
 	bool					addByName(const ld::Atom& atom, bool ignoreDuplicates);
 	bool					addByContent(const ld::Atom& atom);
 	bool					addByReferences(const ld::Atom& atom);
 	void					markCoalescedAway(const ld::Atom* atom);
+    
+    // Tracks duplicated symbols. Each call adds file to the list of files defining symbol.
+    // The file list is uniqued per symbol, so calling multiple times for the same symbol/file pair is permitted.
+    void                    addDuplicateSymbol(const char *symbol, const ld::Atom* atom);
 
 	const Options&					_options;
 	NameToSlot						_byNameTable;
@@ -154,7 +164,7 @@ private:
 	std::vector<const ld::Atom*>&	_indirectBindingTable;
 	bool							_hasExternalTentativeDefinitions;
 	
-	static bool						_s_doDemangle;
+    DuplicateSymbols                _duplicateSymbols;
 
 };
 

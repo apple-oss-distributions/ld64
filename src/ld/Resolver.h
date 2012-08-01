@@ -57,10 +57,10 @@ namespace tool {
 class Resolver : public ld::File::AtomHandler
 {
 public:
-							Resolver(const Options& opts, const InputFiles& inputs, ld::Internal& state) 
+							Resolver(const Options& opts, InputFiles& inputs, ld::Internal& state) 
 								: _options(opts), _inputFiles(inputs), _internal(state), 
 								  _symbolTable(opts, state.indirectBindingTable),
-								  _haveLLVMObjs(false), _addToFinalSection(false),
+								  _haveLLVMObjs(false),
 								  _completedInitialObjectFiles(false) {}
 								
 
@@ -94,8 +94,9 @@ private:
 	void					markLive(const ld::Atom& atom, WhyLiveBackChain* previous);
 	bool					isDtraceProbe(ld::Fixup::Kind kind);
 	void					liveUndefines(std::vector<const char*>&);
+	void					remainingUndefines(std::vector<const char*>&);
 	bool					printReferencedBy(const char* name, SymbolTable::IndirectBindingSlot slot);
-			
+	void					tweakWeakness();
 
 	class CStringEquals {
 	public:
@@ -118,14 +119,13 @@ private:
 	};
 
 	const Options&					_options;
-	const InputFiles&				_inputFiles;
+	InputFiles&						_inputFiles;
 	ld::Internal&					_internal;
 	std::vector<const ld::Atom*>	_atoms;
 	std::set<const ld::Atom*>		_deadStripRoots;
 	std::vector<const ld::Atom*>	_atomsWithUnresolvedReferences;
 	SymbolTable						_symbolTable;
 	bool							_haveLLVMObjs;
-	bool							_addToFinalSection;
 	bool							_completedInitialObjectFiles;
 };
 

@@ -193,8 +193,9 @@ bool Layout::Comparer::operator()(const ld::Atom* left, const ld::Atom* right)
 	// sort by .o order
 	const ld::File* leftFile = left->file();
 	const ld::File* rightFile = right->file();
-	uint32_t leftFileOrdinal = (leftFile != NULL) ? leftFile->ordinal() : 0;
-	uint32_t rightFileOrdinal = (rightFile != NULL) ? rightFile->ordinal() : 0;
+	// <rdar://problem/10830126> properly sort if on file is NULL and the other is not
+	ld::File::Ordinal leftFileOrdinal = (leftFile != NULL) ? leftFile->ordinal() : ld::File::Ordinal::NullOrdinal();
+	ld::File::Ordinal rightFileOrdinal = (rightFile != NULL) ? rightFile->ordinal() : ld::File::Ordinal::NullOrdinal();
 	if ( leftFileOrdinal != rightFileOrdinal )
 		return leftFileOrdinal< rightFileOrdinal;
 

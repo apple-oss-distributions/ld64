@@ -32,12 +32,6 @@ LLVMAR  = /usr/local/bin/llvm-ar
 #
 # Test the we set the stack execution bit properly.
 
-run:
-	if [ -f /Developer/usr/bin/llvm-gcc-4.2 ] ; then \
-	  $(MAKE) all ; \
-	else \
-	  ${PASS_IFF} /usr/bin/true ; \
-	fi
 
 all: zero one two three four five six seven eight nine ten \
     eleven twelve thirteen fourteen fifteen sixteen seventeen \

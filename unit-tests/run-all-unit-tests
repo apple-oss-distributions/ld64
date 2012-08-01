@@ -15,7 +15,7 @@ cd `echo "$0" | sed 's/run-all-unit-tests/test-cases/'`
 all_archs="x86_64  i386"
 valid_archs="x86_64 i386"
 # only test arm code if iOS platform tools installed
-if [ -d /Developer/Platforms/iPhoneOS.platform/Developer/SDKs ]
+if [ -d /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs ]
 then
     all_archs="${all_archs}  armv7"
     valid_archs="${valid_archs} armv7"

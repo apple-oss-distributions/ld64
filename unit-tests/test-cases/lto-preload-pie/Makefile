@@ -27,16 +27,13 @@ include ${TESTROOT}/include/common.makefile
 # verify -preload -pie produces relocations
 #
 
-LLVMGCC = /Developer/usr/bin/llvm-gcc-4.2 -arch ${ARCH}
-LLVMGXX = /Developer/usr/bin/llvm-g++-4.2 -arch ${ARCH}
-
 run: all
 
 all:
-	${LLVMGCC} ${CCFLAGS} --emit-llvm a.c -c -o a.o
-	${LLVMGCC} ${CCFLAGS} --emit-llvm b.c -c -o b.o
-	${LLVMGCC} ${CCFLAGS} --emit-llvm main.c -c -o main.o
-	${LLVMGCC} ${CCFLAGS} main.o a.o b.o -Wl,-preload -Wl,-pie -o main.preload \
+	${CC} ${CCFLAGS} -flto a.c -c -o a.o
+	${CC} ${CCFLAGS} -flto b.c -c -o b.o
+	${CC} ${CCFLAGS} -flto main.c -c -o main.o
+	${CC} ${CCFLAGS} main.o a.o b.o -Wl,-preload -Wl,-pie -o main.preload \
 		-e _entry -nostdlib -Wl,-segalign,0x20 -Wl,-seg1addr,0x200 
 	otool -rv main.preload | grep "Local relocation information" | ${PASS_IFF_STDIN}
 

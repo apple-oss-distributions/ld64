@@ -36,6 +36,7 @@
 
 #include "Options.h"
 #include "ld.hpp"
+#include "MachOFileAbstraction.hpp"
 
 #include "make_stubs.h"
 
@@ -118,6 +119,7 @@ const ld::Atom* Pass::stubableFixup(const ld::Fixup* fixup, ld::Internal& state)
 			case ld::Fixup::kindStoreTargetAddressX86BranchPCRel32:
 			case ld::Fixup::kindStoreTargetAddressARMBranch24:
 			case ld::Fixup::kindStoreTargetAddressThumbBranch22:
+                assert(target != NULL);
 				// create stub if target is in a dylib
 				if ( target->definition() == ld::Atom::definitionProxy ) 
 					return target;
@@ -175,20 +177,31 @@ ld::Atom* Pass::makeStub(const ld::Atom& target, bool weakImport)
 	}
 
 	switch ( _architecture ) {
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			if ( usingCompressedLINKEDIT() && !forLazyDylib )
 				return new ld::passes::stubs::x86::StubAtom(*this, target, stubToGlobalWeakDef, stubToResolver, weakImport);
 			else
 				return new ld::passes::stubs::x86::classic::StubAtom(*this, target, forLazyDylib, weakImport);
 			break;
+#endif
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
-			if ( usingCompressedLINKEDIT() && !forLazyDylib )
+			if ( (_options.outputKind() == Options::kKextBundle) && _options.kextsUseStubs() ) 
+				return new ld::passes::stubs::x86_64::KextStubAtom(*this, target);
+			else if ( usingCompressedLINKEDIT() && !forLazyDylib )
 				return new ld::passes::stubs::x86_64::StubAtom(*this, target, stubToGlobalWeakDef, stubToResolver, weakImport);
 			else
 				return new ld::passes::stubs::x86_64::classic::StubAtom(*this, target, forLazyDylib, weakImport);
 			break;
+#endif
+#if SUPPORT_ARCH_arm_any
 		case CPU_TYPE_ARM: 
-			if ( usingCompressedLINKEDIT() && !forLazyDylib ) {
+			if ( (_options.outputKind() == Options::kKextBundle) && _options.kextsUseStubs() ) {
+				// if text relocs are not allows in kext bundles, then linker must create a stub 
+				return new ld::passes::stubs::arm::StubPICKextAtom(*this, target);
+			}
+			else if ( usingCompressedLINKEDIT() && !forLazyDylib ) {
 				if ( (_stubCount < 900) && !_mightBeInSharedRegion && !_largeText )
 					return new ld::passes::stubs::arm::StubCloseAtom(*this, target, stubToGlobalWeakDef, stubToResolver, weakImport);
 				else if ( _pic )
@@ -203,6 +216,7 @@ ld::Atom* Pass::makeStub(const ld::Atom& target, bool weakImport)
 					return new ld::passes::stubs::arm::classic::StubNoPICAtom(*this, target, forLazyDylib, weakImport);
 			}
 			break;
+#endif
 	}
 	throw "unsupported arch for stub";
 }
@@ -226,7 +240,6 @@ void Pass::process(ld::Internal& state)
 		case Options::kObjectFile:
 			// these kinds don't use stubs and can have resolver functions
 			return;
-		case Options::kKextBundle:
 		case Options::kStaticExecutable:
 		case Options::kPreload:
 		case Options::kDyld:
@@ -235,6 +248,12 @@ void Pass::process(ld::Internal& state)
 			return;
 		case Options::kDynamicLibrary:
 			// uses stubs and can have resolver functions
+			break;
+		case Options::kKextBundle:
+			verifyNoResolverFunctions(state);
+			// if kext don't use stubs, don't do this pass
+			if ( !_options.kextsUseStubs() )
+				return;
 			break;
 		case Options::kDynamicExecutable:
 		case Options::kDynamicBundle:
@@ -302,6 +321,15 @@ void Pass::process(ld::Internal& state)
 			}
 		}
 	}
+
+	const bool needStubForMain = _options.needsEntryPointLoadCommand() 
+								&& (state.entryPoint != NULL) 
+								&& (state.entryPoint->definition() == ld::Atom::definitionProxy);
+	if ( needStubForMain ) {
+		// _main not found in any .o files.  Currently have proxy to dylib 
+		// Add to map, so that a stub will be made
+		stubFor[state.entryPoint] = NULL;	
+	}
 	
 	// short circuit if no stubs needed
 	_internal = &state;
@@ -310,7 +338,7 @@ void Pass::process(ld::Internal& state)
 		return;
 	
 	// <rdar://problem/8553283> lazily check for helper
-	if ( !_options.makeCompressedDyldInfo() && (state.classicBindingHelper == NULL) ) 
+	if ( !_options.makeCompressedDyldInfo() && (state.classicBindingHelper == NULL) && (_options.outputKind() != Options::kKextBundle) ) 
 		throw "symbol dyld_stub_binding_helper not found, normally in crt1.o/dylib1.o/bundle1.o";
 
 	// disable arm close stubs in some cases
@@ -355,6 +383,13 @@ void Pass::process(ld::Internal& state)
 				fit->u.target = stub;
 			}
 		}
+	}
+	
+	// switch entry point from proxy to stub
+	if ( needStubForMain ) {
+		const ld::Atom* mainStub = stubFor[state.entryPoint];	
+		assert(mainStub != NULL);
+		state.entryPoint = mainStub;
 	}
 	
 	// sort new atoms so links are consistent

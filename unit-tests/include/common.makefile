@@ -8,7 +8,6 @@ ARCH ?= $(shell arch)
 # set default to be all
 VALID_ARCHS ?= "i386 x86_64 armv6"
 
-IOS_SDK = /Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS5.0.Internal.sdk
 
 MYDIR=$(shell cd ../../bin;pwd)
 LD			= ld
@@ -56,21 +55,23 @@ ifeq ($(ARCH),ppc)
 	SDKExtra = -isysroot /Developer/SDKs/MacOSX10.6.sdk
 endif
 
-CC		 = cc -arch ${ARCH} ${SDKExtra}
+CC		 = $(shell xcrun -find clang) -arch ${ARCH} ${SDKExtra}
 CCFLAGS = -Wall 
 ASMFLAGS =
 VERSION_NEW_LINKEDIT = -mmacosx-version-min=10.6
 VERSION_OLD_LINKEDIT = -mmacosx-version-min=10.4
 LD_NEW_LINKEDIT = -macosx_version_min 10.6
 
-CXX		  = c++ -arch ${ARCH} ${SDKExtra}
+CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} ${SDKExtra}
 CXXFLAGS = -Wall
+
+IOS_SDK = $(shell xcodebuild -sdk iphoneos6.0.internal -version Path)
 
 ifeq ($(ARCH),armv6)
   LDFLAGS := -syslibroot $(IOS_SDK)
   override FILEARCH = arm
-  CC = /Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/clang -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
-  CXX = /Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/clang++ -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
+  CC = $(shell xcrun -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
+  CXX = $(shell xcrun -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=4.0
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)
@@ -82,8 +83,8 @@ endif
 ifeq ($(ARCH),armv7)
   LDFLAGS := -syslibroot $(IOS_SDK)
   override FILEARCH = arm
-  CC = /Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/clang -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
-  CXX = /Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/clang++ -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
+  CC = $(shell xcrun -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
+  CXX = $(shell xcrun -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=4.0
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)
@@ -98,8 +99,8 @@ ifeq ($(ARCH),thumb)
   CXXFLAGS += -mthumb
   override ARCH = armv6
   override FILEARCH = arm
-  CC = /Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/clang -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
-  CXX = /Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/clang++ -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
+  CC = $(shell xcrun -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
+  CXX = $(shell xcrun -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=4.0
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)
@@ -114,8 +115,8 @@ ifeq ($(ARCH),thumb2)
   CXXFLAGS += -mthumb
   override ARCH = armv7
   override FILEARCH = arm
-  CC = /Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/clang -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
-  CXX = /Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/clang++ -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
+  CC = $(shell xcrun -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
+  CXX = $(shell xcrun -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=4.0
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)

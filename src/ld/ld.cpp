@@ -67,6 +67,7 @@ extern "C" double log2 ( double );
 #include "InputFiles.h"
 #include "Resolver.h"
 #include "OutputFile.h"
+#include "Snapshot.h"
 
 #include "passes/stubs/make_stubs.h"
 #include "passes/dtrace_dof.h"
@@ -619,6 +620,25 @@ static void getVMInfo(vm_statistics_data_t& info)
 	}
 }
 
+
+
+static const char* sOverridePathlibLTO = NULL;
+
+//
+// This is magic glue that overrides the default behaviour 
+// of lazydylib1.o which is used to lazily load libLTO.dylib.
+//
+extern "C" const char* dyld_lazy_dylib_path_fix(const char* path);
+const char* dyld_lazy_dylib_path_fix(const char* path)
+{
+	if ( sOverridePathlibLTO != NULL )
+		return sOverridePathlibLTO;
+	else
+		return path;
+}
+
+
+
 int main(int argc, const char* argv[])
 {
 	const char* archName = NULL;
@@ -631,6 +651,9 @@ int main(int argc, const char* argv[])
 		// create object to track command line arguments
 		Options options(argc, argv);
 		InternalState state(options);
+		
+		// allow libLTO to be overridden by command line -lto_library
+		sOverridePathlibLTO = options.overridePathlibLTO();
 		
 		// gather vm stats
 		if ( options.printStatistics() )
@@ -649,7 +672,7 @@ int main(int argc, const char* argv[])
 		statistics.startResolver = mach_absolute_time();
 		ld::tool::Resolver resolver(options, inputFiles, state);
 		resolver.resolve();
-				
+        
 		// add dylibs used
 		statistics.startDylibs = mach_absolute_time();
 		inputFiles.dylibs(state);
@@ -727,7 +750,11 @@ int main(int argc, const char* argv[])
 // implement assert() function to print out a backtrace before aborting
 void __assert_rtn(const char* func, const char* file, int line, const char* failedexpr)
 {
-	fprintf(stderr, "Assertion failed: (%s), function %s, file %s, line %d.\n", failedexpr, func, file, line);
+    Snapshot *snapshot = Snapshot::globalSnapshot;
+    
+    snapshot->setSnapshotMode(Snapshot::SNAPSHOT_DEBUG);
+    snapshot->createSnapshot();
+	snapshot->recordAssertionMessage("Assertion failed: (%s), function %s, file %s, line %d.\n", failedexpr, func, file, line);
 
 	void* callStack[128];
 	int depth = ::backtrace(callStack, 128);
@@ -745,7 +772,10 @@ void __assert_rtn(const char* func, const char* file, int line, const char* fail
 		}
 		long offset = (uintptr_t)callStack[i] - (uintptr_t)info.dli_saddr;
 		fprintf(stderr, "%d  %p  %s + %ld\n", i, callStack[i], symboName, offset);
+		snapshot->recordAssertionMessage("%d  %p  %s + %ld\n", i, callStack[i], symboName, offset);
 	}
+    fprintf(stderr, "A linker snapshot was created at:\n\t%s\n", snapshot->rootDir());
+	fprintf(stderr, "ld: Assertion failed: (%s), function %s, file %s, line %d.\n", failedexpr, func, file, line);
 	exit(1);
 }
 #endif

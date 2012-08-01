@@ -72,11 +72,12 @@ namespace tool {
 OutputFile::OutputFile(const Options& opts) 
 	:
 		hasWeakExternalSymbols(false), usesWeakExternalSymbols(false), overridesWeakExternalSymbols(false), 
-		_noReExportedDylibs(false), hasThreadLocalVariableDefinitions(false), pieDisabled(false), 
+		_noReExportedDylibs(false), hasThreadLocalVariableDefinitions(false), pieDisabled(false), hasDataInCode(false), 
 		headerAndLoadCommandsSection(NULL),
 		rebaseSection(NULL), bindingSection(NULL), weakBindingSection(NULL), 
 		lazyBindingSection(NULL), exportSection(NULL), 
 		splitSegInfoSection(NULL), functionStartsSection(NULL), 
+		dataInCodeSection(NULL), dependentDRsSection(NULL), 
 		symbolTableSection(NULL), stringPoolSection(NULL), 
 		localRelocationsSection(NULL), externalRelocationsSection(NULL), 
 		sectionRelocationsSection(NULL), 
@@ -87,6 +88,8 @@ OutputFile::OutputFile(const Options& opts)
 		_hasSectionRelocations(opts.outputKind() == Options::kObjectFile),
 		_hasSplitSegInfo(opts.sharedRegionEligible()),
 		_hasFunctionStartsInfo(opts.addFunctionStarts()),
+		_hasDataInCodeInfo(opts.addDataInCodeInfo()),
+		_hasDependentDRInfo(opts.needsDependentDRInfo()),
 		_hasDynamicSymbolTable(true),
 		_hasLocalRelocations(!opts.makeCompressedDyldInfo()),
 		_hasExternalRelocations(!opts.makeCompressedDyldInfo()),
@@ -109,7 +112,9 @@ OutputFile::OutputFile(const Options& opts)
 		_weakBindingInfoAtom(NULL),
 		_exportInfoAtom(NULL),
 		_splitSegInfoAtom(NULL),
-		_functionStartsAtom(NULL)
+		_functionStartsAtom(NULL),
+		_dataInCodeAtom(NULL),
+		_dependentDRInfoAtom(NULL)
 {
 }
 
@@ -179,10 +184,14 @@ bool OutputFile::findSegment(ld::Internal& state, uint64_t addr, uint64_t* start
 
 void OutputFile::assignAtomAddresses(ld::Internal& state)
 {
+	const bool log = false;
+	if ( log ) fprintf(stderr, "assignAtomAddresses()\n");
 	for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
 		ld::Internal::FinalSection* sect = *sit;
+		if ( log ) fprintf(stderr, "  section=%s/%s\n", sect->segmentName(), sect->sectionName());
 		for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 			const ld::Atom* atom = *ait;
+			if ( log ) fprintf(stderr, "    atom=%p, name=%s\n", atom, atom->name());
 			switch ( sect-> type() ) {
 				case ld::Section::typeImportProxies:
 					// want finalAddress() of all proxy atoms to be zero
@@ -237,6 +246,18 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 		// build function starts info  
 		assert(_functionStartsAtom != NULL);
 		_functionStartsAtom->encode();
+	}
+
+	if ( _options.addDataInCodeInfo() ) {
+		// build data-in-code info  
+		assert(_dataInCodeAtom != NULL);
+		_dataInCodeAtom->encode();
+	}
+	
+	if ( _options.needsDependentDRInfo() ) {
+		// build dependent dylib DR info  
+		assert(_dependentDRInfoAtom != NULL);
+		_dependentDRInfoAtom->encode();
 	}
 
 	// build classic symbol table  
@@ -572,8 +593,8 @@ void OutputFile::assignFileOffsets(ld::Internal& state)
 			}
 		}
 		
-		if ( log ) fprintf(stderr, "  address=0x%08llX, hidden=%d, alignment=%02d, padBytes=%d, section=%s,%s\n",
-							sect->address, sect->isSectionHidden(), sect->alignment, sect->alignmentPaddingBytes, 
+		if ( log ) fprintf(stderr, "  address=0x%08llX, size=0x%08llX, hidden=%d, alignment=%02d, padBytes=%d, section=%s,%s\n",
+							sect->address, sect->size, sect->isSectionHidden(), sect->alignment, sect->alignmentPaddingBytes, 
 							sect->segmentName(), sect->sectionName());
 		// update running totals
 		if ( !sect->isSectionHidden() || hiddenSectionsOccupyAddressSpace )
@@ -605,6 +626,9 @@ void OutputFile::assignFileOffsets(ld::Internal& state)
 		if ( hasZeroForFileOffset(sect) ) {
 			// fileoff of zerofill sections is moot, but historically it is set to zero
 			sect->fileOffset = 0;
+
+			// <rdar://problem/10445047> align file offset with address layout
+			fileOffset += sect->alignmentPaddingBytes;
 		}
 		else {
 			// page align file offset at start of each segment
@@ -713,6 +737,11 @@ uint64_t OutputFile::addressOf(const ld::Internal& state, const ld::Fixup* fixup
 			return (*target)->finalAddress();
 		case ld::Fixup::bindingsIndirectlyBound:
 			*target = state.indirectBindingTable[fixup->u.bindingIndex];
+		#ifndef NDEBUG
+			if ( ! (*target)->finalAddressMode() ) {
+				throwf("reference to symbol (which has not been assigned an address) %s", (*target)->name());
+			}
+		#endif
 			return (*target)->finalAddress();
 	}
 	throw "unexpected binding";
@@ -1205,6 +1234,13 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 				assert(fit->binding == ld::Fixup::bindingDirectlyBound);
 				accumulator = this->lazyBindingInfoOffsetForLazyPointerAddress(fit->u.target->finalAddress());
 				break;
+			case ld::Fixup::kindDataInCodeStartData:
+			case ld::Fixup::kindDataInCodeStartJT8:
+			case ld::Fixup::kindDataInCodeStartJT16:
+			case ld::Fixup::kindDataInCodeStartJT32:
+			case ld::Fixup::kindDataInCodeStartJTA32:
+			case ld::Fixup::kindDataInCodeEnd:
+				break;
 			case ld::Fixup::kindStoreTargetAddressLittleEndian32:
 				accumulator = addressOf(state, fit, &toTarget);
 				thumbTarget = targetIsThumb(state, fit);
@@ -1529,35 +1565,8 @@ bool OutputFile::hasZeroForFileOffset(const ld::Section* sect)
 	return false;
 }
 
-
-void OutputFile::writeOutputFile(ld::Internal& state)
+void OutputFile::writeAtoms(ld::Internal& state, uint8_t* wholeBuffer)
 {
-	// for UNIX conformance, error if file exists and is not writable
-	if ( (access(_options.outputFilePath(), F_OK) == 0) && (access(_options.outputFilePath(), W_OK) == -1) )
-		throwf("can't write output file: %s", _options.outputFilePath());
-
-	int permissions = 0777;
-	if ( _options.outputKind() == Options::kObjectFile )
-		permissions = 0666;
-	// Calling unlink first assures the file is gone so that open creates it with correct permissions
-	// It also handles the case where __options.outputFilePath() file is not writable but its directory is
-	// And it means we don't have to truncate the file when done writing (in case new is smaller than old)
-	// Lastly, only delete existing file if it is a normal file (e.g. not /dev/null).
-	struct stat stat_buf;
-	if ( (stat(_options.outputFilePath(), &stat_buf) != -1) && (stat_buf.st_mode & S_IFREG) )
-		(void)unlink(_options.outputFilePath());
-
-	// try to allocate buffer for entire output file content
-	uint8_t* wholeBuffer = (uint8_t*)calloc(_fileSize, 1);
-	if ( wholeBuffer == NULL )
-		throwf("can't create buffer of %llu bytes for output", _fileSize);
-	
-	if ( _options.UUIDMode() == Options::kUUIDRandom ) {
-		uint8_t bits[16];
-		::uuid_generate_random(bits);
-		_headersAndLoadCommandAtom->setUUID(bits);
-	}
-
 	// have each atom write itself
 	uint64_t fileOffsetOfEndOfLastAtom = 0;
 	uint64_t mhAddress = 0;
@@ -1598,74 +1607,153 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 			}
 		}
 	}
-	
-	// compute UUID 
-	if ( _options.UUIDMode() == Options::kUUIDContent ) {
-		const bool log = false;
-		if ( (_options.outputKind() != Options::kObjectFile) || state.someObjectFileHasDwarf ) {
-			uint8_t digest[CC_MD5_DIGEST_LENGTH];
-			uint32_t	stabsStringsOffsetStart;
-			uint32_t	tabsStringsOffsetEnd;
-			uint32_t	stabsOffsetStart;
-			uint32_t	stabsOffsetEnd;
-			if ( _symbolTableAtom->hasStabs(stabsStringsOffsetStart, tabsStringsOffsetEnd, stabsOffsetStart, stabsOffsetEnd) ) {
-				// find two areas of file that are stabs info and should not contribute to checksum
-				uint64_t stringPoolFileOffset = 0;
-				uint64_t symbolTableFileOffset = 0;
-				for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
-					ld::Internal::FinalSection* sect = *sit;
-					if ( sect->type() == ld::Section::typeLinkEdit ) {
-						if ( strcmp(sect->sectionName(), "__string_pool") == 0 )
-							stringPoolFileOffset = sect->fileOffset;
-						else if ( strcmp(sect->sectionName(), "__symbol_table") == 0 )
-							symbolTableFileOffset = sect->fileOffset;
-					}
+}
+
+
+void OutputFile::computeContentUUID(ld::Internal& state, uint8_t* wholeBuffer)
+{
+	const bool log = false;
+	if ( (_options.outputKind() != Options::kObjectFile) || state.someObjectFileHasDwarf ) {
+		uint8_t digest[CC_MD5_DIGEST_LENGTH];
+		uint32_t	stabsStringsOffsetStart;
+		uint32_t	tabsStringsOffsetEnd;
+		uint32_t	stabsOffsetStart;
+		uint32_t	stabsOffsetEnd;
+		if ( _symbolTableAtom->hasStabs(stabsStringsOffsetStart, tabsStringsOffsetEnd, stabsOffsetStart, stabsOffsetEnd) ) {
+			// find two areas of file that are stabs info and should not contribute to checksum
+			uint64_t stringPoolFileOffset = 0;
+			uint64_t symbolTableFileOffset = 0;
+			for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
+				ld::Internal::FinalSection* sect = *sit;
+				if ( sect->type() == ld::Section::typeLinkEdit ) {
+					if ( strcmp(sect->sectionName(), "__string_pool") == 0 )
+						stringPoolFileOffset = sect->fileOffset;
+					else if ( strcmp(sect->sectionName(), "__symbol_table") == 0 )
+						symbolTableFileOffset = sect->fileOffset;
 				}
-				uint64_t firstStabNlistFileOffset  = symbolTableFileOffset + stabsOffsetStart;
-				uint64_t lastStabNlistFileOffset   = symbolTableFileOffset + stabsOffsetEnd;
-				uint64_t firstStabStringFileOffset = stringPoolFileOffset  + stabsStringsOffsetStart;
-				uint64_t lastStabStringFileOffset  = stringPoolFileOffset  + tabsStringsOffsetEnd;
-				if ( log ) fprintf(stderr, "firstStabNlistFileOffset=0x%08llX\n", firstStabNlistFileOffset);
-				if ( log ) fprintf(stderr, "lastStabNlistFileOffset=0x%08llX\n", lastStabNlistFileOffset);
-				if ( log ) fprintf(stderr, "firstStabStringFileOffset=0x%08llX\n", firstStabStringFileOffset);
-				if ( log ) fprintf(stderr, "lastStabStringFileOffset=0x%08llX\n", lastStabStringFileOffset);
-				assert(firstStabNlistFileOffset <= firstStabStringFileOffset);
-				
-				CC_MD5_CTX md5state;
-				CC_MD5_Init(&md5state);
-				// checksum everything up to first stabs nlist
-				if ( log ) fprintf(stderr, "checksum 0x%08X -> 0x%08llX\n", 0, firstStabNlistFileOffset);
-				CC_MD5_Update(&md5state, &wholeBuffer[0], firstStabNlistFileOffset);
-				// checkusm everything after last stabs nlist and up to first stabs string
-				if ( log ) fprintf(stderr, "checksum 0x%08llX -> 0x%08llX\n", lastStabNlistFileOffset, firstStabStringFileOffset);
-				CC_MD5_Update(&md5state, &wholeBuffer[lastStabNlistFileOffset], firstStabStringFileOffset-lastStabNlistFileOffset);
-				// checksum everything after last stabs string to end of file
-				if ( log ) fprintf(stderr, "checksum 0x%08llX -> 0x%08llX\n", lastStabStringFileOffset, _fileSize);
-				CC_MD5_Update(&md5state, &wholeBuffer[lastStabStringFileOffset], _fileSize-lastStabStringFileOffset);
-				CC_MD5_Final(digest, &md5state);
-				if ( log ) fprintf(stderr, "uuid=%02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X\n", digest[0], digest[1], digest[2], 
-																	digest[3], digest[4], digest[5], digest[6],  digest[7]);
 			}
-			else {
-				CC_MD5(wholeBuffer, _fileSize, digest);
-			}
-			// <rdar://problem/6723729> LC_UUID uuids should conform to RFC 4122 UUID version 4 & UUID version 5 formats
-			digest[6] = ( digest[6] & 0x0F ) | ( 3 << 4 );
-			digest[8] = ( digest[8] & 0x3F ) | 0x80;
-			// update buffer with new UUID
-			_headersAndLoadCommandAtom->setUUID(digest);
-			_headersAndLoadCommandAtom->recopyUUIDCommand();
+			uint64_t firstStabNlistFileOffset  = symbolTableFileOffset + stabsOffsetStart;
+			uint64_t lastStabNlistFileOffset   = symbolTableFileOffset + stabsOffsetEnd;
+			uint64_t firstStabStringFileOffset = stringPoolFileOffset  + stabsStringsOffsetStart;
+			uint64_t lastStabStringFileOffset  = stringPoolFileOffset  + tabsStringsOffsetEnd;
+			if ( log ) fprintf(stderr, "firstStabNlistFileOffset=0x%08llX\n", firstStabNlistFileOffset);
+			if ( log ) fprintf(stderr, "lastStabNlistFileOffset=0x%08llX\n", lastStabNlistFileOffset);
+			if ( log ) fprintf(stderr, "firstStabStringFileOffset=0x%08llX\n", firstStabStringFileOffset);
+			if ( log ) fprintf(stderr, "lastStabStringFileOffset=0x%08llX\n", lastStabStringFileOffset);
+			assert(firstStabNlistFileOffset <= firstStabStringFileOffset);
+			
+			CC_MD5_CTX md5state;
+			CC_MD5_Init(&md5state);
+			// checksum everything up to first stabs nlist
+			if ( log ) fprintf(stderr, "checksum 0x%08X -> 0x%08llX\n", 0, firstStabNlistFileOffset);
+			CC_MD5_Update(&md5state, &wholeBuffer[0], firstStabNlistFileOffset);
+			// checkusm everything after last stabs nlist and up to first stabs string
+			if ( log ) fprintf(stderr, "checksum 0x%08llX -> 0x%08llX\n", lastStabNlistFileOffset, firstStabStringFileOffset);
+			CC_MD5_Update(&md5state, &wholeBuffer[lastStabNlistFileOffset], firstStabStringFileOffset-lastStabNlistFileOffset);
+			// checksum everything after last stabs string to end of file
+			if ( log ) fprintf(stderr, "checksum 0x%08llX -> 0x%08llX\n", lastStabStringFileOffset, _fileSize);
+			CC_MD5_Update(&md5state, &wholeBuffer[lastStabStringFileOffset], _fileSize-lastStabStringFileOffset);
+			CC_MD5_Final(digest, &md5state);
+			if ( log ) fprintf(stderr, "uuid=%02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X\n", digest[0], digest[1], digest[2], 
+							   digest[3], digest[4], digest[5], digest[6],  digest[7]);
+		}
+		else {
+			CC_MD5(wholeBuffer, _fileSize, digest);
+		}
+		// <rdar://problem/6723729> LC_UUID uuids should conform to RFC 4122 UUID version 4 & UUID version 5 formats
+		digest[6] = ( digest[6] & 0x0F ) | ( 3 << 4 );
+		digest[8] = ( digest[8] & 0x3F ) | 0x80;
+		// update buffer with new UUID
+		_headersAndLoadCommandAtom->setUUID(digest);
+		_headersAndLoadCommandAtom->recopyUUIDCommand();
+	}
+}
+	
+	
+void OutputFile::writeOutputFile(ld::Internal& state)
+{
+	// for UNIX conformance, error if file exists and is not writable
+	if ( (access(_options.outputFilePath(), F_OK) == 0) && (access(_options.outputFilePath(), W_OK) == -1) )
+		throwf("can't write output file: %s", _options.outputFilePath());
+
+	mode_t permissions = 0777;
+	if ( _options.outputKind() == Options::kObjectFile )
+		permissions = 0666;
+	mode_t umask = ::umask(0);
+	::umask(umask); // put back the original umask
+	permissions &= ~umask;
+	// Calling unlink first assures the file is gone so that open creates it with correct permissions
+	// It also handles the case where __options.outputFilePath() file is not writable but its directory is
+	// And it means we don't have to truncate the file when done writing (in case new is smaller than old)
+	// Lastly, only delete existing file if it is a normal file (e.g. not /dev/null).
+	struct stat stat_buf;
+	bool outputIsRegularFile = true;
+	if ( stat(_options.outputFilePath(), &stat_buf) != -1 ) {
+		if (stat_buf.st_mode & S_IFREG) {
+			(void)unlink(_options.outputFilePath());
+		} else {
+			outputIsRegularFile = false;
 		}
 	}
 
-	// write whole output file in one chunk
-	int fd = open(_options.outputFilePath(), O_CREAT | O_WRONLY | O_TRUNC, permissions);
-	if ( fd == -1 ) 
-		throwf("can't open output file for writing: %s, errno=%d", _options.outputFilePath(), errno);
-	if ( ::pwrite(fd, wholeBuffer, _fileSize, 0) == -1 )
-		throwf("can't write to output file: %s, errno=%d", _options.outputFilePath(), errno);
-	close(fd);
-	free(wholeBuffer);
+	int fd;
+	// Construct a temporary path of the form {outputFilePath}.ld_XXXXXX
+	const char filenameTemplate[] = ".ld_XXXXXX";
+	char tmpOutput[PATH_MAX];
+	uint8_t *wholeBuffer;
+	if (outputIsRegularFile) {
+		strcpy(tmpOutput, _options.outputFilePath());
+		// If the path is too long to add a suffix for a temporary name then
+		// just fall back to using the output path. 
+		if (strlen(tmpOutput)+strlen(filenameTemplate) < PATH_MAX) {
+			strcat(tmpOutput, filenameTemplate);
+			fd = mkstemp(tmpOutput);
+		} else {
+			fd = open(tmpOutput, O_RDWR|O_CREAT, permissions);
+		}
+		if ( fd == -1 ) 
+			throwf("can't open output file for writing: %s, errno=%d", tmpOutput, errno);
+		ftruncate(fd, _fileSize);
+		
+		wholeBuffer = (uint8_t *)mmap(NULL, _fileSize, PROT_WRITE|PROT_READ, MAP_SHARED, fd, 0);
+		if ( wholeBuffer == MAP_FAILED )
+			throwf("can't create buffer of %llu bytes for output", _fileSize);
+	} else {
+		fd = open(_options.outputFilePath(), O_WRONLY);
+		if ( fd == -1 ) 
+			throwf("can't open output file for writing: %s, errno=%d", _options.outputFilePath(), errno);
+		// try to allocate buffer for entire output file content
+		wholeBuffer = (uint8_t*)calloc(_fileSize, 1);
+		if ( wholeBuffer == NULL )
+			throwf("can't create buffer of %llu bytes for output", _fileSize);
+	}
+	
+	if ( _options.UUIDMode() == Options::kUUIDRandom ) {
+		uint8_t bits[16];
+		::uuid_generate_random(bits);
+		_headersAndLoadCommandAtom->setUUID(bits);
+	}
+
+	writeAtoms(state, wholeBuffer);
+	
+	// compute UUID 
+	if ( _options.UUIDMode() == Options::kUUIDContent )
+		computeContentUUID(state, wholeBuffer);
+
+	if (outputIsRegularFile) {
+		if ( ::chmod(tmpOutput, permissions) == -1 ) {
+			unlink(tmpOutput);
+			throwf("can't set permissions on output file: %s, errno=%d", tmpOutput, errno);
+		}
+		if ( ::rename(tmpOutput, _options.outputFilePath()) == -1 && strcmp(tmpOutput, _options.outputFilePath()) != 0) {
+			unlink(tmpOutput);
+			throwf("can't move output file in place, errno=%d", errno);
+		}
+	} else {
+		if ( ::write(fd, wholeBuffer, _fileSize) == -1 ) {
+			throwf("can't write to output file: %s, errno=%d", _options.outputFilePath(), errno);
+		}
+	}
 }
 
 struct AtomByNameSorter
@@ -1778,27 +1866,6 @@ void OutputFile::buildSymbolTable(ld::Internal& state)
 				continue;
 			}
 			
-			// <rdar://problem/7977374> Add command line options to control symbol weak-def bit on exported symbols			
-			if ( _options.hasWeakBitTweaks() && (atom->definition() == ld::Atom::definitionRegular) ) {
-				const char* name = atom->name();
-				if ( atom->scope() == ld::Atom::scopeGlobal ) {
-					if ( atom->combine() == ld::Atom::combineNever ) {
-						if ( _options.forceWeak(name) )
-							(const_cast<ld::Atom*>(atom))->setCombine(ld::Atom::combineByName);
-					}
-					else if ( atom->combine() == ld::Atom::combineByName ) {
-						if ( _options.forceNotWeak(name) )
-							(const_cast<ld::Atom*>(atom))->setCombine(ld::Atom::combineNever);
-					}
-				}
-				else {
-					if ( _options.forceWeakNonWildCard(name) )
-						warning("cannot force to be weak, non-external symbol %s", name);
-					else if ( _options.forceNotWeakNonWildcard(name) )
-						warning("cannot force to be not-weak, non-external symbol %s", name);
-				}
-			}
-			
 			switch ( atom->scope() ) {
 				case ld::Atom::scopeTranslationUnit:
 					if ( _options.keepLocalSymbol(atom->name()) ) {	
@@ -1879,6 +1946,7 @@ void OutputFile::buildSymbolTable(ld::Internal& state)
 void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 {
 	switch ( _options.architecture() ) {
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			if ( _hasLocalRelocations ) {
 				_localRelocsAtom = new LocalRelocationsAtom<x86>(_options, state, *this);
@@ -1897,6 +1965,8 @@ void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			break;
+#endif
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
 			if ( _hasLocalRelocations ) {
 				_localRelocsAtom = new LocalRelocationsAtom<x86_64>(_options, state, *this);
@@ -1915,6 +1985,8 @@ void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			break;
+#endif
+#if SUPPORT_ARCH_arm_any
 		case CPU_TYPE_ARM:
 			if ( _hasLocalRelocations ) {
 				_localRelocsAtom = new LocalRelocationsAtom<arm>(_options, state, *this);
@@ -1933,6 +2005,7 @@ void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			break;
+#endif
 		default:
 			throw "architecture not supported for -preload";
 	}
@@ -1947,6 +2020,7 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 		return addPreloadLinkEdit(state);
 	
 	switch ( _options.architecture() ) {
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			if ( _hasSectionRelocations ) {
 				_sectionsRelocationsAtom = new SectionRelocationsAtom<x86>(_options, state, *this);
@@ -1980,6 +2054,14 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_functionStartsAtom = new FunctionStartsAtom<x86>(_options, state, *this);
 				functionStartsSection = state.addAtom(*_functionStartsAtom);
 			}
+			if ( _hasDataInCodeInfo ) {
+				_dataInCodeAtom = new DataInCodeAtom<x86>(_options, state, *this);
+				dataInCodeSection = state.addAtom(*_dataInCodeAtom);
+			}
+			if ( _hasDependentDRInfo ) {
+				_dependentDRInfoAtom = new DependentDRAtom<x86>(_options, state, *this);
+				dependentDRsSection = state.addAtom(*_dependentDRInfoAtom);
+			}
 			if ( _hasSymbolTable ) {
 				_symbolTableAtom = new SymbolTableAtom<x86>(_options, state, *this);
 				symbolTableSection = state.addAtom(*_symbolTableAtom);
@@ -1995,6 +2077,8 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			break;
+#endif
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
 			if ( _hasSectionRelocations ) {
 				_sectionsRelocationsAtom = new SectionRelocationsAtom<x86_64>(_options, state, *this);
@@ -2028,6 +2112,14 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_functionStartsAtom = new FunctionStartsAtom<x86_64>(_options, state, *this);
 				functionStartsSection = state.addAtom(*_functionStartsAtom);
 			}
+			if ( _hasDataInCodeInfo ) {
+				_dataInCodeAtom = new DataInCodeAtom<x86_64>(_options, state, *this);
+				dataInCodeSection = state.addAtom(*_dataInCodeAtom);
+			}
+			if ( _hasDependentDRInfo ) {
+				_dependentDRInfoAtom = new DependentDRAtom<x86_64>(_options, state, *this);
+				dependentDRsSection = state.addAtom(*_dependentDRInfoAtom);
+			}
 			if ( _hasSymbolTable ) {
 				_symbolTableAtom = new SymbolTableAtom<x86_64>(_options, state, *this);
 				symbolTableSection = state.addAtom(*_symbolTableAtom);
@@ -2043,6 +2135,8 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			break;
+#endif
+#if SUPPORT_ARCH_arm_any
 		case CPU_TYPE_ARM:
 			if ( _hasSectionRelocations ) {
 				_sectionsRelocationsAtom = new SectionRelocationsAtom<arm>(_options, state, *this);
@@ -2076,6 +2170,14 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				_functionStartsAtom = new FunctionStartsAtom<arm>(_options, state, *this);
 				functionStartsSection = state.addAtom(*_functionStartsAtom);
 			}
+			if ( _hasDataInCodeInfo ) {
+				_dataInCodeAtom = new DataInCodeAtom<arm>(_options, state, *this);
+				dataInCodeSection = state.addAtom(*_dataInCodeAtom);
+			}
+			if ( _hasDependentDRInfo ) {
+				_dependentDRInfoAtom = new DependentDRAtom<arm>(_options, state, *this);
+				dependentDRsSection = state.addAtom(*_dependentDRInfoAtom);
+			}
 			if ( _hasSymbolTable ) {
 				_symbolTableAtom = new SymbolTableAtom<arm>(_options, state, *this);
 				symbolTableSection = state.addAtom(*_symbolTableAtom);
@@ -2091,6 +2193,7 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 				stringPoolSection = state.addAtom(*_stringPoolAtom);
 			}
 			break;
+#endif
 		default:
 			throw "unknown architecture";
 	}
@@ -2099,18 +2202,24 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 void OutputFile::addLoadCommands(ld::Internal& state)
 {
 	switch ( _options.architecture() ) {
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
 			_headersAndLoadCommandAtom = new HeaderAndLoadCommandsAtom<x86_64>(_options, state, *this);
 			headerAndLoadCommandsSection = state.addAtom(*_headersAndLoadCommandAtom);
 			break;
+#endif
+#if SUPPORT_ARCH_arm_any
 		case CPU_TYPE_ARM:
 			_headersAndLoadCommandAtom = new HeaderAndLoadCommandsAtom<arm>(_options, state, *this);
 			headerAndLoadCommandsSection = state.addAtom(*_headersAndLoadCommandAtom);
 			break;
+#endif
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			_headersAndLoadCommandAtom = new HeaderAndLoadCommandsAtom<x86>(_options, state, *this);
 			headerAndLoadCommandsSection = state.addAtom(*_headersAndLoadCommandAtom);
 			break;
+#endif
 		default:
 			throw "unknown architecture";
 	}
@@ -2485,7 +2594,15 @@ void OutputFile::generateLinkEditInfo(ld::Internal& state)
 						}
 						assert(minusTarget != NULL);
 						break;
-                     default:
+					case ld::Fixup::kindDataInCodeStartData:
+					case ld::Fixup::kindDataInCodeStartJT8:
+					case ld::Fixup::kindDataInCodeStartJT16:
+					case ld::Fixup::kindDataInCodeStartJT32:
+					case ld::Fixup::kindDataInCodeStartJTA32:
+					case ld::Fixup::kindDataInCodeEnd:
+						hasDataInCode = true;
+						break;
+					default:
                         break;    
 				}
 				if ( this->isStore(fit->kind) ) {
@@ -2530,7 +2647,8 @@ void OutputFile::noteTextReloc(const ld::Atom* atom, const ld::Atom* target)
 		if ( _options.warnAboutTextRelocs() )
 			warning("text reloc in %s to %s", atom->name(), target->name());
 	} 
-	else if ( _options.positionIndependentExecutable() && ((_options.iOSVersionMin() >= ld::iOS_4_3) || (_options.macosxVersionMin() >= ld::mac10_7)) ) {
+	else if ( _options.positionIndependentExecutable() && (_options.outputKind() == Options::kDynamicExecutable) 
+		&& ((_options.iOSVersionMin() >= ld::iOS_4_3) || (_options.macosxVersionMin() >= ld::mac10_7)) ) {
 		if ( ! this->pieDisabled ) {
 			warning("PIE disabled. Absolute addressing (perhaps -mdynamic-no-pic) not allowed in code signed PIE, "
 				"but used in %s from %s. " 
@@ -2568,9 +2686,10 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 					return;
 				}
 				// Have direct reference to weak-global.  This should be an indrect reference
+				const char* demangledName = strdup(_options.demangleSymbol(atom->name()));
 				warning("direct access in %s to global weak symbol %s means the weak symbol cannot be overridden at runtime. "
 						"This was likely caused by different translation units being compiled with different visibility settings.",
-						 atom->name(), target->name());
+						  demangledName, _options.demangleSymbol(target->name()));
 			}
 			return;
 		}
@@ -2596,9 +2715,10 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 				return;
 			}
 			// Have direct reference to weak-global.  This should be an indrect reference
+			const char* demangledName = strdup(_options.demangleSymbol(atom->name()));
 			warning("direct access in %s to global weak symbol %s means the weak symbol cannot be overridden at runtime. "
 					"This was likely caused by different translation units being compiled with different visibility settings.",
-					 atom->name(), target->name());
+					 demangledName, _options.demangleSymbol(target->name()));
 		}
 		return;
 	}
@@ -2620,7 +2740,7 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 	uint8_t	rebaseType = REBASE_TYPE_POINTER;
 	uint8_t type = BIND_TYPE_POINTER;
 	const ld::dylib::File* dylib = dynamic_cast<const ld::dylib::File*>(target->file());
-	bool weak_import = ((dylib != NULL) && (fixupWithTarget->weakImport || dylib->forcedWeakLinked()));
+    bool weak_import = (fixupWithTarget->weakImport || ((dylib != NULL) && dylib->forcedWeakLinked()));
 	uint64_t address =  atom->finalAddress() + fixupWithTarget->offsetInAtom;
 	uint64_t addend = targetAddend - minusTargetAddend;
 
@@ -2716,6 +2836,22 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			sect->hasLocalRelocs = true;  // so dyld knows to change permissions on __TEXT segment
 			rebaseType = REBASE_TYPE_TEXT_ABSOLUTE32;
 		}
+		if ( (addend != 0) && _options.sharedRegionEligible() ) {
+			// make sure the addend does not cause the pointer to point outside the target's segment
+			// if it does, update_dyld_shared_cache will not be able to put this dylib into the shared cache
+			uint64_t targetAddress = target->finalAddress();
+			for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
+				ld::Internal::FinalSection* sct = *sit;
+				uint64_t sctEnd = (sct->address+sct->size);
+				if ( (sct->address <= targetAddress) && (targetAddress < sctEnd) ) {
+					if ( (targetAddress+addend) > sctEnd ) {
+						warning("data symbol %s from %s has pointer to %s + 0x%08llX. "  
+								"That large of an addend may disable %s from being put in the dyld shared cache.", 
+								atom->name(), atom->file()->path(), target->name(), addend, _options.installPath() );
+					}
+				}
+			}
+		}
 		_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
 	}
 	if ( needsBinding ) {
@@ -2745,10 +2881,20 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 		return;
 	
 	// non-lazy-pointer section is encoded in indirect symbol table - not using relocations
-	if ( (sect->type() == ld::Section::typeNonLazyPointer) && (_options.outputKind() != Options::kKextBundle) ) {
-		assert(target != NULL);
-		assert(fixupWithTarget != NULL);
-		return;
+	if ( sect->type() == ld::Section::typeNonLazyPointer ) {
+		// except kexts and static pie which *do* use relocations
+		switch (_options.outputKind()) {
+			case Options::kKextBundle:
+				break;
+			case Options::kStaticExecutable:
+				if ( _options.positionIndependentExecutable() )
+					break;
+				// else fall into default case
+			default:
+				assert(target != NULL);
+				assert(fixupWithTarget != NULL);
+				return;
+		}
 	}
 	
 	// no need to rebase or bind PCRel stores
@@ -3091,8 +3237,8 @@ void OutputFile::writeMapFile(ld::Internal& state)
 			//		uuid[8], uuid[9], uuid[10], uuid[11], uuid[12], uuid[13], uuid[14], uuid[15]);
 			//}
 			// write table of object files
-			std::map<const ld::File*, uint32_t> readerToOrdinal;
-			std::map<uint32_t, const ld::File*> ordinalToReader;
+			std::map<const ld::File*, ld::File::Ordinal> readerToOrdinal;
+			std::map<ld::File::Ordinal, const ld::File*> ordinalToReader;
 			std::map<const ld::File*, uint32_t> readerToFileOrdinal;
 			for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
 				ld::Internal::FinalSection* sect = *sit;
@@ -3103,8 +3249,8 @@ void OutputFile::writeMapFile(ld::Internal& state)
 					const ld::File* reader = atom->file();
 					if ( reader == NULL )
 						continue;
-					uint32_t readerOrdinal = reader->ordinal();
-					std::map<const ld::File*, uint32_t>::iterator pos = readerToOrdinal.find(reader);
+					ld::File::Ordinal readerOrdinal = reader->ordinal();
+					std::map<const ld::File*, ld::File::Ordinal>::iterator pos = readerToOrdinal.find(reader);
 					if ( pos == readerToOrdinal.end() ) {
 						readerToOrdinal[reader] = readerOrdinal;
 						ordinalToReader[readerOrdinal] = reader;
@@ -3113,13 +3259,10 @@ void OutputFile::writeMapFile(ld::Internal& state)
 			}
 			fprintf(mapFile, "# Object files:\n");
 			fprintf(mapFile, "[%3u] %s\n", 0, "linker synthesized");
-			uint32_t fileIndex = 0;
-			readerToFileOrdinal[NULL] = fileIndex++;
-			for(std::map<uint32_t, const ld::File*>::iterator it = ordinalToReader.begin(); it != ordinalToReader.end(); ++it) {
-				if ( it->first != 0 ) {
-					fprintf(mapFile, "[%3u] %s\n", fileIndex, it->second->path());
-					readerToFileOrdinal[it->second] = fileIndex++;
-				}
+			uint32_t fileIndex = 1;
+			for(std::map<ld::File::Ordinal, const ld::File*>::iterator it = ordinalToReader.begin(); it != ordinalToReader.end(); ++it) {
+				fprintf(mapFile, "[%3u] %s\n", fileIndex, it->second->path());
+				readerToFileOrdinal[it->second] = fileIndex++;
 			}
 			// write table of sections
 			fprintf(mapFile, "# Sections:\n");
@@ -3196,8 +3339,8 @@ public:
 	bool operator()(const ld::Atom* left, const ld::Atom* right) const
 	{
 		// first sort by reader
-		uint32_t leftFileOrdinal  = left->file()->ordinal();
-		uint32_t rightFileOrdinal = right->file()->ordinal();
+		ld::File::Ordinal leftFileOrdinal  = left->file()->ordinal();
+		ld::File::Ordinal rightFileOrdinal = right->file()->ordinal();
 		if ( leftFileOrdinal!= rightFileOrdinal)
 			return (leftFileOrdinal < rightFileOrdinal);
 
@@ -3300,11 +3443,13 @@ void OutputFile::synthesizeDebugNotes(ld::Internal& state)
 		const char* newDirPath;
 		const char* newFilename;
 		//fprintf(stderr, "debug note for %s\n", atom->name());
-		if ( atom->translationUnitSource(&newDirPath, &newFilename) ) {
+		// guard against dwarf info that has no directory <rdar://problem/10991352>
+		if ( atom->translationUnitSource(&newDirPath, &newFilename) && (newDirPath != NULL)) {
 			// need SO's whenever the translation unit source file changes
 			if ( newFilename != filename ) {
 				// gdb like directory SO's to end in '/', but dwarf DW_AT_comp_dir usually does not have trailing '/'
-				if ( (newDirPath != NULL) && (strlen(newDirPath) > 1 ) && (newDirPath[strlen(newDirPath)-1] != '/') )
+				size_t len = strlen(newDirPath);
+				if ( (newDirPath != NULL) && (len > 1 ) && (newDirPath[len-1] != '/') )
 					asprintf((char**)&newDirPath, "%s/", newDirPath);
 				if ( filename != NULL ) {
 					// translation unit change, emit ending SO

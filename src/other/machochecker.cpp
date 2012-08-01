@@ -388,6 +388,7 @@ void MachOChecker<A>::checkLoadCommands()
 	// check that all load commands fit within the load command space file
 	const macho_encryption_info_command<P>* encryption_info = NULL;
 	const macho_thread_command<P>* threadInfo = NULL;
+	const macho_entry_point_command<P>* entryPoint = NULL;
 	const uint8_t* const endOfFile = (uint8_t*)fHeader + fLength;
 	const uint8_t* const endOfLoadCommands = (uint8_t*)fHeader + sizeof(macho_header<P>) + fHeader->sizeofcmds();
 	const uint32_t cmd_count = fHeader->ncmds();
@@ -424,8 +425,12 @@ void MachOChecker<A>::checkLoadCommands()
 			case LC_LOAD_UPWARD_DYLIB:
 			case LC_VERSION_MIN_MACOSX:
 			case LC_VERSION_MIN_IPHONEOS:
-			case LC_FUNCTION_STARTS:
 			case LC_RPATH:
+			case LC_FUNCTION_STARTS:
+			case LC_DYLD_ENVIRONMENT:
+			case LC_DATA_IN_CODE:
+			case LC_DYLIB_CODE_SIGN_DRS:
+			case LC_SOURCE_VERSION:
 				break;
 			case LC_DYLD_INFO:
 			case LC_DYLD_INFO_ONLY:
@@ -438,6 +443,11 @@ void MachOChecker<A>::checkLoadCommands()
 			case LC_SUB_LIBRARY:
 				if ( fHeader->flags() & MH_NO_REEXPORTED_DYLIBS )
 					throw "MH_NO_REEXPORTED_DYLIBS bit of mach_header flags should not be set in an image with LC_SUB_LIBRARY or LC_SUB_UMBRELLA";
+				break;
+			case LC_MAIN:
+				if ( fHeader->filetype() != MH_EXECUTE )
+					throw "LC_MAIN can only be used in MH_EXECUTE file types";
+				entryPoint =  (macho_entry_point_command<P>*)cmd;
 				break;
 			case LC_UNIXTHREAD:
 				if ( fHeader->filetype() != MH_EXECUTE )
@@ -590,7 +600,11 @@ void MachOChecker<A>::checkLoadCommands()
 		if ( (initialPC < fTEXTSegment->vmaddr()) ||  (initialPC >= (fTEXTSegment->vmaddr()+fTEXTSegment->vmsize())) ) 
 			throwf("entry point 0x%0llX is outside __TEXT segment", (long long)initialPC);
 	}
-	
+	else if ( entryPoint != NULL ) {
+		pint_t initialOffset = entryPoint->entryoff();
+		if ( (initialOffset < fTEXTSegment->fileoff()) ||  (initialOffset >= (fTEXTSegment->fileoff()+fTEXTSegment->filesize())) ) 
+			throwf("entry point 0x%0llX is outside __TEXT segment", (long long)initialOffset);
+	}
 	
 	// checks for executables
 	bool isStaticExecutable = false;
@@ -607,7 +621,7 @@ void MachOChecker<A>::checkLoadCommands()
 			cmd = (const macho_load_command<P>*)(((uint8_t*)cmd)+cmd->cmdsize());
 		}
 		if ( isStaticExecutable ) {
-			if ( fHeader->flags() != MH_NOUNDEFS )
+			if ( (fHeader->flags() != MH_NOUNDEFS) && (fHeader->flags() != (MH_NOUNDEFS|MH_PIE)) )
 				throw "invalid bits in mach_header flags for static executable";
 		}
 	}
@@ -661,7 +675,7 @@ void MachOChecker<A>::checkLoadCommands()
 				break;
 			case LC_DYSYMTAB:
 				{
-					if ( isStaticExecutable )
+					if ( isStaticExecutable &&! fSlidableImage )
 						throw "LC_DYSYMTAB should not be used in static executable";
 					foundDynamicSymTab = true;
 					fDynamicSymbolTable = (macho_dysymtab_command<P>*)cmd;
@@ -723,6 +737,32 @@ void MachOChecker<A>::checkLoadCommands()
 						throw "function starts data table not pointer aligned";
 					if ( (info->datasize() % sizeof(pint_t)) != 0 )
 						throw "function starts data size not a multiple of pointer size";
+				}
+				break;
+			case LC_DATA_IN_CODE:
+				{
+					const macho_linkedit_data_command<P>* info = (macho_linkedit_data_command<P>*)cmd;
+					if ( info->dataoff() < linkEditSegment->fileoff() )
+						throw "data-in-code data not in __LINKEDIT";
+					if ( (info->dataoff()+info->datasize()) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+						throw "data-in-code data not in __LINKEDIT";
+					if ( (info->dataoff() % sizeof(pint_t)) != 0 )
+						throw "data-in-code data table not pointer aligned";
+					if ( (info->datasize() % sizeof(pint_t)) != 0 )
+						throw "data-in-code data size not a multiple of pointer size";
+				}
+				break;
+			case LC_DYLIB_CODE_SIGN_DRS:
+				{
+					const macho_linkedit_data_command<P>* info = (macho_linkedit_data_command<P>*)cmd;
+					if ( info->dataoff() < linkEditSegment->fileoff() )
+						throw "dependent dylib DR data not in __LINKEDIT";
+					if ( (info->dataoff()+info->datasize()) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+						throw "dependent dylib DR  data not in __LINKEDIT";
+					if ( (info->dataoff() % sizeof(pint_t)) != 0 )
+						throw "dependent dylib DR  data table not pointer aligned";
+					if ( (info->datasize() % sizeof(pint_t)) != 0 )
+						throw "dependent dylib DR  data size not a multiple of pointer size";
 				}
 				break;
 		}
@@ -1039,6 +1079,7 @@ void MachOChecker<x86_64>::checkExternalReloation(const macho_relocation_info<P>
 	// FIX: check r_symbol
 }
 
+#if SUPPORT_ARCH_arm_any
 template <>
 void MachOChecker<arm>::checkExternalReloation(const macho_relocation_info<P>* reloc)
 {
@@ -1054,6 +1095,7 @@ void MachOChecker<arm>::checkExternalReloation(const macho_relocation_info<P>* r
 		throw "external relocation address not in writable segment";
 	// FIX: check r_symbol
 }
+#endif
 
 
 template <>
@@ -1109,6 +1151,7 @@ void MachOChecker<x86_64>::checkLocalReloation(const macho_relocation_info<P>* r
 		throw "local relocation address not in writable segment";
 }
 
+#if SUPPORT_ARCH_arm_any
 template <>
 void MachOChecker<arm>::checkLocalReloation(const macho_relocation_info<P>* reloc)
 {
@@ -1129,6 +1172,7 @@ void MachOChecker<arm>::checkLocalReloation(const macho_relocation_info<P>* relo
 			throw "local relocation address not in writable segment";
 	}
 }
+#endif
 
 template <typename A>
 void MachOChecker<A>::checkRelocations()
@@ -1273,6 +1317,7 @@ bool MachOChecker<A>::hasTextRelocInRange(pint_t rangeStart, pint_t rangeEnd)
 			}
 		}	
 	}
+	return false;
 }
 
 template <typename A>
@@ -1518,12 +1563,14 @@ static void check(const char* path)
 					else
 						throw "in universal file, x86_64 slice does not contain x86_64 mach-o";
 					break;
+#if SUPPORT_ARCH_arm_any
 				case CPU_TYPE_ARM:
 					if ( MachOChecker<arm>::validFile(p + offset) )
 						MachOChecker<arm>::make(p + offset, size, path);
 					else
 						throw "in universal file, arm slice does not contain arm mach-o";
 					break;
+#endif
 				default:
 						throwf("in universal file, unknown architecture slice 0x%x\n", cputype);
 				}
@@ -1541,9 +1588,11 @@ static void check(const char* path)
 		else if ( MachOChecker<x86_64>::validFile(p) ) {
 			MachOChecker<x86_64>::make(p, length, path);
 		}
+#if SUPPORT_ARCH_arm_any
 		else if ( MachOChecker<arm>::validFile(p) ) {
 			MachOChecker<arm>::make(p, length, path);
 		}
+#endif
 		else {
 			throw "not a known file type";
 		}

@@ -91,7 +91,7 @@ class File : public ld::relocatable::File
 {
 public:
 											File(const char* path, time_t mTime, const uint8_t* content, 
-													uint32_t contentLength, uint32_t ordinal, cpu_type_t arch);
+													uint32_t contentLength, cpu_type_t arch);
 	virtual									~File();
 
 	// overrides of ld::File
@@ -101,7 +101,6 @@ public:
 	virtual uint32_t									cpuSubType() const			{ return _cpuSubType; }
 	
 	// overrides of ld::relocatable::File 
-	virtual bool										objcReplacementClasses() const	{ return false; }
 	virtual DebugInfoKind								debugInfo()	const			{ return _debugInfo; }
 	virtual const char*									debugInfoPath() const		{ return _debugInfoPath; }
 	virtual time_t										debugInfoModificationTime() const 
@@ -199,11 +198,10 @@ public:
 	static bool						validFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t architecture, cpu_subtype_t subarch);
 	static const char*				fileKind(const uint8_t* fileContent, uint64_t fileLength);
 	static File*					parse(const uint8_t* fileContent, uint64_t fileLength, const char* path, 
-											time_t modTime, uint32_t ordinal, cpu_type_t architecture, cpu_subtype_t subarch, bool logAllFiles);
+											time_t modTime, cpu_type_t architecture, cpu_subtype_t subarch, bool logAllFiles);
 	static bool						libLTOisLoaded() { return (::lto_get_version() != NULL); }
 	static bool						optimize(   const std::vector<const ld::Atom*>&	allAtoms,
 												ld::Internal&						state,
-												uint32_t							nextInputOrdinal, 
 												const OptimizeOptions&				options,
 												ld::File::AtomHandler&				handler,
 												std::vector<const ld::Atom*>&		newAtoms, 
@@ -213,7 +211,7 @@ public:
 
 private:
 	static const char*				tripletPrefixForArch(cpu_type_t arch);
-	static ld::relocatable::File*	parseMachOFile(const uint8_t* p, size_t len, uint32_t nextInputOrdinal, const OptimizeOptions& options);
+	static ld::relocatable::File*	parseMachOFile(const uint8_t* p, size_t len, const OptimizeOptions& options);
 
 	class CStringEquals
 	{
@@ -246,17 +244,17 @@ std::vector<File*> Parser::_s_files;
 
 bool Parser::validFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t architecture, cpu_subtype_t subarch)
 {
-	switch (architecture) {
-		case CPU_TYPE_I386:
-			return ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, "i386-");
-		case CPU_TYPE_X86_64:
-			return ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, "x86_64-");
-		case CPU_TYPE_ARM:
-			for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
-				if ( subarch == t->subType )
-					return ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, t->llvmTriplePrefix);
+	for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
+		if ( (architecture == t->cpuType) && (!(t->isSubType) || (subarch == t->cpuSubType)) ) {
+			bool result = ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, t->llvmTriplePrefix);
+			if ( !result ) {
+				// <rdar://problem/8434487> LTO only supports thumbv7 not armv7
+				if ( t->llvmTriplePrefixAlt[0] != '\0' ) {
+					result = ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, t->llvmTriplePrefixAlt);
+				}
 			}
-			break;
+			return result;
+		}
 	}
 	return false;
 }
@@ -264,18 +262,17 @@ bool Parser::validFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type
 const char* Parser::fileKind(const uint8_t* p, uint64_t fileLength)
 {
 	if ( (p[0] == 0xDE) && (p[1] == 0xC0) && (p[2] == 0x17) && (p[3] == 0x0B) ) {
-		uint32_t arch = LittleEndian::get32(*((uint32_t*)(&p[16])));
-		switch (arch) {
-			case CPU_TYPE_I386:
-				return "i386";
-			case CPU_TYPE_X86_64:
-				return "x86_64";
-			case CPU_TYPE_ARM:
-				for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
+		cpu_type_t arch = LittleEndian::get32(*((uint32_t*)(&p[16])));
+		for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
+			if ( arch == t->cpuType ) {
+				 if ( t->isSubType ) {
 					if ( ::lto_module_is_object_file_in_memory_for_target(p, fileLength, t->llvmTriplePrefix) )
-						return t->subTypeName;
+						return t->archName;
 				}
-				return "arm";
+				else {
+					return t->archName;
+				}
+			}
 		}
 		return "unknown bitcode architecture";
 	}
@@ -283,9 +280,9 @@ const char* Parser::fileKind(const uint8_t* p, uint64_t fileLength)
 }
 
 File* Parser::parse(const uint8_t* fileContent, uint64_t fileLength, const char* path, time_t modTime, 
-													uint32_t ordinal, cpu_type_t architecture, cpu_subtype_t subarch, bool logAllFiles) 
+													cpu_type_t architecture, cpu_subtype_t subarch, bool logAllFiles) 
 {
-	File* f = new File(path, modTime, fileContent, fileLength, ordinal, architecture);
+	File* f = new File(path, modTime, fileContent, fileLength, architecture);
 	_s_files.push_back(f);
 	if ( logAllFiles ) 
 		printf("%s\n", path);
@@ -293,7 +290,7 @@ File* Parser::parse(const uint8_t* fileContent, uint64_t fileLength, const char*
 }
 
 
-ld::relocatable::File* Parser::parseMachOFile(const uint8_t* p, size_t len, uint32_t nextInputOrdinal, const OptimizeOptions& options) 
+ld::relocatable::File* Parser::parseMachOFile(const uint8_t* p, size_t len, const OptimizeOptions& options) 
 {
 	mach_o::relocatable::ParserOptions objOpts;
 	objOpts.architecture		= options.arch;
@@ -312,7 +309,7 @@ ld::relocatable::File* Parser::parseMachOFile(const uint8_t* p, size_t len, uint
 			modTime = statBuffer.st_mtime;
 	}
 	
-	ld::relocatable::File* result = mach_o::relocatable::parse(p, len, path, modTime, nextInputOrdinal, objOpts);
+	ld::relocatable::File* result = mach_o::relocatable::parse(p, len, path, modTime, ld::File::Ordinal::LTOOrdinal(), objOpts);
 	if ( result != NULL )
 		return result;
 	throw "LLVM LTO, file is not of required architecture";
@@ -320,8 +317,8 @@ ld::relocatable::File* Parser::parseMachOFile(const uint8_t* p, size_t len, uint
 
 
 
-File::File(const char* pth, time_t mTime, const uint8_t* content, uint32_t contentLength, uint32_t ord, cpu_type_t arch) 
-	: ld::relocatable::File(pth,mTime,ord), _architecture(arch), _internalAtom(*this), 
+File::File(const char* pth, time_t mTime, const uint8_t* content, uint32_t contentLength, cpu_type_t arch) 
+	: ld::relocatable::File(pth,mTime,ld::File::Ordinal::LTOOrdinal()), _architecture(arch), _internalAtom(*this), 
 	_atomArray(NULL), _atomArrayCount(0), _module(NULL), _debugInfoPath(pth), 
 	_section("__TEXT_", "__tmp_lto", ld::Section::typeTempLTO),
 	_fixupToInternal(0, ld::Fixup::k1of1, ld::Fixup::kindNone, &_internalAtom),
@@ -399,7 +396,7 @@ File::File(const char* pth, time_t mTime, const uint8_t* content, uint32_t conte
 			uint8_t alignment = (attr & LTO_SYMBOL_ALIGNMENT_MASK);
 			// make Atom using placement new operator
 			new (&_atomArray[_atomArrayCount++]) Atom(*this, name, scope, def, combine, alignment, autohide);
-			if ( scope == ld::Atom::scopeLinkageUnit )
+			if ( scope != ld::Atom::scopeTranslationUnit )
 				_internalAtom.addReference(name);
 			if ( log ) fprintf(stderr, "\t0x%08X %s\n", attr, name);
 		}
@@ -458,7 +455,6 @@ void Atom::setCompiledAtom(const ld::Atom& atom)
 
 bool Parser::optimize(  const std::vector<const ld::Atom*>&	allAtoms,
 						ld::Internal&						state,
-						uint32_t							nextInputOrdinal, 
 						const OptimizeOptions&				options,
 						ld::File::AtomHandler&				handler,
 						std::vector<const ld::Atom*>&		newAtoms, 
@@ -577,7 +573,7 @@ bool Parser::optimize(  const std::vector<const ld::Atom*>&	allAtoms,
 		// 1 - atom scope is global (and not linkage unit).
 		// 2 - included in nonLLVMRefs set.
 		// If a symbol is not listed in exportList then LTO is free to optimize it away.
-		if ( (atom->scope() == ld::Atom::scopeGlobal) ) { 
+		if ( (atom->scope() == ld::Atom::scopeGlobal) && options.preserveAllGlobals ) { 
 			if ( logMustPreserve ) fprintf(stderr, "lto_codegen_add_must_preserve_symbol(%s) because global symbol\n", name);
 			::lto_codegen_add_must_preserve_symbol(generator, name);
 		}
@@ -680,7 +676,7 @@ bool Parser::optimize(  const std::vector<const ld::Atom*>&	allAtoms,
 	}
 	
 	// parse generated mach-o file into a MachOReader
-	ld::relocatable::File* machoFile = parseMachOFile(machOFile, machOFileLen, nextInputOrdinal, options);
+	ld::relocatable::File* machoFile = parseMachOFile(machOFile, machOFileLen, options);
 	
 	// sync generated mach-o atoms with existing atoms ld knows about
 	if ( logAtomsBeforeSync ) {
@@ -806,12 +802,20 @@ void Parser::AtomSyncer::doAtom(const ld::Atom& machoAtom)
 
 }
 
+class Mutex {
+	static pthread_mutex_t lto_lock;
+public:
+	Mutex() { pthread_mutex_lock(&lto_lock); }
+	~Mutex() { pthread_mutex_unlock(&lto_lock); }
+};
+pthread_mutex_t Mutex::lto_lock = PTHREAD_MUTEX_INITIALIZER;
 
 //
 // Used by archive reader to see if member is an llvm bitcode file
 //
 bool isObjectFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t architecture, cpu_subtype_t subarch)
 {
+	Mutex lock;
 	return Parser::validFile(fileContent, fileLength, architecture, subarch);
 }
 
@@ -820,11 +824,12 @@ bool isObjectFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t ar
 // main function used by linker to instantiate ld::Files
 //
 ld::relocatable::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
-								const char* path, time_t modTime, uint32_t ordinal, 
+								const char* path, time_t modTime, 
 								cpu_type_t architecture, cpu_subtype_t subarch, bool logAllFiles)
 {
+	Mutex lock;
 	if ( Parser::validFile(fileContent, fileLength, architecture, subarch) )
-		return Parser::parse(fileContent, fileLength, path, modTime, ordinal, architecture, subarch, logAllFiles);
+		return Parser::parse(fileContent, fileLength, path, modTime, architecture, subarch, logAllFiles);
 	else
 		return NULL;
 }
@@ -834,6 +839,7 @@ ld::relocatable::File* parse(const uint8_t* fileContent, uint64_t fileLength,
 //
 const char* version()
 {
+	Mutex lock;
 	return ::lto_get_version();
 }
 
@@ -843,6 +849,7 @@ const char* version()
 //
 bool libLTOisLoaded()
 {
+	Mutex lock;
 	return (::lto_get_version() != NULL);
 }
 
@@ -851,6 +858,7 @@ bool libLTOisLoaded()
 //
 const char* archName(const uint8_t* fileContent, uint64_t fileLength)
 {
+	Mutex lock;
 	return Parser::fileKind(fileContent, fileLength);
 }
 
@@ -859,13 +867,13 @@ const char* archName(const uint8_t* fileContent, uint64_t fileLength)
 //
 bool optimize(  const std::vector<const ld::Atom*>&	allAtoms,
 				ld::Internal&						state,
-				uint32_t							nextInputOrdinal, 
 				const OptimizeOptions&				options,
 				ld::File::AtomHandler&				handler,
 				std::vector<const ld::Atom*>&		newAtoms, 
 				std::vector<const char*>&			additionalUndefines)
 { 
-	return Parser::optimize(allAtoms, state, nextInputOrdinal, options, handler, newAtoms, additionalUndefines);
+	Mutex lock;
+	return Parser::optimize(allAtoms, state, options, handler, newAtoms, additionalUndefines);
 }
 
 

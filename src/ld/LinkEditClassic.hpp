@@ -230,6 +230,7 @@ private:
 	uint32_t						stringOffsetForStab(const ld::relocatable::File::Stab& stab, StringPoolAtom* pool);
 	uint64_t						valueForStab(const ld::relocatable::File::Stab& stab);
 	uint8_t							sectionIndexForStab(const ld::relocatable::File::Stab& stab);
+	void							addDataInCodeLabels(const ld::Atom* atom, uint32_t& symbolIndex);
 	
 
 	mutable std::vector<macho_nlist<P> >	_globals;
@@ -242,18 +243,21 @@ private:
 	uint32_t								_stabsIndexEnd;
 
 	static ld::Section			_s_section;
+	static int					_s_anonNameIndex;
+
 };
 
 template <typename A>
 ld::Section SymbolTableAtom<A>::_s_section("__LINKEDIT", "__symbol_table", ld::Section::typeLinkEdit, true);
 
+template <typename A>
+int	 SymbolTableAtom<A>::_s_anonNameIndex = 1;
 
 
 template <typename A>
 bool SymbolTableAtom<A>::addLocal(const ld::Atom* atom, StringPoolAtom* pool) 
 {
 	macho_nlist<P> entry;
-	static int s_anonNameIndex = 1;
 	assert(atom->symbolTableInclusion() != ld::Atom::symbolTableNotIn);
 	 
 	// set n_strx
@@ -264,7 +268,7 @@ bool SymbolTableAtom<A>::addLocal(const ld::Atom* atom, StringPoolAtom* pool)
 			if ( atom->combine() == ld::Atom::combineByNameAndContent ) {
 				// don't use 'l' labels for x86_64 strings
 				// <rdar://problem/6605499> x86_64 obj-c runtime confused when static lib is stripped
-				sprintf(anonName, "LC%u", s_anonNameIndex++);
+				sprintf(anonName, "LC%u", _s_anonNameIndex++);
 				symbolName = anonName;
 			}
 		}
@@ -279,7 +283,7 @@ bool SymbolTableAtom<A>::addLocal(const ld::Atom* atom, StringPoolAtom* pool)
 		}
 		else if ( atom->symbolTableInclusion() == ld::Atom::symbolTableInWithRandomAutoStripLabel ) {
 			// make auto-strip anonymous name for symbol 
-			sprintf(anonName, "l%03u", s_anonNameIndex++);
+			sprintf(anonName, "l%03u", _s_anonNameIndex++);
 			symbolName = anonName;
 		}
 	}
@@ -335,7 +339,16 @@ void SymbolTableAtom<A>::addGlobal(const ld::Atom* atom, StringPoolAtom* pool)
 	macho_nlist<P> entry;
 
 	// set n_strx
-	entry.set_n_strx(pool->add(atom->name()));
+	const char* symbolName = atom->name();
+	char anonName[32];
+	if ( this->_options.outputKind() == Options::kObjectFile ) {
+		if ( atom->symbolTableInclusion() == ld::Atom::symbolTableInWithRandomAutoStripLabel ) {
+			// make auto-strip anonymous name for symbol 
+			sprintf(anonName, "l%03u", _s_anonNameIndex++);
+			symbolName = anonName;
+		}
+	}
+	entry.set_n_strx(pool->add(symbolName));
 
 	// set n_type
 	if ( atom->definition() == ld::Atom::definitionAbsolute ) {
@@ -356,8 +369,9 @@ void SymbolTableAtom<A>::addGlobal(const ld::Atom* atom, StringPoolAtom* pool)
 				entry.set_n_type(N_EXT | N_SECT | N_PEXT);
 		}
 		else if ( (atom->symbolTableInclusion() == ld::Atom::symbolTableInAndNeverStrip)
-					&& (atom->section().type() == ld::Section::typeMachHeader) ) {
-			// the __mh_execute_header is historical magic and must be an absolute symbol
+					&& (atom->section().type() == ld::Section::typeMachHeader) 
+					&& !_options.positionIndependentExecutable() ) {
+			// the __mh_execute_header is historical magic in non-pie executabls and must be an absolute symbol
 			entry.set_n_type(N_EXT | N_ABS);
 		}
 	}
@@ -609,6 +623,49 @@ bool SymbolTableAtom<A>::hasStabs(uint32_t& ssos, uint32_t& ssoe, uint32_t& sos,
 	return ( (_stabsIndexStart != _stabsIndexEnd) || (_stabsStringsOffsetStart != _stabsStringsOffsetEnd) );
 }
 
+
+template <typename A>
+void SymbolTableAtom<A>::addDataInCodeLabels(const ld::Atom* atom, uint32_t& symbolIndex)
+{
+	char label[64];
+	for (ld::Fixup::iterator fit = atom->fixupsBegin(), end=atom->fixupsEnd(); fit != end; ++fit) {
+		label[0] = '\0';
+		switch ( fit->kind ) {
+			case ld::Fixup::kindDataInCodeStartData:
+				sprintf(label, "L$start$data$%03u", symbolIndex);
+				break;
+			case ld::Fixup::kindDataInCodeStartJT8:
+				sprintf(label, "L$start$jt8$%03u", symbolIndex);
+				break;
+			case ld::Fixup::kindDataInCodeStartJT16:
+				sprintf(label, "L$start$jt16$%03u", symbolIndex);
+				break;
+			case ld::Fixup::kindDataInCodeStartJT32:
+				sprintf(label, "L$start$jt32$%03u", symbolIndex);
+				break;
+			case ld::Fixup::kindDataInCodeStartJTA32:
+				sprintf(label, "L$start$jta32$%03u", symbolIndex);
+				break;
+			case ld::Fixup::kindDataInCodeEnd:
+				sprintf(label, "L$start$code$%03u", symbolIndex);
+				break;
+			default:
+				break;
+		}
+		if ( label[0] != '\0' ) {
+			macho_nlist<P> entry;
+			entry.set_n_type(N_SECT);
+			entry.set_n_sect(atom->machoSection());
+			entry.set_n_desc(0);
+			entry.set_n_value(atom->finalAddress() + fit->offsetInAtom);
+			entry.set_n_strx(this->_writer._stringPoolAtom->add(label));
+			_locals.push_back(entry);
+			++symbolIndex;
+		}
+	}
+}
+
+
 template <typename A>
 void SymbolTableAtom<A>::encode()
 {
@@ -616,6 +673,7 @@ void SymbolTableAtom<A>::encode()
 
 	// make nlist entries for all local symbols
 	std::vector<const ld::Atom*>& localAtoms = this->_writer._localAtoms;
+	std::vector<const ld::Atom*>& globalAtoms = this->_writer._exportedAtoms;
 	_locals.reserve(localAtoms.size()+this->_state.stabs.size());
 	this->_writer._localSymbolsStartIndex = 0;
 	// make nlist entries for all debug notes
@@ -638,11 +696,19 @@ void SymbolTableAtom<A>::encode()
 		if ( this->addLocal(atom, this->_writer._stringPoolAtom) )
 			this->_writer._atomToSymbolIndex[atom] = symbolIndex++;
 	}
+	// <rdar://problem/9218847> recreate L$start$ labels in -r mode
+	if ( (_options.outputKind() == Options::kObjectFile) && this->_writer.hasDataInCode ) {
+		for (std::vector<const ld::Atom*>::const_iterator it=globalAtoms.begin(); it != globalAtoms.end(); ++it) {
+			this->addDataInCodeLabels(*it, symbolIndex);
+		}
+		for (std::vector<const ld::Atom*>::const_iterator it=localAtoms.begin(); it != localAtoms.end(); ++it) {
+			this->addDataInCodeLabels(*it, symbolIndex);
+		}
+	}
 	this->_writer._localSymbolsCount = symbolIndex;
 	
 
 	// make nlist entries for all global symbols
-	std::vector<const ld::Atom*>& globalAtoms = this->_writer._exportedAtoms;
 	_globals.reserve(globalAtoms.size());
 	this->_writer._globalSymbolsStartIndex = symbolIndex;
 	for (std::vector<const ld::Atom*>::const_iterator it=globalAtoms.begin(); it != globalAtoms.end(); ++it) {
@@ -919,7 +985,9 @@ uint64_t ExternalRelocationsAtom<A>::size() const
 	return (_pointerLocations.size() + _callSiteLocations.size()) * sizeof(macho_relocation_info<P>);
 }
 
+#if SUPPORT_ARCH_arm_any
 template <> uint32_t ExternalRelocationsAtom<arm>::pointerReloc() { return ARM_RELOC_VANILLA; }
+#endif
 template <> uint32_t ExternalRelocationsAtom<x86>::pointerReloc() { return GENERIC_RELOC_VANILLA; }
 template <> uint32_t ExternalRelocationsAtom<x86_64>::pointerReloc() { return X86_64_RELOC_UNSIGNED; }
 
@@ -1363,8 +1431,8 @@ void SectionRelocationsAtom<x86>::encodeSectionReloc(ld::Internal::FinalSection*
 			}
 			else {
 				// regular pointer
-				if ( !external && (entry.toAddend != 0) ) {
-					// use scattered reloc is target offset is non-zero
+				if ( !external && (entry.toAddend != 0) && (entry.toTarget->symbolTableInclusion() != ld::Atom::symbolTableNotIn) ) {
+					// use scattered reloc if target offset is non-zero into named atom (5658046)
 					sreloc1->set_r_scattered(true);
 					sreloc1->set_r_pcrel(false);
 					sreloc1->set_r_length(2);
@@ -1390,6 +1458,7 @@ void SectionRelocationsAtom<x86>::encodeSectionReloc(ld::Internal::FinalSection*
 }
 
 
+#if SUPPORT_ARCH_arm_any
 template <>
 void SectionRelocationsAtom<arm>::encodeSectionReloc(ld::Internal::FinalSection* sect, 
 													const Entry& entry, std::vector<macho_relocation_info<P> >& relocs)
@@ -1614,6 +1683,7 @@ void SectionRelocationsAtom<arm>::encodeSectionReloc(ld::Internal::FinalSection*
 		
 	}
 }
+#endif
 
 
 
@@ -1866,12 +1936,16 @@ bool IndirectSymbolTableAtom<A>::kextBundlesDontHaveIndirectSymbolTable()
 template <typename A>
 void IndirectSymbolTableAtom<A>::encode()
 {
-	// static executables should not have an indirect symbol table
-	if ( this->_options.outputKind() == Options::kStaticExecutable ) 
+	// static executables should not have an indirect symbol table, unless PIE
+	if ( (this->_options.outputKind() == Options::kStaticExecutable) && !_options.positionIndependentExecutable() ) 
 		return;
 
 	// x86_64 kext bundles should not have an indirect symbol table
 	if ( (this->_options.outputKind() == Options::kKextBundle) && kextBundlesDontHaveIndirectSymbolTable() ) 
+		return;
+
+	// slidable static executables (-static -pie) should not have an indirect symbol table
+	if ( (this->_options.outputKind() == Options::kStaticExecutable) && this->_options.positionIndependentExecutable() ) 
 		return;
 
 	// find all special sections that need a range of the indirect symbol table section

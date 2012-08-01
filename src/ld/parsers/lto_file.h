@@ -38,13 +38,13 @@ extern const char* archName(const uint8_t* fileContent, uint64_t fileLength);
 extern bool isObjectFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t architecture, cpu_subtype_t subarch);
 
 extern ld::relocatable::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
-									const char* path, time_t modTime, uint32_t ordinal, 
+									const char* path, time_t modTime, 
 									cpu_type_t architecture, cpu_subtype_t subarch, bool logAllFiles);
 
 struct OptimizeOptions {
 	const char*							outputFilePath;
 	const char*							tmpObjectFilePath;
-	bool								allGlobalsAReDeadStripRoots;
+	bool								preserveAllGlobals;
 	bool								verbose; 
 	bool								saveTemps; 
 	bool								pie; 
@@ -59,7 +59,6 @@ struct OptimizeOptions {
 
 extern bool	optimize(   const std::vector<const ld::Atom*>&	allAtoms,
 						ld::Internal&						state,
-						uint32_t							nextInputOrdinal, 
 						const OptimizeOptions&				options,
 						ld::File::AtomHandler&				handler,
 						std::vector<const ld::Atom*>&		newAtoms, 

@@ -60,21 +60,93 @@ public:
 		virtual void		doFile(const class File&) = 0;
 	};
 
-										File(const char* pth, time_t modTime, uint32_t ord)
-											: _path(pth), _modTime(modTime), _ordinal(ord) { }
+	//
+	// ld::File::Ordinal 
+	//
+	// Codifies the rules of ordering input files for symbol precedence. These are:
+	// - Input files listed on the command line are ordered according to their index in the argument list.
+	// - Input files listed in a file list are ordered first at the index of the file list argument, then
+	//   by index in the file list
+	// - Input files extracted from archives are ordered using the ordinal of the archive itself plus the
+	//   index of the object file within the archive
+	// - Indirect dylibs are ordered after all input files derived from the command line, in the order that
+	//   they are discovered.
+	// - The LTO object file is last.
+	//
+	class Ordinal
+	{
+	private:
+		// The actual numeric ordinal. Lower values have higher precedence and a zero value is invalid.
+		// The 64 bit ordinal is broken into 4 16 bit chunks. The high 16 bits are a "partition" that
+		// is used to distinguish major ordinal groups: command line, indirect dylib, LTO.
+		// The remaining chunks are used according to the partition (see below).
+		uint64_t	_ordinal;
+		
+		Ordinal (uint64_t ordinal) : _ordinal(ordinal) {}
+		
+		enum { ArgListPartition=0, IndirectDylibPartition=1, LTOPartition = 2, InvalidParition=0xffff };
+		Ordinal(uint16_t partition, uint16_t majorIndex, uint16_t minorIndex, uint16_t counter) {
+			_ordinal = ((uint64_t)partition<<48) | ((uint64_t)majorIndex<<32) | ((uint64_t)minorIndex<<16) | ((uint64_t)counter<<0);
+		}
+		
+		const uint16_t	partition() const		{ return (_ordinal>>48)&0xffff; }
+		const uint16_t	majorIndex() const		{ return (_ordinal>>32)&0xffff; }
+		const uint16_t	minorIndex() const		{ return (_ordinal>>16)&0xffff; }
+		const uint16_t	counter() const			{ return (_ordinal>>00)&0xffff; }
+		
+		const Ordinal nextMajorIndex()		const { assert(majorIndex() < 0xffff); return Ordinal(_ordinal+((uint64_t)1<<32)); }
+		const Ordinal nextMinorIndex()		const { assert(minorIndex() < 0xffff); return Ordinal(_ordinal+((uint64_t)1<<16)); }
+		const Ordinal nextCounter()		const { assert(counter() < 0xffff); return Ordinal(_ordinal+((uint64_t)1<<0)); }
+		
+	public:
+		Ordinal() : _ordinal(0) {};
+		
+		static const Ordinal NullOrdinal()		{ return Ordinal((uint64_t)0); }
+		
+		const bool validOrdinal() const { return _ordinal != 0; }
+		
+		bool operator ==(const Ordinal& rhs) const { return _ordinal == rhs._ordinal; }
+		bool operator !=(const Ordinal& rhs) const {	return _ordinal != rhs._ordinal; }
+		bool operator < (const Ordinal& rhs) const { return _ordinal < rhs._ordinal; }
+		bool operator > (const Ordinal& rhs) const { return _ordinal > rhs._ordinal; }
+		
+		// For ordinals derived from the command line args the partition is ArgListPartition
+		// The majorIndex is the arg index that pulls in the file, file list, or archive.
+		// The minorIndex is used for files pulled in by a file list and the value is the index of the file in the file list.
+		// The counter is used for .a files and the value is the index of the object in the archive.
+		// Thus, an object pulled in from a .a that was listed in a file list could use all three fields.
+		static const Ordinal makeArgOrdinal(uint16_t argIndex) { return Ordinal(ArgListPartition, argIndex, 0, 0); };
+		const Ordinal nextFileListOrdinal() const { return nextMinorIndex(); }
+		const Ordinal archiveOrdinalWithMemberIndex(uint16_t index) const { return Ordinal(ArgListPartition, majorIndex(), minorIndex(), index); }
+		
+		// For indirect libraries the partition is IndirectDylibPartition and the counter is used or order the libraries.
+		static const ld::File::Ordinal indirectDylibBase() { return Ordinal(IndirectDylibPartition, 0, 0, 0); }
+		const Ordinal nextIndirectDylibOrdinal() const { return nextCounter(); }
+		
+		// For the LTO mach-o the partition is LTOPartition. As there is only one LTO file no other fields are needed.
+		static const ld::File::Ordinal LTOOrdinal()			{ return Ordinal(LTOPartition, 0, 0, 0); }
+	};
+	
+	typedef enum { Reloc, Dylib, Archive, Other } Type;
+	
+										File(const char* pth, time_t modTime, Ordinal ord, Type type)
+											: _path(pth), _modTime(modTime), _ordinal(ord), _type(type) { }
 	virtual								~File() {}
 			const char*					path() const			{ return _path; }
 			time_t						modificationTime() const{ return _modTime; }
-			uint32_t					ordinal() const			{ return _ordinal; }
+	Ordinal								ordinal() const			{ return _ordinal; }
 	virtual bool						forEachAtom(AtomHandler&) const = 0;
 	virtual bool						justInTimeforEachAtom(const char* name, AtomHandler&) const = 0;
 	virtual ObjcConstraint				objCConstraint() const			{ return objcConstraintNone; }
 	virtual uint32_t					cpuSubType() const		{ return 0; }
 	virtual uint32_t					subFileCount() const	{ return 1; }
+    bool								fileExists() const     { return _modTime != 0; }
+	Type								type() const { return _type; }
 private:
 	const char*							_path;
 	time_t								_modTime;
-	uint32_t							_ordinal;
+	const Ordinal						_ordinal;
+	const Type							_type;
 };
 
 
@@ -82,9 +154,11 @@ private:
 // minumum OS versions
 //
 enum MacVersionMin { macVersionUnset=0, mac10_4=0x000A0400, mac10_5=0x000A0500, 
-						mac10_6=0x000A0600, mac10_7=0x000A0700 };
+						mac10_6=0x000A0600, mac10_7=0x000A0700, mac10_8=0x000A0800,
+						mac10_Future=0x10000000 };
 enum IOSVersionMin { iOSVersionUnset=0, iOS_2_0=0x00020000, iOS_3_1=0x00030100, 
-						iOS_4_2=0x00040200, iOS_4_3=0x00040300, iOS_5_0=0x00050000 };
+						iOS_4_2=0x00040200, iOS_4_3=0x00040300, iOS_5_0=0x00050000,
+						iOS_Future=0x10000000};
  
 namespace relocatable {
 	//
@@ -92,8 +166,6 @@ namespace relocatable {
 	//
 	// Abstract base class for object files the linker processes.
 	// 
-	// objcReplacementClasses() is reflects if the file was compiled for fix-and-continue
-	//
 	// debugInfo() returns if the object file contains debugger information (stabs or dwarf).
 	//
 	// stabs() lazily creates a vector of Stab objects for each atom
@@ -118,10 +190,9 @@ namespace relocatable {
 			const char*			string;
 		};
 
-											File(const char* pth, time_t modTime, uint32_t ord)
-												: ld::File(pth, modTime, ord) { }
+											File(const char* pth, time_t modTime, Ordinal ord)
+												: ld::File(pth, modTime, ord, Reloc) { }
 		virtual								~File() {}
-		virtual bool						objcReplacementClasses() const = 0;
 		virtual DebugInfoKind				debugInfo() const = 0;
 		virtual const char*					debugInfoPath() const { return path(); }
 		virtual time_t						debugInfoModificationTime() const { return modificationTime(); }
@@ -149,8 +220,8 @@ namespace dylib {
 			virtual File*		findDylib(const char* installPath, const char* fromPath) = 0;
 		};
 			
-											File(const char* pth, time_t modTime, uint32_t ord)
-												: ld::File(pth, modTime, ord), _dylibInstallPath(NULL),
+											File(const char* pth, time_t modTime, Ordinal ord)
+												: ld::File(pth, modTime, ord, Dylib), _dylibInstallPath(NULL),
 												_dylibTimeStamp(0), _dylibCurrentVersion(0), _dylibCompatibilityVersion(0),
 												_explicitlyLinked(false), _implicitlyLinked(false),
 												_lazyLoadedDylib(false), _forcedWeakLinked(false), _reExported(false),
@@ -163,6 +234,7 @@ namespace dylib {
 				bool						explicitlyLinked() const	{ return _explicitlyLinked; }
 				void						setImplicitlyLinked()		{ _implicitlyLinked = true; }
 				bool						implicitlyLinked() const	{ return _implicitlyLinked; }
+				
 				// attributes of how dylib will be used when linked
 				void						setWillBeLazyLoadedDylb()		{ _lazyLoadedDylib = true; }
 				bool						willBeLazyLoadedDylib() const	{ return _lazyLoadedDylib; }
@@ -185,6 +257,7 @@ namespace dylib {
 		virtual bool						hasWeakDefinition(const char* name) const = 0;
 		virtual bool						hasPublicInstallName() const = 0;
 		virtual bool						allSymbolsAreWeakImported() const = 0;
+		virtual const void*					codeSignatureDR() const = 0;
 	protected:
 		const char*							_dylibInstallPath;
 		uint32_t							_dylibTimeStamp;
@@ -210,8 +283,8 @@ namespace archive {
 	class File : public ld::File
 	{
 	public:
-											File(const char* pth, time_t modTime, uint32_t ord)
-												: ld::File(pth, modTime, ord) { }
+											File(const char* pth, time_t modTime, Ordinal ord)
+												: ld::File(pth, modTime, ord, Archive) { }
 		virtual								~File() {}
 		virtual bool						justInTimeDataOnlyforEachAtom(const char* name, AtomHandler&) const = 0;
 	};
@@ -325,6 +398,9 @@ struct Fixup
 					kindStoreThumbDtraceCallSiteNop, kindStoreThumbDtraceIsEnableSiteClear,
 					// lazy binding
 					kindLazyTarget, kindSetLazyOffset,
+					// data-in-code markers
+					kindDataInCodeStartData, kindDataInCodeStartJT8, kindDataInCodeStartJT16, 
+					kindDataInCodeStartJT32, kindDataInCodeStartJTA32, kindDataInCodeEnd,
 					// pointer store combinations
 					kindStoreTargetAddressLittleEndian32,	// kindSetTargetAddress + kindStoreLittleEndian32
 					kindStoreTargetAddressLittleEndian64,	// kindSetTargetAddress + kindStoreLittleEndian64
@@ -579,7 +655,9 @@ public:
 	void									setSectionStartAddress(uint64_t a) { assert(_mode == modeSectionOffset); _address += a; _mode = modeFinalAddress; }
 	uint64_t								sectionOffset() const		{ assert(_mode == modeSectionOffset); return _address; }
 	uint64_t								finalAddress() const		{ assert(_mode == modeFinalAddress); return _address; }
-
+#ifndef NDEBUG
+	bool									finalAddressMode() const    { return (_mode == modeFinalAddress); }
+#endif
 	virtual const File*						file() const = 0;
 	virtual bool							translationUnitSource(const char** dir, const char** name) const = 0;
 	virtual const char*						name() const = 0;
@@ -591,6 +669,13 @@ public:
 	virtual bool							canCoalesceWith(const Atom& rhs, const class IndirectBindingTable&) const { return false; }
 	virtual Fixup::iterator					fixupsBegin() const	{ return NULL; }
 	virtual Fixup::iterator					fixupsEnd() const	{ return NULL; }
+	bool									hasFixupsOfKind(Fixup::Kind kind) const {
+		for (ld::Fixup::iterator fit = fixupsBegin(), end=fixupsEnd(); fit != end; ++fit) {
+			if ( fit->kind == kind ) return true;
+		}
+		return false;
+	}
+	
 	virtual UnwindInfo::iterator			beginUnwind() const { return NULL; }
 	virtual UnwindInfo::iterator			endUnwind() const	{ return NULL; }
 	virtual LineInfo::iterator				beginLineInfo() const { return NULL; }
@@ -681,7 +766,7 @@ public:
 											objcObjectConstraint(ld::File::objcConstraintNone), 
 											objcDylibConstraint(ld::File::objcConstraintNone), 
 											cpuSubType(0), 
-											allObjectFilesScatterable(true), hasObjcReplacementClasses(false),
+											allObjectFilesScatterable(true), 
 											someObjectFileHasDwarf(false), usingHugeSections(false) { }
 										
 	std::vector<FinalSection*>					sections;
@@ -697,7 +782,6 @@ public:
 	ld::File::ObjcConstraint					objcDylibConstraint;
 	uint32_t									cpuSubType;
 	bool										allObjectFilesScatterable;
-	bool										hasObjcReplacementClasses;
 	bool										someObjectFileHasDwarf;
 	bool										usingHugeSections;
 };

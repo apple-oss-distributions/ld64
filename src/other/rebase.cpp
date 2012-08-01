@@ -674,6 +674,7 @@ void Rebaser<x86>::doLocalRelocation(const macho_relocation_info<P>* reloc)
 	}
 }
 
+#if SUPPORT_ARCH_arm_any
 template <>
 void Rebaser<arm>::doLocalRelocation(const macho_relocation_info<P>* reloc)
 {
@@ -693,6 +694,7 @@ void Rebaser<arm>::doLocalRelocation(const macho_relocation_info<P>* reloc)
 		}
 	}
 }
+#endif
 
 template <typename A>
 void Rebaser<A>::doLocalRelocation(const macho_relocation_info<P>* reloc)
@@ -1008,27 +1010,18 @@ int main(int argc, const char* argv[])
 					highAddress = strtoull(argv[++i], &endptr, 16);
 				}
 				else if ( strcmp(arg, "-arch") == 0 ) {
-					const char* arch = argv[++i];
-					if ( strcmp(arch, "ppc") == 0 ) 
-						onlyArchs.insert(CPU_TYPE_POWERPC);
-					else if ( strcmp(arch, "ppc64") == 0 )
-						onlyArchs.insert(CPU_TYPE_POWERPC64);
-					else if ( strcmp(arch, "i386") == 0 )
-						onlyArchs.insert(CPU_TYPE_I386);
-					else if ( strcmp(arch, "x86_64") == 0 )
-						onlyArchs.insert(CPU_TYPE_X86_64);
-					else {
-						bool found = false;
-						for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
-							if ( strcmp(t->subTypeName,arch) == 0 ) {
-								onlyArchs.insert(CPU_TYPE_ARM);
-								found = true;
-								break;
-							}
+					const char* archName = argv[++i];
+					if ( archName == NULL )
+						throw "-arch missing architecture name";
+					bool found = false;
+					for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
+						if ( strcmp(t->archName,archName) == 0 ) {
+							onlyArchs.insert(t->cpuType);
+							found = true;
 						}
-						if ( !found )
-							throwf("unknown architecture %s", arch);
 					}
+					if ( !found )
+						throwf("unknown architecture %s", archName);
 				}
 				else {
 					usage();

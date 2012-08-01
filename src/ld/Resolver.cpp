@@ -292,6 +292,7 @@ void Resolver::buildAtomList()
 	// each input files contributes initial atoms
 	_atoms.reserve(1024);
 	_inputFiles.forEachInitialAtom(*this);
+    
 	_completedInitialObjectFiles = true;
 	
 	//_symbolTable.printStatistics();
@@ -331,10 +332,6 @@ void Resolver::doFile(const ld::File& file)
 		// in -r mode, if any .o files have dwarf then add UUID to output .o file
 		if ( objFile->debugInfo() == ld::relocatable::File::kDebugInfoDwarf )
 			_internal.someObjectFileHasDwarf = true;
-			
-		// remember if any objc classes built for fix-and-continue
-		if ( objFile->objcReplacementClasses() )
-			_internal.hasObjcReplacementClasses = true;
 			
 		// remember if any .o file did not have MH_SUBSECTIONS_VIA_SYMBOLS bit set
 		if ( ! objFile->canScatterAtoms() )
@@ -427,16 +424,16 @@ void Resolver::doAtom(const ld::Atom& atom)
 							}
 							else if ( _options.outputKind() == Options::kDynamicLibrary ) {
 								if ( atom.file() != NULL )
-									warning("target OS does not support re-exporting symbol %s from %s\n", SymbolTable::demangle(name), atom.file()->path());
+									warning("target OS does not support re-exporting symbol %s from %s\n", _options.demangleSymbol(name), atom.file()->path());
 								else
-									warning("target OS does not support re-exporting symbol %s\n", SymbolTable::demangle(name));
+									warning("target OS does not support re-exporting symbol %s\n", _options.demangleSymbol(name));
 							}
 						}
 						else {
 							if ( atom.file() != NULL )
-								warning("cannot export hidden symbol %s from %s", SymbolTable::demangle(name), atom.file()->path());
+								warning("cannot export hidden symbol %s from %s", _options.demangleSymbol(name), atom.file()->path());
 							else
-								warning("cannot export hidden symbol %s", SymbolTable::demangle(name));
+								warning("cannot export hidden symbol %s", _options.demangleSymbol(name));
 						}
 					}
 				}
@@ -446,7 +443,7 @@ void Resolver::doAtom(const ld::Atom& atom)
 						(const_cast<ld::Atom*>(&atom))->setScope(ld::Atom::scopeGlobal);
 					}
 					else {
-						throwf("requested re-export symbol %s is not from a dylib, but from %s\n", SymbolTable::demangle(name), atom.file()->path());
+						throwf("requested re-export symbol %s is not from a dylib, but from %s\n", _options.demangleSymbol(name), atom.file()->path());
 					}
 				}
 				break;
@@ -457,7 +454,7 @@ void Resolver::doAtom(const ld::Atom& atom)
 					//fprintf(stderr, "demote %s to hidden\n", name);
 				}
 				if ( _options.canReExportSymbols() && _options.shouldReExport(name) ) {
-					throwf("requested re-export symbol %s is not from a dylib, but from %s\n", SymbolTable::demangle(name), atom.file()->path());
+					throwf("requested re-export symbol %s is not from a dylib, but from %s\n", _options.demangleSymbol(name), atom.file()->path());
 				}
 				break;
 		}
@@ -491,11 +488,7 @@ void Resolver::doAtom(const ld::Atom& atom)
 	// remember if any atoms are proxies that require LTO
 	if ( atom.contentType() == ld::Atom::typeLTOtemporary )
 		_haveLLVMObjs = true;
-	
-	// if we've already partitioned into final sections, and lto needs a symbol very late, add it
-	if ( _addToFinalSection ) 
-		_internal.addAtom(atom);
-	
+		
 	if ( _options.deadCodeStrip() ) {
 		// add to set of dead-strip-roots, all symbols that the compiler marks as don't strip
 		if ( atom.dontDeadStrip() )
@@ -856,9 +849,10 @@ void Resolver::deadStripOptimize()
 	// now remove all non-live atoms from _atoms
 	const bool log = false;
 	if ( log ) {
-		fprintf(stderr, "deadStripOptimize() all atoms with liveness:\n");
+		fprintf(stderr, "deadStripOptimize() all %ld atoms with liveness:\n", _atoms.size());
 		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
-			fprintf(stderr, "  live=%d  name=%s\n", (*it)->live(), (*it)->name());
+			const ld::File* file = (*it)->file();
+			fprintf(stderr, "  live=%d  atom=%p  name=%s from=%s\n", (*it)->live(), *it, (*it)->name(),  (file ? file->path() : "<internal>"));
 		}
 	}
 	
@@ -869,8 +863,55 @@ void Resolver::deadStripOptimize()
 	else {
 		_atoms.erase(std::remove_if(_atoms.begin(), _atoms.end(), NotLive()), _atoms.end());
 	}
+
+	if ( log ) {
+		fprintf(stderr, "deadStripOptimize() %ld remaining atoms\n", _atoms.size());
+		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+			fprintf(stderr, "  live=%d  atom=%p  name=%s\n", (*it)->live(), *it, (*it)->name());
+		}
+	}
 }
 
+
+// This is called when LTO is used but -dead_strip is not used.
+// Some undefines were eliminated by LTO, but others were not.
+void Resolver::remainingUndefines(std::vector<const char*>& undefs)
+{
+	StringSet  undefSet;
+	// search all atoms for references that are unbound
+	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+		const ld::Atom* atom = *it;
+		for (ld::Fixup::iterator fit=atom->fixupsBegin(); fit != atom->fixupsEnd(); ++fit) {
+			switch ( (ld::Fixup::TargetBinding)fit->binding ) {
+				case ld::Fixup::bindingByNameUnbound:
+					assert(0 && "should not be by-name this late");
+					undefSet.insert(fit->u.name);
+					break;
+				case ld::Fixup::bindingsIndirectlyBound:
+					if ( _internal.indirectBindingTable[fit->u.bindingIndex] == NULL ) {
+						undefSet.insert(_symbolTable.indirectName(fit->u.bindingIndex));
+					}
+					break;
+				case ld::Fixup::bindingByContentBound:
+				case ld::Fixup::bindingNone:
+				case ld::Fixup::bindingDirectlyBound:
+					break;
+			}
+		}
+	}
+	// look for any initial undefines that are still undefined
+	for (Options::UndefinesIterator uit=_options.initialUndefinesBegin(); uit != _options.initialUndefinesEnd(); ++uit) {
+		if ( ! _symbolTable.hasName(*uit) ) {
+			undefSet.insert(*uit);
+		}
+	}
+	
+	// copy set to vector
+	for (StringSet::const_iterator it=undefSet.begin(); it != undefSet.end(); ++it) {
+        fprintf(stderr, "undef: %s\n", *it);
+		undefs.push_back(*it);
+	}
+}
 
 void Resolver::liveUndefines(std::vector<const char*>& undefs)
 {
@@ -990,7 +1031,7 @@ bool Resolver::printReferencedBy(const char* name, SymbolTable::IndirectBindingS
 						++foundReferenceCount;
 					}
 					else {
-						fprintf(stderr, "      %s in %s\n", SymbolTable::demangle(atom->name()), pathLeafName(atom->file()->path()));
+						fprintf(stderr, "      %s in %s\n", _options.demangleSymbol(atom->name()), pathLeafName(atom->file()->path()));
 						++foundReferenceCount;
 						break; // if undefined used twice in a function, only show first
 					}
@@ -1029,9 +1070,10 @@ void Resolver::checkUndefines(bool force)
 			break;
 	}
 	std::vector<const char*> unresolvableUndefines;
-	// <rdar://problem/10052396> LTO many have eliminated need for some undefines
-	if ( _options.deadCodeStrip() || _haveLLVMObjs ) 
+	if ( _options.deadCodeStrip() )
 		this->liveUndefines(unresolvableUndefines);
+    else if( _haveLLVMObjs ) 
+		this->remainingUndefines(unresolvableUndefines); // <rdar://problem/10052396> LTO may have eliminated need for some undefines
 	else	
 		_symbolTable.undefines(unresolvableUndefines);
 
@@ -1056,7 +1098,7 @@ void Resolver::checkUndefines(bool force)
 			for (int i=0; i < unresolvableCount; ++i) {
 				const char* name = unresolvableUndefines[i];
 				unsigned int slot = _symbolTable.findSlotForName(name);
-				fprintf(stderr, "  \"%s\", referenced from:\n", SymbolTable::demangle(name));
+				fprintf(stderr, "  \"%s\", referenced from:\n", _options.demangleSymbol(name));
 				// scan all atoms for references
 				bool foundAtomReference = printReferencedBy(name, slot);
 				// scan command line options
@@ -1174,8 +1216,6 @@ const ld::Atom* Resolver::entryPoint(bool searchArchives)
 		else if ( _internal.indirectBindingTable[slot]->definition() == ld::Atom::definitionProxy ) {
 			if ( makingDylib ) 
 				throwf("-init function (%s) found in linked dylib, must be in dylib being linked", symbolName);
-			else
-				throwf("entry point (%s) found in linked dylib, must be in executable being linked", symbolName);
 		}
 		return _internal.indirectBindingTable[slot];
 	}
@@ -1262,7 +1302,17 @@ void Resolver::fillInInternalState()
 
 void Resolver::removeCoalescedAwayAtoms()
 {
+	const bool log = false;
+	if ( log ) {
+		fprintf(stderr, "removeCoalescedAwayAtoms() starts with %lu atoms\n", _atoms.size());
+	}
 	_atoms.erase(std::remove_if(_atoms.begin(), _atoms.end(), AtomCoalescedAway()), _atoms.end());
+	if ( log ) {
+		fprintf(stderr, "removeCoalescedAwayAtoms() after removing coalesced atoms, %lu remain\n", _atoms.size());
+		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+			fprintf(stderr, "  atom=%p %s\n", *it, (*it)->name());
+		}
+	}
 }
 
 void Resolver::linkTimeOptimize()
@@ -1275,7 +1325,7 @@ void Resolver::linkTimeOptimize()
 	lto::OptimizeOptions optOpt;
 	optOpt.outputFilePath				= _options.outputFilePath();
 	optOpt.tmpObjectFilePath			= _options.tempLtoObjectPath();
-	optOpt.allGlobalsAReDeadStripRoots	= _options.allGlobalsAreDeadStripRoots();
+	optOpt.preserveAllGlobals			= _options.allGlobalsAreDeadStripRoots() || _options.hasExportRestrictList();
 	optOpt.verbose						= _options.verbose();
 	optOpt.saveTemps					= _options.saveTempFiles();
 	optOpt.pie							= _options.positionIndependentExecutable();
@@ -1289,7 +1339,7 @@ void Resolver::linkTimeOptimize()
 	
 	std::vector<const ld::Atom*>		newAtoms;
 	std::vector<const char*>			additionalUndefines; 
-	if ( ! lto::optimize(_atoms, _internal, _inputFiles.nextInputOrdinal(), optOpt, *this, newAtoms, additionalUndefines) )
+	if ( ! lto::optimize(_atoms, _internal, optOpt, *this, newAtoms, additionalUndefines) )
 		return; // if nothing done
 		
 	
@@ -1299,36 +1349,12 @@ void Resolver::linkTimeOptimize()
 		
 	// some atoms might have been optimized way (marked coalesced), remove them
 	this->removeCoalescedAwayAtoms();
-	
-	// add new atoms into their final section
-	for (std::vector<const ld::Atom*>::iterator it = newAtoms.begin(); it != newAtoms.end(); ++it) {
-		_internal.addAtom(**it);
-	}
 
-	// remove temp lto section and move all of its atoms to their final section
-	ld::Internal::FinalSection* tempLTOsection = NULL;
-	for (std::vector<ld::Internal::FinalSection*>::iterator sit=_internal.sections.begin(); sit != _internal.sections.end(); ++sit) {
-		ld::Internal::FinalSection* sect = *sit;
-		if ( sect->type() == ld::Section::typeTempLTO ) {
-			tempLTOsection = sect;
-			// remove temp lto section from final image
-			_internal.sections.erase(sit);
-			break;
-		}
-	}
-	// lto atoms now have proper section info, so add to final section
-	if ( tempLTOsection != NULL ) {
-		for (std::vector<const ld::Atom*>::iterator ait=tempLTOsection->atoms.begin(); ait != tempLTOsection->atoms.end(); ++ait) {
-			const ld::Atom* atom = *ait;
-			if ( ! atom->coalescedAway() ) {
-				this->convertReferencesToIndirect(*atom);
-				_internal.addAtom(*atom);
-			}
-		}
-	}
-	
+	// run through all atoms again and make sure newly codegened atoms have refernces bound
+	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) 
+		this->convertReferencesToIndirect(**it);
+
 	// resolve new undefines (e.g calls to _malloc and _memcpy that llvm compiler conjures up)
-	_addToFinalSection = true;
 	for(std::vector<const char*>::iterator uit = additionalUndefines.begin(); uit != additionalUndefines.end(); ++uit) {
 		const char *targetName = *uit;
 		// these symbols may or may not already be in linker's symbol table
@@ -1336,7 +1362,6 @@ void Resolver::linkTimeOptimize()
 			_inputFiles.searchLibraries(targetName, true, true, false, *this);
 		}
 	}
-	_addToFinalSection = false;
 
 	// if -dead_strip on command line
 	if ( _options.deadCodeStrip() ) {
@@ -1346,19 +1371,11 @@ void Resolver::linkTimeOptimize()
 		}
 		// and re-compute dead code
 		this->deadStripOptimize();
-
-		// remove newly dead atoms from each section
-		for (std::vector<ld::Internal::FinalSection*>::iterator sit=_internal.sections.begin(); sit != _internal.sections.end(); ++sit) {
-			ld::Internal::FinalSection* sect = *sit;
-			sect->atoms.erase(std::remove_if(sect->atoms.begin(), sect->atoms.end(), NotLive()), sect->atoms.end());
-		}
 	}
 	
 	if ( _options.outputKind() == Options::kObjectFile ) {
 		// if -r mode, add proxies for new undefines (e.g. ___stack_chk_fail)
-		_addToFinalSection = true;
 		this->resolveUndefines();
-		_addToFinalSection = false;
 	}
 	else {
 		// last chance to check for undefines
@@ -1366,6 +1383,39 @@ void Resolver::linkTimeOptimize()
 
 		// check new code does not override some dylib
 		this->checkDylibSymbolCollisions();
+	}
+}
+
+
+void Resolver::tweakWeakness()
+{
+	// <rdar://problem/7977374> Add command line options to control symbol weak-def bit on exported symbols			
+	if ( _options.hasWeakBitTweaks() ) {
+		for (std::vector<ld::Internal::FinalSection*>::iterator sit = _internal.sections.begin(); sit != _internal.sections.end(); ++sit) {
+			ld::Internal::FinalSection* sect = *sit;
+			for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+				const ld::Atom* atom = *ait;
+				if ( atom->definition() != ld::Atom::definitionRegular ) 
+					continue;
+				const char* name = atom->name();
+				if ( atom->scope() == ld::Atom::scopeGlobal ) {
+					if ( atom->combine() == ld::Atom::combineNever ) {
+						if ( _options.forceWeak(name) )
+							(const_cast<ld::Atom*>(atom))->setCombine(ld::Atom::combineByName);
+					}
+					else if ( atom->combine() == ld::Atom::combineByName ) {
+						if ( _options.forceNotWeak(name) )
+							(const_cast<ld::Atom*>(atom))->setCombine(ld::Atom::combineNever);
+					}
+				}
+				else {
+					if ( _options.forceWeakNonWildCard(name) )
+						warning("cannot force to be weak, non-external symbol %s", name);
+					else if ( _options.forceNotWeakNonWildcard(name) )
+						warning("cannot force to be not-weak, non-external symbol %s", name);
+				}
+			}
+		}
 	}
 }
 
@@ -1381,8 +1431,10 @@ void Resolver::resolve()
 	this->checkUndefines();
 	this->checkDylibSymbolCollisions();
 	this->removeCoalescedAwayAtoms();
-	this->fillInInternalState();
 	this->linkTimeOptimize();
+	this->fillInInternalState();
+	this->tweakWeakness();
+    _symbolTable.checkDuplicateSymbols();
 }
 
 

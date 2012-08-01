@@ -40,7 +40,7 @@ struct ParserOptions {
 };
 
 extern ld::relocatable::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
-									const char* path, time_t modTime, uint32_t ordinal, 
+									const char* path, time_t modTime, ld::File::Ordinal ordinal, 
 									const ParserOptions& opts);
 									
 extern bool isObjectFile(const uint8_t* fileContent, uint64_t fileLength, const ParserOptions& opts);
@@ -48,6 +48,8 @@ extern bool isObjectFile(const uint8_t* fileContent, uint64_t fileLength, const 
 extern bool isObjectFile(const uint8_t* fileContent, cpu_type_t* result, cpu_subtype_t* subResult);					
 
 extern bool hasObjC2Categories(const uint8_t* fileContent);					
+
+extern bool hasObjC1Categories(const uint8_t* fileContent);
 
 extern const char* archName(const uint8_t* fileContent);					
 

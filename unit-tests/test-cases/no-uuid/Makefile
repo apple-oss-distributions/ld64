@@ -35,29 +35,7 @@ all:
 	${CC} ${CCFLAGS} foo.c -o foo -gdwarf-2
 	${FAIL_IF_BAD_MACHO} foo
 	${OTOOL} -hlv foo | grep LC_UUID | ${FAIL_IF_EMPTY}
-	rm -f foo
-
-# Test main executable built with stabs has uuid
-	${CC} ${CCFLAGS} foo.c -o foo -gfull -gstabs+
-	${FAIL_IF_BAD_MACHO} foo
-	${OTOOL} -hlv foo | grep LC_UUID | ${FAIL_IF_EMPTY}
-
-# Test main executable built with dwarf and -no_uuid does not have uuid
-	${CC} ${CCFLAGS} foo.c -o foo -Wl,-no_uuid -gdwarf-2
-	${FAIL_IF_BAD_MACHO} foo
-	${OTOOL} -hlv foo | grep LC_UUID | ${FAIL_IF_STDIN}
-
-# Test ld -r of stabs file has no uuid (llvm does not support stabs, so use gcc)
-	gcc-4.2 -arch ${ARCH} ${CCFLAGS} foo.c -c -o foo.o -gfull -gstabs+
-	${LD} -arch ${ARCH} foo.o -r -o foo2.o
-	${OTOOL} -hlv foo2.o | grep LC_UUID | ${FAIL_IF_STDIN}
-
-# Test ld -r of two files one with uuid produces a uuid
-	${CC} ${CCFLAGS} foo.c -c -o foo.o -gdwarf-2
-	${LD} -arch ${ARCH} foo.o -r -o foo2.o
-	${CC} ${CCFLAGS} bar.c -c -gstabs+ -o bar.o
-	${LD} -arch ${ARCH} -r foo.o bar.o -o foobar.o
-	${OTOOL} -hlv foobar.o | grep LC_UUID | ${PASS_IFF_STDIN}
+	${PASS_IFF_GOOD_MACHO} foo
 
 clean:
-	rm -rf foo foo.o foo2.o bar.o foobar.o foo.dSYM
+	rm -rf foo 

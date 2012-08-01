@@ -38,6 +38,7 @@
 #include "MachOFileAbstraction.hpp"
 #include "Architectures.hpp"
 #include "MachOTrie.hpp"
+#include "../ld/code-sign-blobs/superblob.h"
 
 static bool printRebase = false;
 static bool printBind = false;
@@ -50,6 +51,8 @@ static bool printExportNodes = false;
 static bool printSharedRegion = false;
 static bool printFunctionStarts = false;
 static bool printDylibs = false;
+static bool printDRs = false;
+static bool printDataCode = false;
 static cpu_type_t	sPreferredArch = 0;
 static cpu_type_t	sPreferredSubArch = 0;
 
@@ -110,6 +113,8 @@ private:
 	void										printSharedRegionInfo();
 	void										printFunctionStartsInfo();
 	void										printDylibsInfo();
+	void										printDRInfo();
+	void										printDataInCode();
 	void										printFunctionStartLine(uint64_t addr);
 	const uint8_t*								printSharedRegionInfoForEachULEB128Address(const uint8_t* p, uint8_t kind);
 	pint_t										relocBase();
@@ -143,6 +148,8 @@ private:
 	const macho_dyld_info_command<P>*			fInfo;
 	const macho_linkedit_data_command<P>*		fSharedRegionInfo;
 	const macho_linkedit_data_command<P>*		fFunctionStartsInfo;
+	const macho_linkedit_data_command<P>*		fDataInCode;
+	const macho_linkedit_data_command<P>*		fDRInfo;
 	uint64_t									fBaseAddress;
 	const macho_dysymtab_command<P>*			fDynamicSymbolTable;
 	const macho_segment_command<P>*				fFirstSegment;
@@ -166,6 +173,7 @@ bool DyldInfoPrinter<ppc>::validFile(const uint8_t* fileContent)
 	switch (header->filetype()) {
 		case MH_EXECUTE:
 		case MH_DYLIB:
+		case MH_DYLIB_STUB:
 		case MH_BUNDLE:
 		case MH_DYLINKER:
 			return true;
@@ -184,6 +192,7 @@ bool DyldInfoPrinter<ppc64>::validFile(const uint8_t* fileContent)
 	switch (header->filetype()) {
 		case MH_EXECUTE:
 		case MH_DYLIB:
+		case MH_DYLIB_STUB:
 		case MH_BUNDLE:
 		case MH_DYLINKER:
 			return true;
@@ -202,6 +211,7 @@ bool DyldInfoPrinter<x86>::validFile(const uint8_t* fileContent)
 	switch (header->filetype()) {
 		case MH_EXECUTE:
 		case MH_DYLIB:
+		case MH_DYLIB_STUB:
 		case MH_BUNDLE:
 		case MH_DYLINKER:
 			return true;
@@ -220,6 +230,7 @@ bool DyldInfoPrinter<x86_64>::validFile(const uint8_t* fileContent)
 	switch (header->filetype()) {
 		case MH_EXECUTE:
 		case MH_DYLIB:
+		case MH_DYLIB_STUB:
 		case MH_BUNDLE:
 		case MH_DYLINKER:
 			return true;
@@ -227,6 +238,7 @@ bool DyldInfoPrinter<x86_64>::validFile(const uint8_t* fileContent)
 	return false;
 }
 
+#if SUPPORT_ARCH_arm_any
 template <>
 bool DyldInfoPrinter<arm>::validFile(const uint8_t* fileContent)
 {	
@@ -238,18 +250,20 @@ bool DyldInfoPrinter<arm>::validFile(const uint8_t* fileContent)
 	switch (header->filetype()) {
 		case MH_EXECUTE:
 		case MH_DYLIB:
+		case MH_DYLIB_STUB:
 		case MH_BUNDLE:
 		case MH_DYLINKER:
 			return true;
 	}
 	return false;
 }
+#endif
 
 template <typename A>
 DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLength, const char* path, bool printArch)
  : fHeader(NULL), fLength(fileLength), 
    fStrings(NULL), fStringsEnd(NULL), fSymbols(NULL), fSymbolCount(0), fInfo(NULL), 
-   fSharedRegionInfo(NULL), fFunctionStartsInfo(NULL), 
+   fSharedRegionInfo(NULL), fFunctionStartsInfo(NULL), fDataInCode(NULL), fDRInfo(NULL), 
    fBaseAddress(0), fDynamicSymbolTable(NULL), fFirstSegment(NULL), fFirstWritableSegment(NULL),
    fWriteableSegmentWithAddrOver4G(false)
 {
@@ -332,31 +346,25 @@ DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLen
 			case LC_FUNCTION_STARTS:
 				fFunctionStartsInfo = (macho_linkedit_data_command<P>*)cmd;
 				break;
+			case LC_DATA_IN_CODE:
+				fDataInCode = (macho_linkedit_data_command<P>*)cmd;
+				break;
+			case LC_DYLIB_CODE_SIGN_DRS:
+				fDRInfo = (macho_linkedit_data_command<P>*)cmd;
+				break;
 		}
 		cmd = (const macho_load_command<P>*)endOfCmd;
 	}
 	
 	if ( printArch ) {
-		switch ( fHeader->cputype() ) {
-			case CPU_TYPE_I386:
-				printf("for arch i386:\n");
-				break;
-			case CPU_TYPE_X86_64:
-				printf("for arch x86_64:\n");
-				break;
-			case CPU_TYPE_POWERPC:			
-				printf("for arch ppc:\n");
-				break;
-			case CPU_TYPE_ARM:
-				for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
-					if ( (cpu_subtype_t)fHeader->cpusubtype() == t->subType) {
-						printf("for arch %s:\n", t->subTypeName);
-						break;
-					}
-				}
+		for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
+			if ( (cpu_type_t)fHeader->cputype() == t->cpuType ) {
+				if ( t->isSubType && ((cpu_subtype_t)fHeader->cpusubtype() != t->cpuSubType) )
+					continue;
+				printf("for arch %s:\n", t->archName);
+			}
 		}
 	}
-	
 	
 	if ( printRebase ) {
 		if ( fInfo != NULL )
@@ -400,6 +408,10 @@ DyldInfoPrinter<A>::DyldInfoPrinter(const uint8_t* fileContent, uint32_t fileLen
 		printFunctionStartsInfo();
 	if ( printDylibs )
 		printDylibsInfo();
+	if ( printDRs )
+		printDRInfo();
+	if ( printDataCode )
+		printDataInCode();
 }
 
 static uint64_t read_uleb128(const uint8_t*& p, const uint8_t* end)
@@ -432,7 +444,7 @@ static int64_t read_sleb128(const uint8_t*& p, const uint8_t* end)
 		if (p == end)
 			throwf("malformed sleb128");
 		byte = *p++;
-		result |= ((byte & 0x7f) << bit);
+		result |= (((int64_t)(byte & 0x7f)) << bit);
 		bit += 7;
 	} while (byte & 0x80);
 	// sign extend negative numbers
@@ -1545,6 +1557,7 @@ void DyldInfoPrinter<A>::printSharedRegionInfo()
 	}
 }
 
+#if SUPPORT_ARCH_arm_any
 template <>
 void DyldInfoPrinter<arm>::printFunctionStartLine(uint64_t addr)
 {
@@ -1553,6 +1566,7 @@ void DyldInfoPrinter<arm>::printFunctionStartLine(uint64_t addr)
 	else
 		printf("0x%0llX         %s\n", addr, symbolNameForAddress(addr)); 
 }
+#endif
 
 template <typename A>
 void DyldInfoPrinter<A>::printFunctionStartLine(uint64_t addr)
@@ -1617,6 +1631,85 @@ void DyldInfoPrinter<A>::printDylibsInfo()
 	}
 }
 
+template <typename A>
+void DyldInfoPrinter<A>::printDRInfo()
+{
+	if ( fDRInfo == NULL ) {
+		printf("no Designated Requirements info\n");
+	}
+	else {
+		printf("dylibs                 DRs\n");
+		const uint8_t* start = ((uint8_t*)fHeader + fDRInfo->dataoff());
+		//const uint8_t* end   = ((uint8_t*)fHeader + fDRInfo->dataoff() + fDRInfo->datasize());
+		typedef Security::SuperBlob<Security::kSecCodeMagicDRList> DRListSuperBlob;
+		typedef Security::SuperBlob<Security::kSecCodeMagicRequirementSet> InternalRequirementsSetBlob;
+		const DRListSuperBlob* topBlob = (DRListSuperBlob*)start;
+		if ( topBlob->validateBlob(fDRInfo->datasize()) ) {
+			if ( topBlob->count() == fDylibLoadCommands.size() ) {
+				for(unsigned i=0; i < topBlob->count(); ++i) {
+					printf(" %-20s   ", fDylibs[i]);
+					const Security::BlobCore* item = topBlob->find(i);
+					if ( item != NULL ) {
+						const uint8_t* itemStart = (uint8_t*)item;
+						const uint8_t* itemEnd = itemStart + item->length();
+						for(const uint8_t* p=itemStart; p < itemEnd; ++p)
+							printf("%02X ", *p);
+					}
+					else {
+						printf("no DR info");
+					}
+					printf("\n");
+				}
+			}
+			else {
+				fprintf(stderr, "superblob of DRs has a different number of elements than dylib load commands\n");
+			}
+		}
+		else {
+			fprintf(stderr, "superblob of DRs invalid\n");
+		}
+	}
+}
+
+
+
+
+
+template <typename A>
+void DyldInfoPrinter<A>::printDataInCode()
+{
+	if ( fDataInCode == NULL ) {
+		printf("no data-in-code info\n");
+	}
+	else {
+		printf("offset      length  data-kind\n");
+		const macho_data_in_code_entry<P>* start = (macho_data_in_code_entry<P>*)((uint8_t*)fHeader + fDataInCode->dataoff());
+		const macho_data_in_code_entry<P>* end = (macho_data_in_code_entry<P>*)((uint8_t*)fHeader + fDataInCode->dataoff() + fDataInCode->datasize());
+		for (const macho_data_in_code_entry<P>* p=start; p < end; ++p) {
+			const char* kindStr = "???";
+			switch ( p->kind() ) {
+				case 1:
+					kindStr = "data";
+					break;
+				case 2:
+					kindStr = "jumptable8";
+					break;
+				case 3:
+					kindStr = "jumptable16";
+					break;
+				case 4:
+					kindStr = "jumptable32";
+					break;
+				case 5:
+					kindStr = "jumptable32absolute";
+					break;
+			}
+			printf("0x%08X  0x%04X  %s\n", p->offset(), p->length(), kindStr);
+		}
+	}
+}
+
+
 
 template <>
 ppc::P::uint_t DyldInfoPrinter<ppc>::relocBase()
@@ -1652,6 +1745,7 @@ x86_64::P::uint_t DyldInfoPrinter<x86_64>::relocBase()
 	return fFirstWritableSegment->vmaddr();
 }
 
+#if SUPPORT_ARCH_arm_any
 template <>
 arm::P::uint_t DyldInfoPrinter<arm>::relocBase()
 {
@@ -1660,6 +1754,7 @@ arm::P::uint_t DyldInfoPrinter<arm>::relocBase()
 	else
 		return fFirstSegment->vmaddr();
 }
+#endif
 
 
 template <>
@@ -1700,6 +1795,7 @@ const char*	DyldInfoPrinter<x86_64>::relocTypeName(uint8_t r_type)
 		return "??";
 }
 	
+#if SUPPORT_ARCH_arm_any
 template <>
 const char*	DyldInfoPrinter<arm>::relocTypeName(uint8_t r_type)
 {
@@ -1710,7 +1806,7 @@ const char*	DyldInfoPrinter<arm>::relocTypeName(uint8_t r_type)
 	else
 		return "??";
 }
-	
+#endif
 
 template <typename A>
 void DyldInfoPrinter<A>::printRelocRebaseInfo()
@@ -2001,12 +2097,14 @@ static void dump(const char* path)
 						else
 							throw "in universal file, x86_64 slice does not contain x86_64 mach-o";
 						break;
+#if SUPPORT_ARCH_arm_any
 					case CPU_TYPE_ARM:
 						if ( DyldInfoPrinter<arm>::validFile(p + offset) ) 
 							DyldInfoPrinter<arm>::make(p + offset, size, path, (sPreferredArch == 0));
 						else
 							throw "in universal file, arm slice does not contain arm mach-o";
 						break;
+#endif
 					default:
 							throwf("in universal file, unknown architecture slice 0x%x\n", cputype);
 					}
@@ -2025,9 +2123,11 @@ static void dump(const char* path)
 		else if ( DyldInfoPrinter<x86_64>::validFile(p) ) {
 			DyldInfoPrinter<x86_64>::make(p, length, path, false);
 		}
+#if SUPPORT_ARCH_arm_any
 		else if ( DyldInfoPrinter<arm>::validFile(p) ) {
 			DyldInfoPrinter<arm>::make(p, length, path, false);
 		}
+#endif
 		else {
 			throw "not a known file type";
 		}
@@ -2041,6 +2141,7 @@ static void usage()
 {
 	fprintf(stderr, "Usage: dyldinfo [-arch <arch>] <options> <mach-o file>\n"
 			"\t-dylibs           print dependent dylibs\n"
+			"\t-dr               print dependent dylibs and show any recorded DR info\n"
 			"\t-rebase           print addresses dyld will adjust if file not loaded at preferred address\n"
 			"\t-bind             print addresses dyld will set based on symbolic lookups\n"
 			"\t-weak_bind        print symbols which dyld must coalesce\n"
@@ -2049,6 +2150,7 @@ static void usage()
 			"\t-opcodes          print opcodes used to generate the rebase and binding information\n"
 			"\t-function_starts  print table of function start addresses\n"
 			"\t-export_dot       print a GraphViz .dot file of the exported symbols trie\n"
+			"\t-data_in_code     print any data-in-code inforamtion\n"
 		);
 }
 
@@ -2076,17 +2178,19 @@ int main(int argc, const char* argv[])
 					else if ( strcmp(arch, "x86_64") == 0 )
 						sPreferredArch = CPU_TYPE_X86_64;
 					else {
+						const char* archName = argv[++i];
+						if ( archName == NULL )
+							throw "-arch missing architecture name";
 						bool found = false;
-						for (const ARMSubType* t=ARMSubTypes; t->subTypeName != NULL; ++t) {
-							if ( strcmp(t->subTypeName,arch) == 0 ) {
-								sPreferredArch = CPU_TYPE_ARM;
-								sPreferredSubArch = t->subType;
-								found = true;
-								break;
+						for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
+							if ( strcmp(t->archName,archName) == 0 ) {
+								sPreferredArch = t->cpuType;
+								if ( t->isSubType )
+									sPreferredSubArch = t->cpuSubType;
 							}
 						}
 						if ( !found )
-							throwf("unknown architecture %s", arch);
+							throwf("unknown architecture %s", archName);
 					}
 				}
 				else if ( strcmp(arg, "-rebase") == 0 ) {
@@ -2121,6 +2225,12 @@ int main(int argc, const char* argv[])
 				}
 				else if ( strcmp(arg, "-dylibs") == 0 ) {
 					printDylibs = true;
+				}
+				else if ( strcmp(arg, "-dr") == 0 ) {
+					printDRs = true;
+				}
+				else if ( strcmp(arg, "-data_in_code") == 0 ) {
+					printDataCode = true;
 				}
 				else {
 					throwf("unknown option: %s\n", arg);

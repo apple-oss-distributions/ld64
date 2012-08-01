@@ -30,7 +30,7 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	clang ${CCFLAGS} main.c -o main -dead_strip -mmacosx-version-min=10.7
+	${CC} ${CCFLAGS} main.c -o main -dead_strip -mmacosx-version-min=10.7
 	otool -lv main | grep S_THREAD_LOCAL_VARIABLES | ${FAIL_IF_EMPTY}
 	otool -lv main | egrep 'S_THREAD_LOCAL_REGULAR|S_THREAD_LOCAL_ZEROFILL' | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main

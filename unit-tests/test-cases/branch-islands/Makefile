@@ -32,8 +32,12 @@ run: all
 
 
 all:
+	# Verify that we fail if there is no valid place to insert branch islands.
+	${CC} ${CCFLAGS} hello.c atomic_space.s extra.c -o hello ${ARCH_FLAGS} 2>&1 | grep "Unable to insert branch island. No insertion point available." | ${PASS_IFF_STDIN}
+
 	${CC} ${CCFLAGS} hello.c space.s extra.c -o hello ${ARCH_FLAGS}
 	${PASS_IFF_GOOD_MACHO} hello
+
 
 clean:
 	rm  hello

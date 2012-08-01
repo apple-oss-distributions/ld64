@@ -51,7 +51,7 @@ all:
 
 	${CC} ${CCFLAGS} main.c extra.s -DSUBSECTIONS=1 -o main4 -Wl,-order_file -Wl,main4.order 
 	${FAIL_IF_BAD_MACHO} main4
-	nm -n -g -j main4 | nm -njg main4 | egrep '*[1-9]' > main4.nm
+	nm -n -g -j main4 | egrep '_[a-zA-Z]+[1-9]' > main4.nm
 	${PASS_IFF} diff main4.nm main4.expected
 
 

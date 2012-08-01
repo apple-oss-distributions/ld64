@@ -1,6 +1,6 @@
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-*
  *
- * Copyright (c) 2009 Apple Inc. All rights reserved.
+ * Copyright (c) 2009-2011 Apple Inc. All rights reserved.
  *
  * @APPLE_LICENSE_HEADER_START@
  *
@@ -96,7 +96,9 @@ private:
 	uint8_t*					copyRoutinesLoadCommand(uint8_t* p) const;
 	uint8_t*					copyUUIDLoadCommand(uint8_t* p) const;
 	uint8_t*					copyVersionLoadCommand(uint8_t* p) const;
+	uint8_t*					copySourceVersionLoadCommand(uint8_t* p) const;
 	uint8_t*					copyThreadsLoadCommand(uint8_t* p) const;
+	uint8_t*					copyEntryPointLoadCommand(uint8_t* p) const;
 	uint8_t*					copyEncryptionLoadCommand(uint8_t* p) const;
 	uint8_t*					copySplitSegInfoLoadCommand(uint8_t* p) const;
 	uint8_t*					copyDylibLoadCommand(uint8_t* p, const ld::dylib::File*) const;
@@ -106,6 +108,8 @@ private:
 	uint8_t*					copySubLibraryLoadCommand(uint8_t* p, const char* name) const;
 	uint8_t*					copySubUmbrellaLoadCommand(uint8_t* p, const char* name) const;
 	uint8_t*					copyFunctionStartsLoadCommand(uint8_t* p) const;
+	uint8_t*					copyDataInCodeLoadCommand(uint8_t* p) const;
+	uint8_t*					copyDependentDRLoadCommand(uint8_t* p) const;
 	uint8_t*					copyDyldEnvLoadCommand(uint8_t* p, const char* env) const;
 	
 	uint32_t					sectionFlags(ld::Internal::FinalSection* sect) const;
@@ -120,6 +124,7 @@ private:
 	bool						_hasDyldLoadCommand;
 	bool						_hasDylibIDLoadCommand;
 	bool						_hasThreadLoadCommand;
+	bool						_hasEntryPointLoadCommand;
 	bool						_hasEncryptionLoadCommand;
 	bool						_hasSplitSegInfoLoadCommand;
 	bool						_hasRoutinesLoadCommand;
@@ -130,6 +135,9 @@ private:
 	bool						_hasSubFrameworkLoadCommand;
 	bool						_hasVersionLoadCommand;
 	bool						_hasFunctionStartsLoadCommand;
+	bool						_hasDataInCodeLoadCommand;
+	bool						_hasSourceVersionLoadCommand;
+	bool						_hasDependentDRInfo;
 	uint32_t					_dylibLoadCommmandsCount;
 	uint32_t					_allowableClientLoadCommmandsCount;
 	uint32_t					_dyldEnvironExrasCount;
@@ -161,9 +169,8 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	_hasDyldInfoLoadCommand = opts.makeCompressedDyldInfo();
 	_hasDyldLoadCommand = ((opts.outputKind() == Options::kDynamicExecutable) || (_options.outputKind() == Options::kDyld));
 	_hasDylibIDLoadCommand = (opts.outputKind() == Options::kDynamicLibrary);
-	_hasThreadLoadCommand = _hasDyldLoadCommand || (opts.outputKind() == Options::kStaticExecutable)
-												|| (opts.outputKind() == Options::kPreload)
-												|| (opts.outputKind() == Options::kDyld);
+	_hasThreadLoadCommand = _options.needsThreadLoadCommand();
+	_hasEntryPointLoadCommand = _options.needsEntryPointLoadCommand();
 	_hasEncryptionLoadCommand = opts.makeEncryptable();
 	_hasSplitSegInfoLoadCommand = opts.sharedRegionEligible();
 	_hasRoutinesLoadCommand = (opts.initFunctionName() != NULL);
@@ -189,7 +196,7 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 			}
 			break;
 		case Options::kStaticExecutable:
-			_hasDynamicSymbolTableLoadCommand = false;
+			_hasDynamicSymbolTableLoadCommand = opts.positionIndependentExecutable();
 			break;
 		case Options::kPreload:
 			_hasDynamicSymbolTableLoadCommand = opts.positionIndependentExecutable();
@@ -199,6 +206,9 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	_hasSubFrameworkLoadCommand = (_options.umbrellaName() != NULL);
 	_hasVersionLoadCommand = _options.addVersionLoadCommand();
 	_hasFunctionStartsLoadCommand = _options.addFunctionStarts();
+	_hasDataInCodeLoadCommand = _options.addDataInCodeInfo();
+	_hasSourceVersionLoadCommand = _options.needsSourceVersionLoadCommand();
+	_hasDependentDRInfo = _options.needsDependentDRInfo();
 	_dylibLoadCommmandsCount = _writer.dylibCount();
 	_allowableClientLoadCommmandsCount = _options.allowableClients().size();
 	_dyldEnvironExrasCount = _options.dyldEnvironExtras().size();
@@ -328,9 +338,15 @@ uint64_t HeaderAndLoadCommandsAtom<A>::size() const
 
 	if ( _hasVersionLoadCommand )
 		sz += sizeof(macho_version_min_command<P>);
+	
+	if ( _hasSourceVersionLoadCommand )
+		sz += sizeof(macho_source_version_command<P>);
 		
 	if ( _hasThreadLoadCommand )
 		sz += this->threadLoadCommandSize();
+
+	if ( _hasEntryPointLoadCommand )
+		sz += sizeof(macho_entry_point_command<P>);
 		
 	if ( _hasEncryptionLoadCommand )
 		sz += sizeof(macho_encryption_info_command<P>);
@@ -377,6 +393,12 @@ uint64_t HeaderAndLoadCommandsAtom<A>::size() const
 	if ( _hasFunctionStartsLoadCommand )
 		sz += sizeof(macho_linkedit_data_command<P>);
 
+	if ( _hasDataInCodeLoadCommand )
+		sz += sizeof(macho_linkedit_data_command<P>);
+
+	if ( _hasDependentDRInfo ) 
+		sz += sizeof(macho_linkedit_data_command<P>);
+		
 	return sz;
 }
 
@@ -409,7 +431,13 @@ uint32_t HeaderAndLoadCommandsAtom<A>::commandsCount() const
 	if ( _hasVersionLoadCommand )
 		++count;
 
+	if ( _hasSourceVersionLoadCommand )
+		++count;
+		
 	if ( _hasThreadLoadCommand )
+		++count;
+	
+	if ( _hasEntryPointLoadCommand )
 		++count;
 		
 	if ( _hasEncryptionLoadCommand )
@@ -436,6 +464,12 @@ uint32_t HeaderAndLoadCommandsAtom<A>::commandsCount() const
 	if ( _hasFunctionStartsLoadCommand )
 		++count;
 
+	if ( _hasDataInCodeLoadCommand )
+		++count;
+
+	if ( _hasDependentDRInfo ) 
+		++count;
+		
 	return count;
 }
 
@@ -473,6 +507,8 @@ uint32_t HeaderAndLoadCommandsAtom<A>::flags() const
 	else {
 		if ( _options.outputKind() == Options::kStaticExecutable ) {
 			bits |= MH_NOUNDEFS;
+			if ( _options.positionIndependentExecutable() ) 
+				bits |= MH_PIE;
 		}
 		else if ( _options.outputKind() == Options::kPreload ) {
 			bits |= MH_NOUNDEFS;
@@ -704,7 +740,12 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 			else
 				return S_SYMBOL_STUBS | S_ATTR_SOME_INSTRUCTIONS | S_ATTR_PURE_INSTRUCTIONS;
 		case ld::Section::typeNonLazyPointer:
-			return S_NON_LAZY_SYMBOL_POINTERS;
+			if ( _options.outputKind() == Options::kKextBundle  )
+				return S_REGULAR;
+			else if ( (_options.outputKind() == Options::kStaticExecutable) && _options.positionIndependentExecutable() )
+				return S_REGULAR;
+			else
+				return S_NON_LAZY_SYMBOL_POINTERS;
 		case ld::Section::typeDyldInfo:
 			return S_REGULAR;
 		case ld::Section::typeLazyDylibPointer:
@@ -715,7 +756,13 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 			else
 				return S_REGULAR | S_ATTR_SOME_INSTRUCTIONS | S_ATTR_PURE_INSTRUCTIONS;
 		case ld::Section::typeInitializerPointers:
-			return S_MOD_INIT_FUNC_POINTERS;
+			// <rdar://problem/11456679> i386 kexts need different section type
+			if ( (_options.outputKind() == Options::kObjectFile) 
+					&& (strcmp(sect->sectionName(), "__constructor") == 0) 
+					&& (strcmp(sect->segmentName(), "__TEXT") == 0) )
+				return S_REGULAR;
+			else
+				return S_MOD_INIT_FUNC_POINTERS;
 		case ld::Section::typeTerminatorPointers:
 			return S_MOD_TERM_FUNC_POINTERS;
 		case ld::Section::typeTLVInitialValues:
@@ -1006,17 +1053,26 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p) const
 		cmd->set_cmd(LC_VERSION_MIN_MACOSX);
 		cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
 		cmd->set_version((uint32_t)macVersion);
-		cmd->set_sdk(0);
+		cmd->set_sdk(_options.sdkVersion());
 	}
 	else {
 		cmd->set_cmd(LC_VERSION_MIN_IPHONEOS);
 		cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
 		cmd->set_version((uint32_t)iOSVersion);
-		cmd->set_sdk(0);
+		cmd->set_sdk(_options.sdkVersion());
 	}
 	return p + sizeof(macho_version_min_command<P>);
 }
 
+template <typename A>
+uint8_t* HeaderAndLoadCommandsAtom<A>::copySourceVersionLoadCommand(uint8_t* p) const
+{
+	macho_source_version_command<P>* cmd = (macho_source_version_command<P>*)p;
+	cmd->set_cmd(LC_SOURCE_VERSION);
+	cmd->set_cmdsize(sizeof(macho_source_version_command<P>));
+	cmd->set_version(_options.sourceVersion());
+	return p + sizeof(macho_source_version_command<P>);
+}
 
 
 template <>
@@ -1086,6 +1142,24 @@ uint8_t* HeaderAndLoadCommandsAtom<arm>::copyThreadsLoadCommand(uint8_t* p) cons
 		cmd->set_thread_register(13, _options.customStackAddr());	// sp
 	return p + threadLoadCommandSize();
 }
+
+
+
+template <typename A>
+uint8_t* HeaderAndLoadCommandsAtom<A>::copyEntryPointLoadCommand(uint8_t* p) const
+{
+	macho_entry_point_command<P>* cmd = (macho_entry_point_command<P>*)p;
+	cmd->set_cmd(LC_MAIN);
+	cmd->set_cmdsize(sizeof(macho_entry_point_command<P>));
+	assert(_state.entryPoint != NULL);
+	pint_t start = _state.entryPoint->finalAddress(); 
+	if ( _state.entryPoint->isThumb() )
+		start |= 1ULL;
+	cmd->set_entryoff(start - this->finalAddress());
+	cmd->set_stacksize(_options.hasCustomStack() ? _options.customStackSize() : 0 );
+	return p + sizeof(macho_entry_point_command<P>);
+}
+
 
 template <typename A>
 uint8_t* HeaderAndLoadCommandsAtom<A>::copyEncryptionLoadCommand(uint8_t* p) const
@@ -1225,6 +1299,30 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyFunctionStartsLoadCommand(uint8_t* p)
 
 
 template <typename A>
+uint8_t* HeaderAndLoadCommandsAtom<A>::copyDataInCodeLoadCommand(uint8_t* p) const
+{
+	macho_linkedit_data_command<P>* cmd = (macho_linkedit_data_command<P>*)p;
+	cmd->set_cmd(LC_DATA_IN_CODE);
+	cmd->set_cmdsize(sizeof(macho_linkedit_data_command<P>));
+	cmd->set_dataoff(_writer.dataInCodeSection->fileOffset);
+	cmd->set_datasize(_writer.dataInCodeSection->size);
+	return p + sizeof(macho_linkedit_data_command<P>);
+}
+
+
+template <typename A>
+uint8_t* HeaderAndLoadCommandsAtom<A>::copyDependentDRLoadCommand(uint8_t* p) const
+{
+	macho_linkedit_data_command<P>* cmd = (macho_linkedit_data_command<P>*)p;
+	cmd->set_cmd(LC_DYLIB_CODE_SIGN_DRS);
+	cmd->set_cmdsize(sizeof(macho_linkedit_data_command<P>));
+	cmd->set_dataoff(_writer.dependentDRsSection->fileOffset);
+	cmd->set_datasize(_writer.dependentDRsSection->size);
+	return p + sizeof(macho_linkedit_data_command<P>);
+}
+
+
+template <typename A>
 void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 {
 	macho_header<P>* mh = (macho_header<P>*)buffer;
@@ -1271,8 +1369,14 @@ void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 	if ( _hasVersionLoadCommand )
 		p = this->copyVersionLoadCommand(p);
 
+	if ( _hasSourceVersionLoadCommand )
+		p = this->copySourceVersionLoadCommand(p);
+
 	if ( _hasThreadLoadCommand )
 		p = this->copyThreadsLoadCommand(p);
+	
+	if ( _hasEntryPointLoadCommand )
+		p = this->copyEntryPointLoadCommand(p);
 		
 	if ( _hasEncryptionLoadCommand )
 		p = this->copyEncryptionLoadCommand(p);
@@ -1318,7 +1422,13 @@ void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 
 	if ( _hasFunctionStartsLoadCommand )
 		p = this->copyFunctionStartsLoadCommand(p);
-		
+
+	if ( _hasDataInCodeLoadCommand )
+		p = this->copyDataInCodeLoadCommand(p);
+	
+	if ( _hasDependentDRInfo ) 
+		p = this->copyDependentDRLoadCommand(p);
+ 
 }
 
 

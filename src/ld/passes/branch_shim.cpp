@@ -328,7 +328,7 @@ void doPass(const Options& opts, ld::Internal& state)
 								if ( pos == thumbToAtomMap.end() ) {
 									if ( opts.archSupportsThumb2() ) {
 										// <rdar://problem/9116044> make long-branch style shims for arm kexts
-										if ( makingKextBundle )
+										if ( makingKextBundle && opts.allowTextRelocs() )
 											shim = new NoPICThumb2ToArmShimAtom(target, *sect);
 										else
 											shim = new Thumb2ToArmShimAtom(target, *sect);
@@ -365,7 +365,7 @@ void doPass(const Options& opts, ld::Internal& state)
 								std::map<const Atom*, const Atom*>::iterator pos = atomToThumbMap.find(target);
 								if ( pos == atomToThumbMap.end() ) {
 									// <rdar://problem/9116044> make long-branch style shims for arm kexts
-									if ( makingKextBundle )
+									if ( makingKextBundle && opts.allowTextRelocs() )
 										shim = new NoPICARMtoThumbShimAtom(target, *sect);
 									else
 										shim = new ARMtoThumbShimAtom(target, *sect);

@@ -34,9 +34,12 @@
 #include <ext/hash_map>
 
 #include "ld.hpp"
+#include "Snapshot.h"
 
 extern void throwf (const char* format, ...) __attribute__ ((noreturn,format(printf, 1, 2)));
 extern void warning(const char* format, ...) __attribute__((format(printf, 1, 2)));
+
+class Snapshot;
 
 class LibraryOptions
 {
@@ -82,12 +85,42 @@ public:
 	enum LocalSymbolHandling { kLocalSymbolsAll, kLocalSymbolsNone, kLocalSymbolsSelectiveInclude, kLocalSymbolsSelectiveExclude };
 	enum DebugInfoStripping { kDebugInfoNone, kDebugInfoMinimal, kDebugInfoFull };
 
-	struct FileInfo {
+	class FileInfo {
+    public:
 		const char*				path;
 		uint64_t				fileLen;
 		time_t					modTime;
 		LibraryOptions			options;
-	};
+		ld::File::Ordinal		ordinal;
+		bool					fromFileList;
+
+		// These are used by the threaded input file parsing engine.
+		mutable int				inputFileSlot;	// The input file "slot" assigned to this particular file
+		bool					readyToParse;
+
+        // The use pattern for FileInfo is to create one on the stack in a leaf function and return
+        // it to the calling frame by copy. Therefore the copy constructor steals the path string from
+        // the source, which dies with the stack frame.
+        FileInfo(FileInfo const &other) : path(other.path), fileLen(other.fileLen), modTime(other.modTime), options(other.options), ordinal(other.ordinal), fromFileList(other.fromFileList), inputFileSlot(-1) { ((FileInfo&)other).path = NULL; };
+
+        // Create an empty FileInfo. The path can be set implicitly by checkFileExists().
+        FileInfo() : path(NULL), fileLen(0), modTime(0), options(), fromFileList(false) {};
+        
+        // Create a FileInfo for a specific path, but does not stat the file.
+        FileInfo(const char *_path) : path(strdup(_path)), fileLen(0), modTime(0), options(), fromFileList(false) {};
+
+        ~FileInfo() { if (path) ::free((void*)path); }
+        
+        // Stat the file and update fileLen and modTime.
+        // If the object already has a path the p must be NULL.
+        // If the object does not have a path then p can be any candidate path, and if the file exists the object permanently remembers the path.
+        // Returns true if the file exists, false if not.
+        bool checkFileExists(const char *p=NULL);
+        
+        // Returns true if a previous call to checkFileExists() succeeded.
+        // Returns false if the file does not exist of checkFileExists() has never been called.
+        bool missing() const { return modTime==0; }
+};
 
 	struct ExtraSection {
 		const char*				segmentName;
@@ -244,6 +277,7 @@ public:
 	bool						keepLocalSymbol(const char* symbolName) const;
 	bool						allowTextRelocs() const { return fAllowTextRelocs; }
 	bool						warnAboutTextRelocs() const { return fWarnTextRelocs; }
+	bool						kextsUseStubs() const { return fKextsUseStubs; }
 	bool						usingLazyDylibLinking() const { return fUsingLazyDylibLinking; }
 	bool						verbose() const { return fVerbose; }
 	bool						makeEncryptable() const { return fEncryptable; }
@@ -282,11 +316,12 @@ public:
 	bool						objcGc() const { return fObjCGc; }
 	bool						objcGcOnly() const { return fObjCGcOnly; }
 	bool						canUseThreadLocalVariables() const { return fTLVSupport; }
-	bool						demangleSymbols() const { return fDemangle; }
 	bool						addVersionLoadCommand() const { return fVersionLoadCommand; }
 	bool						addFunctionStarts() const { return fFunctionStartsLoadCommand; }
+	bool						addDataInCodeInfo() const { return fDataInCodeInfoLoadCommand; }
 	bool						canReExportSymbols() const { return fCanReExportSymbols; }
 	const char*					tempLtoObjectPath() const { return fTempLtoObjectPath; }
+	const char*					overridePathlibLTO() const { return fOverridePathlibLTO; }
 	bool						objcCategoryMerging() const { return fObjcCategoryMerging; }
 	bool						pageAlignDataAtoms() const { return fPageAlignDataAtoms; }
 	bool						hasWeakBitTweaks() const;
@@ -294,8 +329,18 @@ public:
 	bool						forceNotWeak(const char* symbolName) const;
 	bool						forceWeakNonWildCard(const char* symbolName) const;
 	bool						forceNotWeakNonWildcard(const char* symbolName) const;
+    Snapshot&                   snapshot() const { return fLinkSnapshot; }
 	bool						errorBecauseOfWarnings() const;
-
+	bool						needsThreadLoadCommand() const { return fNeedsThreadLoadCommand; }
+	bool						needsEntryPointLoadCommand() const { return fEntryPointLoadCommand; }
+	bool						needsSourceVersionLoadCommand() const { return fSourceVersionLoadCommand; }
+	bool						needsDependentDRInfo() const { return fDependentDRInfo; }
+	uint64_t					sourceVersion() const { return fSourceVersion; }
+	uint32_t					sdkVersion() const { return fSDKVersion; }
+	const char*					demangleSymbol(const char* sym) const;
+    bool						pipelineEnabled() const { return fPipelineFifo != NULL; }
+    const char*					pipelineFifo() const { return fPipelineFifo; }
+	
 private:
 	class CStringEquals
 	{
@@ -343,7 +388,7 @@ private:
 	void						parseOrderFile(const char* path, bool cstring);
 	void						addSection(const char* segment, const char* section, const char* path);
 	void						addSubLibrary(const char* name);
-	void						loadFileList(const char* fileOfPaths);
+	void						loadFileList(const char* fileOfPaths, ld::File::Ordinal baseOrdinal);
 	uint64_t					parseAddress(const char* addr);
 	void						loadExportFile(const char* fileOfExports, const char* option, SetWithWildcards& set);
 	void						parseAliasFile(const char* fileOfAliases);
@@ -423,9 +468,12 @@ private:
 	const char*							fMapPath;
 	const char*							fDyldInstallPath;
 	const char*							fTempLtoObjectPath;
+	const char*							fOverridePathlibLTO;
 	uint64_t							fZeroPageSize;
 	uint64_t							fStackSize;
 	uint64_t							fStackAddr;
+	uint64_t							fSourceVersion;
+	uint32_t							fSDKVersion;
 	bool								fExecutableStack;
 	bool								fNonExecutableHeap;
 	bool								fDisableNonExecutableHeap;
@@ -454,6 +502,7 @@ private:
 	bool								fDeadStripDylibs;
 	bool								fAllowTextRelocs;
 	bool								fWarnTextRelocs;
+	bool								fKextsUseStubs;
 	bool								fUsingLazyDylibLinking;
 	bool								fEncryptable;
 	bool								fOrderData;
@@ -502,9 +551,20 @@ private:
 	bool								fFunctionStartsLoadCommand;
 	bool								fFunctionStartsForcedOn;
 	bool								fFunctionStartsForcedOff;
+	bool								fDataInCodeInfoLoadCommand;
 	bool								fCanReExportSymbols;
 	bool								fObjcCategoryMerging;
 	bool								fPageAlignDataAtoms;
+	bool								fNeedsThreadLoadCommand;
+	bool								fEntryPointLoadCommand;
+	bool								fEntryPointLoadCommandForceOn;
+	bool								fEntryPointLoadCommandForceOff;
+	bool								fSourceVersionLoadCommand;
+	bool								fSourceVersionLoadCommandForceOn;
+	bool								fSourceVersionLoadCommandForceOff;	
+	bool								fDependentDRInfo;
+	bool								fDependentDRInfoForcedOn;
+	bool								fDependentDRInfoForcedOff;
 	DebugInfoStripping					fDebugInfoStripping;
 	const char*							fTraceOutputFile;
 	ld::MacVersionMin					fMacVersionMin;
@@ -526,6 +586,9 @@ private:
 	std::vector<const char*>			fSDKPaths;
 	std::vector<const char*>			fDyldEnvironExtras;
 	bool								fSaveTempFiles;
+    mutable Snapshot                  fLinkSnapshot;
+    bool                              fSnapshotRequested;
+    const char *                      fPipelineFifo;
 };
 
 

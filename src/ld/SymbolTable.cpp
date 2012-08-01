@@ -34,6 +34,8 @@
 #include <unistd.h>
 #include <assert.h>
 
+#include <iostream>
+#include <sstream>
 #include <string>
 #include <map>
 #include <set>
@@ -57,14 +59,12 @@ namespace tool {
 // HACK, I can't find a way to pass values in the compare classes (e.g. ContentFuncs)
 // so use global variable to pass info.
 static ld::IndirectBindingTable*	_s_indirectBindingTable = NULL;
-bool										SymbolTable::_s_doDemangle = false;
 
 
 SymbolTable::SymbolTable(const Options& opts, std::vector<const ld::Atom*>& ibt) 
-	: _options(opts), _cstringTable(6151), _indirectBindingTable(ibt), _hasExternalTentativeDefinitions(false)  
+	: _options(opts), _cstringTable(6151), _indirectBindingTable(ibt), _hasExternalTentativeDefinitions(false)
 {  
 	_s_indirectBindingTable = this;
-	_s_doDemangle = _options.demangleSymbols();
 }
 
 
@@ -119,11 +119,277 @@ bool SymbolTable::ReferencesHashFuncs::operator()(const ld::Atom* left, const ld
 }
 
 
+void SymbolTable::addDuplicateSymbol(const char *name, const ld::Atom *atom)
+{
+    // Look up or create the file list for name.
+    DuplicateSymbols::iterator symbolsIterator = _duplicateSymbols.find(name);
+    DuplicatedSymbolAtomList *atoms = NULL;
+    if (symbolsIterator != _duplicateSymbols.end()) {
+        atoms = symbolsIterator->second;
+    } else {
+        atoms = new std::vector<const ld::Atom *>;
+        _duplicateSymbols.insert(std::pair<const char *, DuplicatedSymbolAtomList *>(name, atoms));
+    }
+    
+    // check if file is already in the list, add it if not
+    bool found = false;
+    for (DuplicatedSymbolAtomList::iterator it = atoms->begin(); !found && it != atoms->end(); it++)
+        if (strcmp((*it)->file()->path(), atom->file()->path()) == 0)
+            found = true;
+    if (!found)
+        atoms->push_back(atom);
+}
+
+void SymbolTable::checkDuplicateSymbols() const
+{
+    bool foundDuplicate = false;
+    for (DuplicateSymbols::const_iterator symbolIt = _duplicateSymbols.begin(); symbolIt != _duplicateSymbols.end(); symbolIt++) {
+        DuplicatedSymbolAtomList *atoms = symbolIt->second;
+        bool reportDuplicate;
+        if (_options.deadCodeStrip()) {
+            // search for a live atom
+            reportDuplicate = false;
+            for (DuplicatedSymbolAtomList::iterator it = atoms->begin(); !reportDuplicate && it != atoms->end(); it++) {
+                if ((*it)->live())
+                    reportDuplicate = true;
+            }
+        } else {
+            reportDuplicate = true;
+        }
+        if (reportDuplicate) {
+            foundDuplicate = true;
+            fprintf(stderr, "duplicate symbol %s in:\n", symbolIt->first);
+            for (DuplicatedSymbolAtomList::iterator atomIt = atoms->begin(); atomIt != atoms->end(); atomIt++) {
+                fprintf(stderr, "    %s\n", (*atomIt)->file()->path());
+            }
+        }
+    }
+    if (foundDuplicate)
+        throwf("%d duplicate symbol%s", (int)_duplicateSymbols.size(), _duplicateSymbols.size()==1?"":"s");
+}
+
+// AtomPicker encapsulates the logic for picking which atom to use when adding an atom by name results in a collision
+class NameCollisionResolution {
+public:
+	NameCollisionResolution(const ld::Atom& a, const ld::Atom& b, bool ignoreDuplicates, const Options& options) : _atomA(a), _atomB(b), _options(options), _reportDuplicate(false), _ignoreDuplicates(ignoreDuplicates) {
+		pickAtom();
+	}
+	
+	// Returns which atom to use
+	const ld::Atom& chosen() { return *_chosen; }
+	bool choseAtom(const ld::Atom& atom) { return _chosen == &atom; }
+
+	// Returns true if the two atoms should be reported as a duplicate symbol
+	bool reportDuplicate()  { return _reportDuplicate; }
+	
+private:
+	const ld::Atom& _atomA;
+	const ld::Atom& _atomB;
+	const Options& _options;
+	const ld::Atom* _chosen;
+	bool _reportDuplicate;
+	bool _ignoreDuplicates;
+
+	void pickAtom(const ld::Atom& atom) { _chosen = &atom; } // primitive to set which atom is picked
+	void pickAtomA() { pickAtom(_atomA); }	// primitive to pick atom A
+	void pickAtomB() { pickAtom(_atomB); }	// primitive to pick atom B
+	
+	// use atom A if pickA, otherwise use atom B
+	void pickAOrB(bool pickA) { if (pickA) pickAtomA(); else pickAtomB(); }
+	
+	void pickHigherOrdinal() {
+		pickAOrB(_atomA.file()->ordinal() < _atomB.file()->ordinal());
+	}
+	
+	void pickLowerOrdinal() {
+		pickAOrB(_atomA.file()->ordinal() > _atomB.file()->ordinal());
+	}
+	
+	void pickLargerSize() {
+		if (_atomA.size() == _atomB.size())
+			pickLowerOrdinal();
+		else
+			pickAOrB(_atomA.size() > _atomB.size());
+	}
+	
+	void pickGreaterAlignment() {
+		pickAOrB(_atomA.alignment().trailingZeros() > _atomB.alignment().trailingZeros());
+	}
+	
+	void pickBetweenRegularAtoms() {
+		if ( _atomA.combine() == ld::Atom::combineByName ) {
+			if ( _atomB.combine() == ld::Atom::combineByName ) {
+				// <rdar://problem/9183821> always choose mach-o over llvm bit code, otherwise LTO may eliminate the llvm atom
+				const bool aIsLTO = (_atomA.contentType() == ld::Atom::typeLTOtemporary);
+				const bool bIsLTO = (_atomB.contentType() == ld::Atom::typeLTOtemporary);
+				// <rdar://problem/9183821> always choose mach-o over llvm bit code, otherwise LTO may eliminate the llvm atom
+				if ( aIsLTO != bIsLTO ) {
+					pickAOrB(!aIsLTO);
+				}
+				else {
+					// both weak, prefer non-auto-hide one
+					if ( _atomA.autoHide() != _atomB.autoHide() ) {
+						// <rdar://problem/6783167> support auto hidden weak symbols: .weak_def_can_be_hidden
+						pickAOrB(!_atomA.autoHide());
+					}
+					else if ( _atomA.autoHide() && _atomB.autoHide() ) {
+						// both have auto-hide, so use one with greater alignment
+						pickGreaterAlignment();
+					}
+					else {
+						// neither auto-hide, check visibility
+						if ( _atomA.scope() != _atomB.scope() ) {
+							// <rdar://problem/8304984> use more visible weak def symbol
+							pickAOrB(_atomA.scope() == ld::Atom::scopeGlobal);
+						}
+						else {
+							// both have same visibility, use one with greater alignment
+							pickGreaterAlignment();
+						}
+					}
+				}
+			}
+			else {
+				pickAtomB(); // pick not-weak
+
+			}
+		}
+		else {
+			if ( _atomB.combine() == ld::Atom::combineByName ) {
+				pickAtomA(); // pick not-weak
+
+			}
+			else {
+				// both are not-weak
+				if ( _atomA.section().type() == ld::Section::typeMachHeader ) {
+					pickAtomA();
+				} 
+				else if ( _atomB.section().type() == ld::Section::typeMachHeader ) {
+					pickAtomB();
+				} 
+				else {
+					if ( _ignoreDuplicates ) {
+						pickLowerOrdinal();
+					}
+					else {
+						_reportDuplicate = true;
+					}
+				}
+			}
+		}
+	}
+	
+	void pickCommonsMode(const ld::Atom& dylib, const ld::Atom& proxy) {
+		assert(dylib.definition() == ld::Atom::definitionTentative);
+		assert(proxy.definition() == ld::Atom::definitionProxy);
+		switch ( _options.commonsMode() ) {
+			case Options::kCommonsIgnoreDylibs:
+				if ( _options.warnCommons() )
+					warning("using common symbol %s from %s and ignoring defintion from dylib %s",
+							proxy.name(), proxy.file()->path(), dylib.file()->path());
+				pickAtom(dylib);
+				break;
+			case Options::kCommonsOverriddenByDylibs:
+				if ( _options.warnCommons() )
+					warning("replacing common symbol %s from %s with true definition from dylib %s",
+							proxy.name(), proxy.file()->path(), dylib.file()->path());
+				pickAtom(proxy);
+				break;
+			case Options::kCommonsConflictsDylibsError:
+				throwf("common symbol %s from %s conflicts with defintion from dylib %s",
+					   proxy.name(), proxy.file()->path(), dylib.file()->path());
+		}
+	}
+	
+	void pickProxyAtom() {
+		// both atoms are definitionProxy
+		// <rdar://problem/5137732> ld should keep looking when it finds a weak definition in a dylib
+		if ( _atomA.combine() == ld::Atom::combineByName ) {
+			pickAtomB();
+		} else if ( _atomB.combine() == ld::Atom::combineByName ) {
+			pickAtomA();
+		} else {
+				throwf("symbol %s exported from both %s and %s\n", _atomA.name(), _atomA.file()->path(), _atomB.file()->path());
+		}
+	}
+	
+	void pickAtom() {
+		// First, discriminate by definition
+		switch (_atomA.definition()) {
+			case ld::Atom::definitionRegular:
+				switch (_atomB.definition()) {
+					case ld::Atom::definitionRegular:
+						pickBetweenRegularAtoms();
+						break;
+					case ld::Atom::definitionTentative:
+						pickAtomA();
+						break;
+					case ld::Atom::definitionAbsolute:
+						_reportDuplicate = true;
+						pickHigherOrdinal();
+						break;
+					case ld::Atom::definitionProxy:
+						pickAtomA();
+						break;
+				}
+				break;
+			case ld::Atom::definitionTentative:
+				switch (_atomB.definition()) {
+					case ld::Atom::definitionRegular:
+						pickAtomB();
+						break;
+					case ld::Atom::definitionTentative:
+						pickLargerSize();
+						break;
+					case ld::Atom::definitionAbsolute:
+						pickHigherOrdinal();
+						break;
+					case ld::Atom::definitionProxy:
+						pickCommonsMode(_atomA, _atomB);
+						break;
+				}
+				break;
+			case ld::Atom::definitionAbsolute:
+				switch (_atomB.definition()) {
+					case ld::Atom::definitionRegular:
+						_reportDuplicate = true;
+						pickHigherOrdinal();
+						break;
+					case ld::Atom::definitionTentative:
+						pickAtomA();
+						break;
+					case ld::Atom::definitionAbsolute:
+						_reportDuplicate = true;
+						pickHigherOrdinal();
+						break;
+					case ld::Atom::definitionProxy:
+						pickAtomA();
+						break;
+				}
+				break;
+			case ld::Atom::definitionProxy:
+				switch (_atomB.definition()) {
+					case ld::Atom::definitionRegular:
+						pickAtomB();
+						break;
+					case ld::Atom::definitionTentative:
+						pickCommonsMode(_atomB, _atomA);
+						break;
+					case ld::Atom::definitionAbsolute:
+						pickAtomB();
+						break;
+					case ld::Atom::definitionProxy:
+						pickProxyAtom();
+						break;
+				}
+				break;
+		}
+	}
+};
 
 bool SymbolTable::addByName(const ld::Atom& newAtom, bool ignoreDuplicates)
 {
 	bool useNew = true;
-	bool checkVisibilityMismatch = false;
 	assert(newAtom.name() != NULL);
 	const char* name = newAtom.name();
 	IndirectBindingSlot slot = this->findSlotForName(name);
@@ -131,239 +397,17 @@ bool SymbolTable::addByName(const ld::Atom& newAtom, bool ignoreDuplicates)
 	//fprintf(stderr, "addByName(%p) name=%s, slot=%u, existing=%p\n", &newAtom, newAtom.name(), slot, existingAtom);
 	if ( existingAtom != NULL ) {
 		assert(&newAtom != existingAtom);
-		switch ( existingAtom->definition() ) {
-			case ld::Atom::definitionRegular:
-				switch ( newAtom.definition() ) {
-					case ld::Atom::definitionRegular:
-						if ( existingAtom->combine() == ld::Atom::combineByName ) {
-							if ( newAtom.combine() == ld::Atom::combineByName ) {
-								// <rdar://problem/9183821> always choose mach-o over llvm bit code, otherwise LTO may eliminate the llvm atom
-								const bool existingIsLTO = (existingAtom->contentType() == ld::Atom::typeLTOtemporary);
-								const bool newIsLTO = (newAtom.contentType() == ld::Atom::typeLTOtemporary);
-								if ( existingIsLTO != newIsLTO ) {
-									useNew = existingIsLTO;
-								}
-								else {
-									// both weak, prefer non-auto-hide one
-									if ( newAtom.autoHide() != existingAtom->autoHide() ) {
-										// <rdar://problem/6783167> support auto hidden weak symbols: .weak_def_can_be_hidden
-										useNew = existingAtom->autoHide();
-										// don't check for visibility mismatch
-									}
-									else if ( newAtom.autoHide() && existingAtom->autoHide() ) {
-										// both have auto-hide, so use one with greater alignment
-										useNew = ( newAtom.alignment().trailingZeros() > existingAtom->alignment().trailingZeros() );
-									}
-									else {
-										// neither auto-hide, check visibility
-										if ( newAtom.scope() != existingAtom->scope() ) {
-											// <rdar://problem/8304984> use more visible weak def symbol
-											useNew = (newAtom.scope() == ld::Atom::scopeGlobal);
-										}
-										else {
-											// both have same visibility, use one with greater alignment
-											useNew = ( newAtom.alignment().trailingZeros() > existingAtom->alignment().trailingZeros() );
-										}
-									}
-								}
-							}
-							else {
-								// existing weak, new is not-weak
-								useNew = true;
-							}
-						}
-						else {
-							if ( newAtom.combine() == ld::Atom::combineByName ) {
-								// existing not-weak, new is weak
-								useNew = false;
-							}
-							else {
-								// existing not-weak, new is not-weak
-								if ( newAtom.section().type() == ld::Section::typeMachHeader ) {
-									warning("ignoring override of built-in symbol %s from %s", newAtom.name(), existingAtom->file()->path());
-									useNew = true;
-								} 
-								else if ( existingAtom->section().type() == ld::Section::typeMachHeader ) {
-									warning("ignoring override of built-in symbol %s from %s", newAtom.name(), newAtom.file()->path());
-									useNew = false;
-								} 
-								else {
-									if ( ignoreDuplicates ) {
-										useNew = false;
-										static bool fullWarning = false;
-										if ( ! fullWarning ) {
-											warning("-dead_strip with lazy loaded static (library) archives "
-													"has resulted in a duplicate symbol.  You can change your "
-													"source code to rename symbols to avoid the collision.  "
-													"This will be an error in a future linker.");
-											fullWarning = true;
-										}
-										warning("duplicate symbol %s originally in %s now lazily loaded from %s",
-												SymbolTable::demangle(name), existingAtom->file()->path(), newAtom.file()->path());
-									}
-									else {
-										throwf("duplicate symbol %s in %s and %s", 
-												SymbolTable::demangle(name), newAtom.file()->path(), existingAtom->file()->path());
-									}
-								}
-							}
-						}
-						break;
-					case ld::Atom::definitionTentative:
-						// ignore new tentative atom, because we already have a regular one
-						useNew = false;
-						checkVisibilityMismatch = true;
-						if ( newAtom.size() > existingAtom->size() ) {
-							warning("for symbol %s tentative definition of size %llu from %s is "
-											"is smaller than the real definition of size %llu from %s",
-											newAtom.name(), newAtom.size(), newAtom.file()->path(),
-											existingAtom->size(), existingAtom->file()->path());
-						}
-						break;
-					case ld::Atom::definitionAbsolute:
-						throwf("duplicate symbol %s in %s and %s", name, newAtom.file()->path(), existingAtom->file()->path());
-					case ld::Atom::definitionProxy:
-						// ignore external atom, because we already have a one
-						useNew = false;
-						break;
-				}
-				break;
-			case ld::Atom::definitionTentative:
-				switch ( newAtom.definition() ) {
-					case ld::Atom::definitionRegular:
-						// replace existing tentative atom with regular one
-						if ( newAtom.section().type() == ld::Section::typeMachHeader ) {
-							// silently replace tentative __dso_handle with real linker created symbol
-							useNew = true;
-						}
-						else if ( existingAtom->section().type() == ld::Section::typeMachHeader ) {
-							// silently replace tentative __dso_handle with real linker created symbol
-							useNew = false;
-						}
-						else {
-							checkVisibilityMismatch = true;
-							if ( newAtom.size() < existingAtom->size() ) {
-								warning("for symbol %s tentative definition of size %llu from %s is "
-												"being replaced by a real definition of size %llu from %s",
-												newAtom.name(), existingAtom->size(), existingAtom->file()->path(),
-												newAtom.size(), newAtom.file()->path());
-							}
-							if ( newAtom.section().type() == ld::Section::typeCode ) {
-								warning("for symbol %s tentative (data) defintion from %s is "
-										"being replaced by code from %s", newAtom.name(), existingAtom->file()->path(),
-										newAtom.file()->path());
-							}
-						}
-						break;
-					case ld::Atom::definitionTentative:
-						// new and existing are both tentative definitions, use largest
-						checkVisibilityMismatch = true;
-						if ( newAtom.size() < existingAtom->size() ) {
-							useNew = false;
-						} 
-						else {
-							if ( newAtom.alignment().trailingZeros() < existingAtom->alignment().trailingZeros() )
-								warning("alignment lost in merging tentative definition %s", newAtom.name());
-						}
-						break;
-					case ld::Atom::definitionAbsolute:
-						// replace tentative with absolute
-						useNew = true;
-						break;
-					case ld::Atom::definitionProxy:
-						// a tentative definition and a dylib definition, so commons-mode decides how to handle
-						switch ( _options.commonsMode() ) {
-							case Options::kCommonsIgnoreDylibs:
-								if ( _options.warnCommons() )
-									warning("using common symbol %s from %s and ignoring defintion from dylib %s",
-											existingAtom->name(), existingAtom->file()->path(), newAtom.file()->path());
-								useNew = false;
-								break;
-							case Options::kCommonsOverriddenByDylibs:
-								if ( _options.warnCommons() )
-									warning("replacing common symbol %s from %s with true definition from dylib %s",
-											existingAtom->name(), existingAtom->file()->path(), newAtom.file()->path());
-								break;
-							case Options::kCommonsConflictsDylibsError:
-								throwf("common symbol %s from %s conflicts with defintion from dylib %s",
-										existingAtom->name(), existingAtom->file()->path(), newAtom.file()->path());
-						}
-						break;
-				}
-				break;
-			case ld::Atom::definitionAbsolute:
-				switch ( newAtom.definition() ) {
-					case ld::Atom::definitionRegular:
-						throwf("duplicate symbol %s in %s and %s", name, newAtom.file()->path(), existingAtom->file()->path());
-					case ld::Atom::definitionTentative:
-						// ignore new tentative atom, because we already have a regular one
-						useNew = false;
-						break;
-					case ld::Atom::definitionAbsolute:
-						throwf("duplicate symbol %s in %s and %s", name, newAtom.file()->path(), existingAtom->file()->path());
-					case ld::Atom::definitionProxy:
-						// ignore external atom, because we already have a one
-						useNew = false;
-						break;
-				}
-				break;
-			case ld::Atom::definitionProxy:
-				switch ( newAtom.definition() ) {
-					case ld::Atom::definitionRegular:
-						// replace external atom with regular one
-						useNew = true;
-						break;
-					case ld::Atom::definitionTentative:
-						// a tentative definition and a dylib definition, so commons-mode decides how to handle
-						switch ( _options.commonsMode() ) {
-							case Options::kCommonsIgnoreDylibs:
-								if ( _options.warnCommons() )
-									warning("using common symbol %s from %s and ignoring defintion from dylib %s",
-											newAtom.name(), newAtom.file()->path(), existingAtom->file()->path());
-								break;
-							case Options::kCommonsOverriddenByDylibs:
-								if ( _options.warnCommons() )
-									warning("replacing defintion of %s from dylib %s with common symbol from %s",
-											newAtom.name(), existingAtom->file()->path(), newAtom.file()->path());
-								useNew = false;
-								break;
-							case Options::kCommonsConflictsDylibsError:
-								throwf("common symbol %s from %s conflicts with defintion from dylib %s",
-											newAtom.name(), newAtom.file()->path(), existingAtom->file()->path());
-						}
-						break;
-					case ld::Atom::definitionAbsolute:
-						// replace external atom with absolute one
-						useNew = true;
-						break;
-					case ld::Atom::definitionProxy:
-						// <rdar://problem/5137732> ld should keep looking when it finds a weak definition in a dylib
-						if ( newAtom.combine() == ld::Atom::combineByName ) {
-							useNew = false;
-						}
-						else {
-							if ( existingAtom->combine() == ld::Atom::combineByName )
-								useNew = true;
-							else
-								throwf("symbol %s exported from both %s and %s\n", name, newAtom.file()->path(), existingAtom->file()->path());
-						}
-						break;
-				}
-				break;
-		}	
-	}
-	if ( (existingAtom != NULL) && checkVisibilityMismatch && (newAtom.scope() != existingAtom->scope()) ) {
-		warning("%s has different visibility (%s) in %s and (%s) in %s", 
-			SymbolTable::demangle(newAtom.name()), (newAtom.scope() == 1 ? "hidden" : "default"), newAtom.file()->path(), (existingAtom->scope()  == 1 ? "hidden" : "default"), existingAtom->file()->path());
+		NameCollisionResolution picker(newAtom, *existingAtom, ignoreDuplicates, _options);
+		if (picker.reportDuplicate()) {
+			addDuplicateSymbol(name, existingAtom);
+			addDuplicateSymbol(name, &newAtom);
+		}
+		useNew = picker.choseAtom(newAtom);
 	}
 	if ( useNew ) {
 		_indirectBindingTable[slot] = &newAtom;
 		if ( existingAtom != NULL ) {
 			markCoalescedAway(existingAtom);
-//			if ( fOwner.fInitialLoadsDone ) {
-//				//fprintf(stderr, "existing %p %s overridden by %p\n", existingAtom, existingAtom->name(), &newAtom);
-//				fOwner.fAtomsOverriddenByLateLoads.insert(existingAtom);
-//			}
 		}
 		if ( newAtom.scope() == ld::Atom::scopeGlobal ) {
 			if ( newAtom.definition() == ld::Atom::definitionTentative ) {
@@ -474,6 +518,16 @@ void SymbolTable::markCoalescedAway(const ld::Atom* atom)
 
 }
 
+
+struct StrcmpSorter {
+		bool operator() (const char* i,const char* j) {
+			if (i==NULL)
+				return true;
+			if (j==NULL)
+				return false;
+			return strcmp(i, j)<0;}
+};
+
 void SymbolTable::undefines(std::vector<const char*>& undefs)
 {
 	// return all names in _byNameTable that have no associated atom
@@ -483,7 +537,8 @@ void SymbolTable::undefines(std::vector<const char*>& undefs)
 			undefs.push_back(it->first);
 	}
 	// sort so that undefines are in a stable order (not dependent on hashing functions)
-	std::sort(undefs.begin(), undefs.end());
+	struct StrcmpSorter strcmpSorter;
+	std::sort(undefs.begin(), undefs.end(), strcmpSorter);
 }
 
 
@@ -683,35 +738,6 @@ const ld::Atom* SymbolTable::indirectAtom(IndirectBindingSlot slot) const
 	assert(slot < _indirectBindingTable.size());
 	return _indirectBindingTable[slot];
 }
-
-extern "C" char* __cxa_demangle (const char* mangled_name,
-				   char* buf,
-				   size_t* n,
-				   int* status);
-
-const char* SymbolTable::demangle(const char* sym)
-{
-	// only try to demangle symbols if -demangle on command line
-	if ( !_s_doDemangle )
-		return sym;
-
-	// only try to demangle symbols that look like C++ symbols
-	if ( strncmp(sym, "__Z", 3) != 0 )
-		return sym;
-
-	static size_t size = 1024;
-	static char* buff = (char*)malloc(size);
-	int status;
-	
-	char* result = __cxa_demangle(&sym[1], buff, &size, &status); 
-	if ( result != NULL ) {
-		// if demangling succesful, keep buffer for next demangle
-		buff = result;
-		return buff;
-	}
-	return sym;
-}
-
 
 void SymbolTable::printStatistics()
 {

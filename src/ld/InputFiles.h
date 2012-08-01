@@ -25,6 +25,8 @@
 #ifndef __INPUT_FILES_H__
 #define __INPUT_FILES_H__
 
+#define HAVE_PTHREADS 1
+
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -40,6 +42,9 @@
 #include <mach/mach_host.h>
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
+#if HAVE_PTHREADS
+#include <pthread.h>
+#endif
 
 #include <vector>
 
@@ -58,7 +63,7 @@ public:
 	virtual ld::dylib::File*	findDylib(const char* installPath, const char* fromPath);
 	
 	// iterates all atoms in initial files
-	bool						forEachInitialAtom(ld::File::AtomHandler&) const;
+	void						forEachInitialAtom(ld::File::AtomHandler&);
 	// searches libraries for name
 	bool						searchLibraries(const char* name, bool searchDylibs, bool searchArchives,  
 																  bool dataSymbolOnly, ld::File::AtomHandler&) const;
@@ -69,29 +74,34 @@ public:
 	
 	bool						inferredArch() const { return _inferredArch; }
 	
-	uint32_t					nextInputOrdinal() const  { return _nextInputOrdinal++; }
-	
 	// for -print_statistics
-	uint64_t					_totalObjectSize;
-	uint64_t					_totalArchiveSize;
-	uint32_t					_totalObjectLoaded;
-	uint32_t					_totalArchivesLoaded;
-	uint32_t					_totalDylibsLoaded;
+	volatile int64_t			_totalObjectSize;
+	volatile int64_t			_totalArchiveSize;
+	volatile int32_t			_totalObjectLoaded;
+	volatile int32_t			_totalArchivesLoaded;
+	volatile int32_t			_totalDylibsLoaded;
 	
 	
 private:
 	void						inferArchitecture(Options& opts, const char** archName);
 	const char*					fileArch(const uint8_t* p, unsigned len);
 	ld::File*					makeFile(const Options::FileInfo& info, bool indirectDylib);
-	ld::File*					addDylib(ld::dylib::File* f,        const Options::FileInfo& info, uint64_t mappedLen);
-	ld::File*					addObject(ld::relocatable::File* f, const Options::FileInfo& info, uint64_t mappedLen);
-	ld::File*					addArchive(ld::File* f,             const Options::FileInfo& info, uint64_t mappedLen);
+	ld::File*					addDylib(ld::dylib::File* f,        const Options::FileInfo& info);
 	void						logTraceInfo (const char* format, ...) const;
 	void						logDylib(ld::File*, bool indirect);
 	void						logArchive(ld::File*) const;
 	void						createIndirectDylibs();
 	void						checkDylibClientRestrictions(ld::dylib::File*);
 	void						createOpaqueFileSections();
+	
+	// for pipelined linking
+    void                      waitForInputFiles();
+	static void					waitForInputFiles(InputFiles *inputFiles);
+
+	// for threaded input file processing
+	void						parseWorkerThread();
+	static void					parseWorkerThread(InputFiles *inputFiles);
+	void						startThread(void (*threadFunc)(InputFiles *)) const;
 
 	class CStringEquals {
 	public:
@@ -105,9 +115,41 @@ private:
 	InstallNameToDylib			_installPathToDylibs;
 	std::set<ld::dylib::File*>	_allDylibs;
 	ld::dylib::File*			_bundleLoader;
-	mutable uint32_t			_nextInputOrdinal;
 	bool						_allDirectDylibsLoaded;
 	bool						_inferredArch;
+    int                       _fileMonitor;
+    struct strcompclass {
+        bool operator() (const char *a, const char *b) const { return ::strcmp(a, b) < 0; }
+    };
+
+	// for threaded input file processing
+#if HAVE_PTHREADS
+	pthread_mutex_t				_parseLock;
+	pthread_cond_t				_parseWorkReady;		// used by parse threads to block for work
+	pthread_cond_t				_newFileAvailable;		// used by main thread to block for parsed input files
+	int							_availableWorkers;		// number of remaining unstarted parse threads
+	int							_idleWorkers;			// number of running parse threads that are idle
+	int							_neededFileSlot;		// input file the resolver is currently blocked waiting for
+	int							_parseCursor;			// slot to begin searching for a file to parse
+	int							_availableInputFiles;	// number of input fileinfos with readyToParse==true
+#endif
+	const char *				_exception;				// passes an exception message from parse thread to main thread
+	int							_remainingInputFiles;	// number of input files still to parse
+	
+	ld::File::Ordinal			_indirectDylibOrdinal;
+    
+    class LibraryInfo {
+        ld::File* _lib;
+        bool      _isDylib;
+    public:
+        LibraryInfo(ld::dylib::File* dylib) : _lib(dylib), _isDylib(true) {};
+        LibraryInfo(ld::archive::File* dylib) : _lib(dylib), _isDylib(false) {};
+
+        bool isDylib() { return _isDylib; }
+        ld::dylib::File *dylib() { return (ld::dylib::File*)_lib; }
+        ld::archive::File *archive() { return (ld::archive::File*)_lib; }
+    };
+    std::vector<LibraryInfo>  _searchLibraries;
 };
 
 } // namespace tool 

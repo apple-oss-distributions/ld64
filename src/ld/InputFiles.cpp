@@ -39,6 +39,8 @@
 #include <dlfcn.h>
 #include <mach-o/dyld.h>
 #include <mach-o/fat.h>
+#include <sys/sysctl.h>
+#include <libkern/OSAtomic.h>
 
 #include <string>
 #include <map>
@@ -60,12 +62,19 @@
 #include "archive_file.h"
 #include "lto_file.h"
 #include "opaque_section_file.h"
+#include "Snapshot.h"
 
+const bool _s_logPThreads = false;
 
 namespace ld {
 namespace tool {
 
-
+class IgnoredFile : public ld::File {
+public:
+	IgnoredFile(const char* pth, time_t modTime, Ordinal ord, Type type) : ld::File(pth, modTime, ord, type) {};
+	virtual bool						forEachAtom(AtomHandler&) const { return false; };
+	virtual bool						justInTimeforEachAtom(const char* name, AtomHandler&) const { return false; };
+};
 
 
 class DSOHandleAtom : public ld::Atom {
@@ -182,7 +191,15 @@ const char* InputFiles::fileArch(const uint8_t* p, unsigned len)
 	if ( strncmp((const char*)p, "!<arch>\n", 8) == 0 )
 		return "archive";
 	
-	return "unsupported file format";	 
+	char *unsupported = (char *)malloc(128);
+	strcpy(unsupported, "unsupported file format (");
+	for (unsigned i=0; i<len && i < 16; i++) {
+		char buf[8];
+		sprintf(buf, " 0x%2x", p[i]);
+		strcat(unsupported, buf);
+	}
+	strcat(unsupported, " )");
+	return unsupported;
 }
 
 
@@ -203,15 +220,16 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	// if fat file, skip to architecture we want
 	// Note: fat header is always big-endian
 	bool isFatFile = false;
+	uint32_t sliceToUse, sliceCount;
 	const fat_header* fh = (fat_header*)p;
 	if ( fh->magic == OSSwapBigToHostInt32(FAT_MAGIC) ) {
 		isFatFile = true;
 		const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
-		uint32_t sliceToUse;
 		bool sliceFound = false;
+		sliceCount = OSSwapBigToHostInt32(fh->nfat_arch);
 		if ( _options.preferSubArchitecture() ) {
 			// first try to find a slice that match cpu-type and cpu-sub-type
-			for (uint32_t i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
+			for (uint32_t i=0; i < sliceCount; ++i) {
 				if ( (OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)_options.architecture())
 				  && (OSSwapBigToHostInt32(archs[i].cpusubtype) == (uint32_t)_options.subArchitecture()) ) {
 					sliceToUse = i;
@@ -222,7 +240,7 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 		}
 		if ( !sliceFound ) {
 			// look for any slice that matches just cpu-type
-			for (uint32_t i=0; i < OSSwapBigToHostInt32(fh->nfat_arch); ++i) {
+			for (uint32_t i=0; i < sliceCount; ++i) {
 				if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)_options.architecture() ) {
 					sliceToUse = i;
 					sliceFound = true;
@@ -260,19 +278,26 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	objOpts.logAllFiles			= _options.logAllFiles();
 	objOpts.convertUnwindInfo	= _options.needsUnwindInfoSection();
 	objOpts.subType				= _options.subArchitecture();
-	ld::relocatable::File* objResult = mach_o::relocatable::parse(p, len, info.path, info.modTime, _nextInputOrdinal, objOpts);
-	if ( objResult != NULL ) 
-		return this->addObject(objResult, info, len);
+	ld::relocatable::File* objResult = mach_o::relocatable::parse(p, len, info.path, info.modTime, info.ordinal, objOpts);
+	if ( objResult != NULL ) {
+		OSAtomicAdd64(len, &_totalObjectSize);
+		OSAtomicIncrement32(&_totalObjectLoaded);
+		return objResult;
+	}
 
 	// see if it is an llvm object file
-	objResult = lto::parse(p, len, info.path, info.modTime, _nextInputOrdinal, _options.architecture(), _options.subArchitecture(), _options.logAllFiles());
-	if ( objResult != NULL ) 
-		return this->addObject(objResult, info, len);
-
+	objResult = lto::parse(p, len, info.path, info.modTime, _options.architecture(), _options.subArchitecture(), _options.logAllFiles());
+	if ( objResult != NULL ) {
+		OSAtomicAdd64(len, &_totalObjectSize);
+		OSAtomicIncrement32(&_totalObjectLoaded);
+		return objResult;
+	}
+	
 	// see if it is a dynamic library
-	ld::dylib::File* dylibResult = mach_o::dylib::parse(p, len, info.path, info.modTime, _options, _nextInputOrdinal, info.options.fBundleLoader, indirectDylib);
-	if ( dylibResult != NULL ) 
-		return this->addDylib(dylibResult, info, len);
+	ld::dylib::File* dylibResult = mach_o::dylib::parse(p, len, info.path, info.modTime, _options, info.ordinal, info.options.fBundleLoader, indirectDylib);
+	if ( dylibResult != NULL ) {
+		return dylibResult;
+	}
 
 	// see if it is a static library
 	::archive::ParserOptions archOpts;
@@ -283,18 +308,17 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	archOpts.objcABI2				= _options.objCABIVersion2POverride();
 	archOpts.verboseLoad			= _options.whyLoad();
 	archOpts.logAllFiles			= _options.logAllFiles();
-	ld::archive::File* archiveResult = ::archive::parse(p, len, info.path, info.modTime, _nextInputOrdinal, archOpts);
+	ld::archive::File* archiveResult = ::archive::parse(p, len, info.path, info.modTime, info.ordinal, archOpts);
 	if ( archiveResult != NULL ) {
-		// <rdar://problem/9740166> force loaded archives should be in LD_TRACE
-		if ( (info.options.fForceLoad || _options.fullyLoadArchives()) && _options.traceArchives() ) 
-			logArchive(archiveResult);
-		return this->addArchive(archiveResult, info, len);
+		OSAtomicAdd64(len, &_totalArchiveSize);
+		OSAtomicIncrement32(&_totalArchivesLoaded);
+		return archiveResult;
 	}
 	
 	// does not seem to be any valid linker input file, check LTO misconfiguration problems
 	if ( lto::archName((uint8_t*)p, len) != NULL ) {
 		if ( lto::libLTOisLoaded() ) {
-			throwf("file was built for %s which is not the architecture being linked (%s)", fileArch(p, len), _options.architectureName());
+			throwf("lto file was built for %s which is not the architecture being linked (%s): %s", fileArch(p, len), _options.architectureName(), info.path);
 		}
 		else {
 			const char* libLTO = "libLTO.dylib";
@@ -302,7 +326,10 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 			char tmpPath[PATH_MAX];
 			char libLTOPath[PATH_MAX];
 			uint32_t bufSize = PATH_MAX;
-			if ( _NSGetExecutablePath(ldPath, &bufSize) != -1 ) {
+			if ( _options.overridePathlibLTO() != NULL ) {
+				libLTO = _options.overridePathlibLTO();
+			}
+			else if ( _NSGetExecutablePath(ldPath, &bufSize) != -1 ) {
 				if ( realpath(ldPath, tmpPath) != NULL ) {
 					char* lastSlash = strrchr(tmpPath, '/');
 					if ( lastSlash != NULL )
@@ -318,13 +345,13 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 
 	// error handling
 	if ( ((fat_header*)p)->magic == OSSwapBigToHostInt32(FAT_MAGIC) ) {
-		throwf("missing required architecture %s in file", _options.architectureName());
+		throwf("missing required architecture %s in file %s (%u slices)", _options.architectureName(), info.path, sliceCount);
 	}
 	else {
 		if ( isFatFile )
-			throwf("file is universal but does not contain a(n) %s slice", _options.architectureName());
+			throwf("file is universal (%u slices) but does not contain a(n) %s slice: %s", sliceCount, _options.architectureName(), info.path);
 		else
-			throwf("file was built for %s which is not the architecture being linked (%s)", fileArch(p, len), _options.architectureName());
+			throwf("file was built for %s which is not the architecture being linked (%s): %s", fileArch(p, len), _options.architectureName(), info.path);
 	}
 }
 
@@ -409,9 +436,12 @@ ld::dylib::File* InputFiles::findDylib(const char* installPath, const char* from
 			if ( strcmp(dit->installName,installPath) == 0 ) {
 				try {
 					Options::FileInfo info = _options.findFile(dit->useInstead);
+					_indirectDylibOrdinal = _indirectDylibOrdinal.nextIndirectDylibOrdinal();
+					info.ordinal = _indirectDylibOrdinal;
 					ld::File* reader = this->makeFile(info, true);
 					ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(reader);
 					if ( dylibReader != NULL ) {
+						addDylib(dylibReader, info);
 						//_installPathToDylibs[strdup(installPath)] = dylibReader;
 						this->logDylib(dylibReader, true);
 						return dylibReader;
@@ -438,12 +468,15 @@ ld::dylib::File* InputFiles::findDylib(const char* installPath, const char* from
 		// note: @executable_path case is handled inside findFileUsingPaths()
 		// search for dylib using -F and -L paths
 		Options::FileInfo info = _options.findFileUsingPaths(installPath);
+		_indirectDylibOrdinal = _indirectDylibOrdinal.nextIndirectDylibOrdinal();
+		info.ordinal = _indirectDylibOrdinal;
 		try {
 			ld::File* reader = this->makeFile(info, true);
 			ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(reader);
 			if ( dylibReader != NULL ) {
 				//assert(_installPathToDylibs.find(installPath) !=  _installPathToDylibs.end());
 				//_installPathToDylibs[strdup(installPath)] = dylibReader;
+				addDylib(dylibReader, info);
 				this->logDylib(dylibReader, true);
 				return dylibReader;
 			}
@@ -461,7 +494,8 @@ ld::dylib::File* InputFiles::findDylib(const char* installPath, const char* from
 void InputFiles::createIndirectDylibs()
 {
 	_allDirectDylibsLoaded = true;
-
+	_indirectDylibOrdinal = ld::File::Ordinal::indirectDylibBase();
+	
 	// mark all dylibs initially specified as required and check if they can be used
 	for (InstallNameToDylib::iterator it=_installPathToDylibs.begin(); it != _installPathToDylibs.end(); it++) {
 		it->second->setExplicitlyLinked();
@@ -510,10 +544,7 @@ void InputFiles::createOpaqueFileSections()
 {
 	// extra command line section always at end
 	for (Options::ExtraSection::const_iterator it=_options.extraSectionsBegin(); it != _options.extraSectionsEnd(); ++it) {
-		_inputFiles.push_back(opaque_section::parse(it->segmentName, it->sectionName, it->path, it->data,
-															it->dataLen, _nextInputOrdinal));
-		// bump ordinal
-		_nextInputOrdinal++;
+		_inputFiles.push_back(opaque_section::parse(it->segmentName, it->sectionName, it->path, it->data, it->dataLen));
 	}
 
 }
@@ -643,71 +674,158 @@ void InputFiles::inferArchitecture(Options& opts, const char** archName)
 InputFiles::InputFiles(Options& opts, const char** archName) 
  : _totalObjectSize(0), _totalArchiveSize(0), 
    _totalObjectLoaded(0), _totalArchivesLoaded(0), _totalDylibsLoaded(0),
-	_options(opts), _bundleLoader(NULL), _nextInputOrdinal(1), 
-	_allDirectDylibsLoaded(false), _inferredArch(false)
+	_options(opts), _bundleLoader(NULL), 
+	_allDirectDylibsLoaded(false), _inferredArch(false), _fileMonitor(-1),
+	_exception(NULL)
 {
 //	fStartCreateReadersTime = mach_absolute_time();
 	if ( opts.architecture() == 0 ) {
 		// command line missing -arch, so guess arch
 		inferArchitecture(opts, archName);
 	}
-
-	const std::vector<Options::FileInfo>& files = opts.getInputFiles();
+#if HAVE_PTHREADS
+	pthread_mutex_init(&_parseLock, NULL);
+	pthread_cond_init(&_parseWorkReady, NULL);
+	pthread_cond_init(&_newFileAvailable, NULL);
+#endif
+	const std::vector<Options::FileInfo>& files = _options.getInputFiles();
 	if ( files.size() == 0 )
 		throw "no object files specified";
-	// add all direct object, archives, and dylibs
+
 	_inputFiles.reserve(files.size());
+#if HAVE_PTHREADS
+	unsigned int inputFileSlot = 0;
+	_availableInputFiles = 0;
+	_parseCursor = 0;
+#endif
+	Options::FileInfo* entry;
 	for (std::vector<Options::FileInfo>::const_iterator it = files.begin(); it != files.end(); ++it) {
-		const Options::FileInfo& entry = *it;
-		try {
-			_inputFiles.push_back(this->makeFile(entry, false));
-		}
-		catch (const char* msg) {
-			if ( (strstr(msg, "architecture") != NULL) && !_options.errorOnOtherArchFiles() ) {
-				if ( opts.ignoreOtherArchInputFiles() ) {
-					// ignore, because this is about an architecture not in use
-				}
-				else {
-					warning("ignoring file %s, %s", entry.path, msg);
-				}
-			}
-			else {
-				throwf("in %s, %s", entry.path, msg);
-			}
-		}
+		entry = (Options::FileInfo*)&(*it);
+#if HAVE_PTHREADS
+		// Assign input file slots to all the FileInfos.
+		// Also chain all FileInfos into one big list to set up for worker threads to do parsing.
+		entry->inputFileSlot = inputFileSlot;
+		entry->readyToParse = !entry->fromFileList || !_options.pipelineEnabled();
+		if (entry->readyToParse)
+			_availableInputFiles++;
+		_inputFiles.push_back(NULL);
+		inputFileSlot++;
+#else
+		// In the non-threaded case just parse the file now.
+		_inputFiles.push_back(makeFile(*entry, false));
+#endif
+	}
+	
+#if HAVE_PTHREADS
+	_remainingInputFiles = files.size();
+	
+	// initialize info for parsing input files on worker threads
+	unsigned int ncpus;
+	int mib[2];
+	size_t len = sizeof(ncpus);
+	mib[0] = CTL_HW;
+	mib[1] = HW_NCPU;
+	if (sysctl(mib, 2, &ncpus, &len, NULL, 0) != 0) {
+		ncpus = 1;
+	}
+	_availableWorkers = MIN(ncpus, files.size()); // max # workers we permit
+	_idleWorkers = 0;
+	
+	if (_options.pipelineEnabled()) {
+		// start up a thread to listen for available input files
+		startThread(InputFiles::waitForInputFiles);
 	}
 
-	this->createIndirectDylibs();
-	this->createOpaqueFileSections();
+	// Start up one parser thread. More start on demand as parsed input files get consumed.
+	startThread(InputFiles::parseWorkerThread);
+	_availableWorkers--;
+#else
+	if (_options.pipelineEnabled()) {
+		throwf("pipelined linking not supported on this platform");
+	}
+#endif
 }
 
 
+#if HAVE_PTHREADS
+void InputFiles::startThread(void (*threadFunc)(InputFiles *)) const {
+	pthread_t thread;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	// set a nice big stack (same as main thread) because some code uses potentially large stack buffers
+	pthread_attr_setstacksize(&attr, 8 * 1024 * 1024);
+	pthread_create(&thread, &attr, (void *(*)(void*))threadFunc, (void *)this);
+	pthread_detach(thread);
+	pthread_attr_destroy(&attr);
+}
 
-ld::File* InputFiles::addArchive(ld::File* reader, const Options::FileInfo& info, uint64_t mappedLen)
-{
-	// bump ordinal
-	_nextInputOrdinal += reader->subFileCount();
-
-	// update stats
-	_totalArchiveSize += mappedLen;
-	_totalArchivesLoaded++;
-	return reader;
+// Work loop for input file parsing threads
+void InputFiles::parseWorkerThread() {
+	ld::File *file;
+	const char *exception = NULL;
+	pthread_mutex_lock(&_parseLock);
+	const std::vector<Options::FileInfo>& files = _options.getInputFiles();
+	if (_s_logPThreads) printf("worker starting\n");
+	do {
+		if (_availableInputFiles == 0) {
+			_idleWorkers++;
+			pthread_cond_wait(&_parseWorkReady, &_parseLock);
+			_idleWorkers--;
+		} else {
+			int slot = _parseCursor;
+			while (slot < (int)files.size() && (_inputFiles[slot] != NULL || !files[slot].readyToParse))
+				slot++;
+			assert(slot < (int)files.size());
+			Options::FileInfo& entry = (Options::FileInfo&)files[slot];
+			_parseCursor = slot+1;
+			_availableInputFiles--;
+			entry.readyToParse = false; // to avoid multiple threads finding this file
+			pthread_mutex_unlock(&_parseLock);
+			if (_s_logPThreads) printf("parsing index %u\n", slot);
+			try {
+				file = makeFile(entry, false);
+			} catch (const char *msg) {
+				if ( (strstr(msg, "architecture") != NULL) && !_options.errorOnOtherArchFiles() ) {
+					if ( _options.ignoreOtherArchInputFiles() ) {
+						// ignore, because this is about an architecture not in use
+					}
+					else {
+						warning("ignoring file %s, %s", entry.path, msg);
+					}
+				} else {
+					exception = msg;
+				}
+				file = new IgnoredFile(entry.path, entry.modTime, entry.ordinal, ld::File::Other);
+			}
+			pthread_mutex_lock(&_parseLock);
+			if (_remainingInputFiles > 0)
+				_remainingInputFiles--;
+			if (_s_logPThreads) printf("done with index %u, %d remaining\n", slot, _remainingInputFiles);
+			if (exception) {
+				// We are about to die, so set to zero to stop other threads from doing unneeded work.
+				_remainingInputFiles = 0;
+				_exception = exception;
+			} else {
+				_inputFiles[slot] = file;
+				if (_neededFileSlot == slot)
+					pthread_cond_signal(&_newFileAvailable);
+			}
+		}
+	} while (_remainingInputFiles);
+	if (_s_logPThreads) printf("worker exiting\n");
+	pthread_cond_broadcast(&_parseWorkReady);
+	pthread_cond_signal(&_newFileAvailable);
+	pthread_mutex_unlock(&_parseLock);
 }
 
 
-ld::File* InputFiles::addObject(ld::relocatable::File* file, const Options::FileInfo& info, uint64_t mappedLen)
-{
-	// bump ordinal
-	_nextInputOrdinal++;
-
-	// update stats
-	_totalObjectSize += mappedLen;
-	_totalObjectLoaded++;
-	return file;
+void InputFiles::parseWorkerThread(InputFiles *inputFiles) {
+	inputFiles->parseWorkerThread();
 }
+#endif
 
 
-ld::File* InputFiles::addDylib(ld::dylib::File* reader, const Options::FileInfo& info, uint64_t mappedLen)
+ld::File* InputFiles::addDylib(ld::dylib::File* reader, const Options::FileInfo& info)
 {
 	_allDylibs.insert(reader);
 	
@@ -750,8 +868,9 @@ ld::File* InputFiles::addDylib(ld::dylib::File* reader, const Options::FileInfo&
 					}
 				}
 			}
-			if ( !dylibOnCommandLineTwice && !isSymlink )
-				warning("dylibs with same install name: %s and %s", pos->second->path(), reader->path());
+			// remove warning for <rdar://problem/10860629> Same install name for CoreServices and CFNetwork?
+			//if ( !dylibOnCommandLineTwice && !isSymlink )
+			//	warning("dylibs with same install name: %s and %s", pos->second->path(), reader->path());
 		}
 	}
 	else if ( info.options.fBundleLoader )
@@ -761,105 +880,239 @@ ld::File* InputFiles::addDylib(ld::dylib::File* reader, const Options::FileInfo&
 	if ( !_allDirectDylibsLoaded ) 
 		this->logDylib(reader, false);
 
-	// bump ordinal
-	_nextInputOrdinal++;
-
 	// update stats
 	_totalDylibsLoaded++;
 
+    _searchLibraries.push_back(LibraryInfo(reader));
 	return reader;
 }
 
 
-bool InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler) const
+#if HAVE_PTHREADS
+// Called during pipelined linking to listen for available input files.
+// Available files are enqueued for parsing.
+void InputFiles::waitForInputFiles()
 {
-	bool didSomething = false;
-	for (std::vector<ld::File*>::const_iterator it=_inputFiles.begin(); it != _inputFiles.end(); ++it) {
-		didSomething |= (*it)->forEachAtom(handler);
+	if (_s_logPThreads) printf("starting pipeline listener\n");
+	try {
+		const char *fifo = _options.pipelineFifo();
+		assert(fifo);
+		std::map<const char *, const Options::FileInfo*, strcompclass> fileMap;
+		const std::vector<Options::FileInfo>& files = _options.getInputFiles();
+		for (std::vector<Options::FileInfo>::const_iterator it = files.begin(); it != files.end(); ++it) {
+			const Options::FileInfo& entry = *it;
+			if (entry.fromFileList) {
+				fileMap[entry.path] = &entry;
+			}
+		}
+		FILE *fileStream = fopen(fifo, "r");
+		if (!fileStream)
+			throwf("pipelined linking error - failed to open stream. fopen() returns %s for \"%s\"\n", strerror(errno), fifo);
+		while (fileMap.size() > 0) {
+			char path_buf[PATH_MAX+1];
+			if (fgets(path_buf, PATH_MAX, fileStream) == NULL)
+				throwf("pipelined linking error - %lu missing input files", fileMap.size());
+			int len = strlen(path_buf);
+			if (path_buf[len-1] == '\n')
+				path_buf[len-1] = 0;
+			std::map<const char *, const Options::FileInfo*, strcompclass>::iterator it = fileMap.find(path_buf);
+			if (it == fileMap.end())
+				throwf("pipelined linking error - not in file list: %s\n", path_buf);
+			Options::FileInfo* inputInfo = (Options::FileInfo*)it->second;
+			if (!inputInfo->checkFileExists())
+				throwf("pipelined linking error - file does not exist: %s\n", inputInfo->path);
+			pthread_mutex_lock(&_parseLock);
+			if (_idleWorkers)
+				pthread_cond_signal(&_parseWorkReady);
+			inputInfo->readyToParse = true;
+			if (_parseCursor > inputInfo->inputFileSlot)
+				_parseCursor = inputInfo->inputFileSlot;
+			_availableInputFiles++;
+			if (_s_logPThreads) printf("pipeline listener: %s slot=%d, _parseCursor=%d, _availableInputFiles = %d remaining = %ld\n", path_buf, inputInfo->inputFileSlot, _parseCursor, _availableInputFiles, fileMap.size()-1);
+			pthread_mutex_unlock(&_parseLock);
+			fileMap.erase(it);
+		}
+	} catch (const char *msg) {
+		pthread_mutex_lock(&_parseLock);
+		_exception = msg;
+		pthread_cond_signal(&_newFileAvailable);
+		pthread_mutex_unlock(&_parseLock);
 	}
-	if ( didSomething || true ) {
-		switch ( _options.outputKind() ) {
-			case Options::kStaticExecutable:
-			case Options::kDynamicExecutable:
-				// add implicit __dso_handle label
-				handler.doAtom(DSOHandleAtom::_s_atomExecutable);
-				handler.doAtom(DSOHandleAtom::_s_atomAll);
-				if ( _options.pageZeroSize() != 0 ) 
-					handler.doAtom(*new PageZeroAtom(_options.pageZeroSize()));
-				if ( _options.hasCustomStack() ) 
-					handler.doAtom(*new CustomStackAtom(_options.customStackSize()));
+}
+
+
+void InputFiles::waitForInputFiles(InputFiles *inputFiles) {
+	inputFiles->waitForInputFiles();
+}
+#endif
+
+
+void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler)
+{
+	// add all direct object, archives, and dylibs
+	const std::vector<Options::FileInfo>& files = _options.getInputFiles();
+	size_t fileIndex;
+	for (fileIndex=0; fileIndex<_inputFiles.size(); fileIndex++) {
+		ld::File *file;
+#if HAVE_PTHREADS
+		pthread_mutex_lock(&_parseLock);
+		
+		// this loop waits for the needed file to be ready (parsed by worker thread)
+		while (_inputFiles[fileIndex] == NULL && _exception == NULL) {
+			// We are starved for input. If there are still files to parse and we have
+			// not maxed out the worker thread count start a new worker thread.
+			if (_availableInputFiles > 0 && _availableWorkers > 0) {
+				if (_s_logPThreads) printf("starting worker\n");
+				startThread(InputFiles::parseWorkerThread);
+				_availableWorkers--;
+			}
+			_neededFileSlot = fileIndex;
+			if (_s_logPThreads) printf("consumer blocking for %lu: %s\n", fileIndex, files[fileIndex].path);
+			pthread_cond_wait(&_newFileAvailable, &_parseLock);
+		}
+
+		if (_exception)
+			throw _exception;
+
+		// The input file is parsed. Assimilate it and call its atom iterator.
+		if (_s_logPThreads) printf("consuming slot %lu\n", fileIndex);
+		file = _inputFiles[fileIndex];
+		pthread_mutex_unlock(&_parseLock);
+#else
+		file = _inputFiles[fileIndex];
+#endif
+		const Options::FileInfo& info = files[fileIndex];
+		switch (file->type()) {
+			case ld::File::Reloc:
+			{
+				ld::relocatable::File* reloc = (ld::relocatable::File*)file;
+				_options.snapshot().recordObjectFile(reloc->path());
+			}
 				break;
-			case Options::kDynamicLibrary:
-				// add implicit __dso_handle label
-				handler.doAtom(DSOHandleAtom::_s_atomDylib);
-				handler.doAtom(DSOHandleAtom::_s_atomAll);
+			case ld::File::Dylib:
+			{
+				ld::dylib::File* dylib = (ld::dylib::File*)file;
+				addDylib(dylib, info);
+			}
 				break;
-			case Options::kDynamicBundle:
-				// add implicit __dso_handle label
-				handler.doAtom(DSOHandleAtom::_s_atomBundle);
-				handler.doAtom(DSOHandleAtom::_s_atomAll);
+			case ld::File::Archive:
+			{
+				ld::archive::File* archive = (ld::archive::File*)file;
+				// <rdar://problem/9740166> force loaded archives should be in LD_TRACE
+				if ( (info.options.fForceLoad || _options.fullyLoadArchives()) && _options.traceArchives() ) 
+					logArchive(archive);
+				_searchLibraries.push_back(LibraryInfo(archive));
+			}
 				break;
-			case Options::kDyld:
-				// add implicit __dso_handle label
-				handler.doAtom(DSOHandleAtom::_s_atomDyld);
-				handler.doAtom(DSOHandleAtom::_s_atomAll);
+			case ld::File::Other:
 				break;
-			case Options::kPreload:
-				// add implicit __mh_preload_header label
-				handler.doAtom(DSOHandleAtom::_s_atomPreload);
-				handler.doAtom(DSOHandleAtom::_s_atomAll);
-				break;
-			case Options::kObjectFile:
-				handler.doAtom(DSOHandleAtom::_s_atomObjectFile);
-				break;
-			case Options::kKextBundle:
-				// add implicit __dso_handle label
-				handler.doAtom(DSOHandleAtom::_s_atomAll);
+			default:
+			{
+				throwf("Unknown file type for %s", file->path());
+			}
 				break;
 		}
+		file->forEachAtom(handler);
 	}
-	return didSomething;
+
+	createIndirectDylibs();
+	createOpaqueFileSections();
+	
+	while (fileIndex < _inputFiles.size()) {
+		ld::File *file = _inputFiles[fileIndex];
+		file->forEachAtom(handler);
+		fileIndex++;
+	}
+    
+    switch ( _options.outputKind() ) {
+        case Options::kStaticExecutable:
+        case Options::kDynamicExecutable:
+            // add implicit __dso_handle label
+            handler.doAtom(DSOHandleAtom::_s_atomExecutable);
+            handler.doAtom(DSOHandleAtom::_s_atomAll);
+            if ( _options.pageZeroSize() != 0 ) 
+                handler.doAtom(*new PageZeroAtom(_options.pageZeroSize()));
+            if ( _options.hasCustomStack() && !_options.needsEntryPointLoadCommand() ) 
+                handler.doAtom(*new CustomStackAtom(_options.customStackSize()));
+            break;
+        case Options::kDynamicLibrary:
+            // add implicit __dso_handle label
+            handler.doAtom(DSOHandleAtom::_s_atomDylib);
+            handler.doAtom(DSOHandleAtom::_s_atomAll);
+            break;
+        case Options::kDynamicBundle:
+            // add implicit __dso_handle label
+            handler.doAtom(DSOHandleAtom::_s_atomBundle);
+            handler.doAtom(DSOHandleAtom::_s_atomAll);
+            break;
+        case Options::kDyld:
+            // add implicit __dso_handle label
+            handler.doAtom(DSOHandleAtom::_s_atomDyld);
+            handler.doAtom(DSOHandleAtom::_s_atomAll);
+            break;
+        case Options::kPreload:
+            // add implicit __mh_preload_header label
+            handler.doAtom(DSOHandleAtom::_s_atomPreload);
+            handler.doAtom(DSOHandleAtom::_s_atomAll);
+            break;
+        case Options::kObjectFile:
+            handler.doAtom(DSOHandleAtom::_s_atomObjectFile);
+            break;
+        case Options::kKextBundle:
+            // add implicit __dso_handle label
+            handler.doAtom(DSOHandleAtom::_s_atomAll);
+            break;
+	}
 }
 
 
 bool InputFiles::searchLibraries(const char* name, bool searchDylibs, bool searchArchives, bool dataSymbolOnly, ld::File::AtomHandler& handler) const
 {
-	// check each input file 
-	for (std::vector<ld::File*>::const_iterator it=_inputFiles.begin(); it != _inputFiles.end(); ++it) {
-		ld::File* file = *it;
-		// if this reader is a static archive that has the symbol we need, pull in all atoms in that module
-		// if this reader is a dylib that exports the symbol we need, have it synthesize an atom for us.
-		ld::dylib::File* dylibFile = dynamic_cast<ld::dylib::File*>(file);
-		ld::archive::File* archiveFile = dynamic_cast<ld::archive::File*>(file);
-		if ( searchDylibs && (dylibFile != NULL) ) {
-			//fprintf(stderr, "searchLibraries(%s), looking in linked %s\n", name, dylibFile->path() );
-			if ( dylibFile->justInTimeforEachAtom(name, handler) ) {
-				// we found a definition in this dylib
-				// done, unless it is a weak definition in which case we keep searching
-				if ( !dylibFile->hasWeakExternals() || !dylibFile->hasWeakDefinition(name))
-					return true;
-				// else continue search for a non-weak definition
-			}
-		}
-		else if ( searchArchives && (archiveFile != NULL) ) {
-			if ( dataSymbolOnly ) {
-				if ( archiveFile->justInTimeDataOnlyforEachAtom(name, handler) ) {
-					if ( _options.traceArchives() ) 
-						logArchive(file);
-					// found data definition in static library, done
-					return true;
-				}
-			}
-			else {
-				if ( archiveFile->justInTimeforEachAtom(name, handler) ) {
-					if ( _options.traceArchives() ) 
-						logArchive(file);
-					// found definition in static library, done
-					return true;
-				}
-			}
-		}
-	}
+	// Check each input library.
+    std::vector<LibraryInfo>::const_iterator libIterator = _searchLibraries.begin();
+    
+    
+    while (libIterator != _searchLibraries.end()) {
+        LibraryInfo lib = *libIterator;
+        if (lib.isDylib()) {
+            if (searchDylibs) {
+                ld::dylib::File *dylibFile = lib.dylib();
+                //fprintf(stderr, "searchLibraries(%s), looking in linked %s\n", name, dylibFile->path() );
+                if ( dylibFile->justInTimeforEachAtom(name, handler) ) {
+                    // we found a definition in this dylib
+                    // done, unless it is a weak definition in which case we keep searching
+                    _options.snapshot().recordDylibSymbol(dylibFile, name);
+                    if ( !dylibFile->hasWeakExternals() || !dylibFile->hasWeakDefinition(name)) {
+                        return true;
+                    }
+                    // else continue search for a non-weak definition
+                }
+            }
+        } else {
+            if (searchArchives) {
+                ld::archive::File *archiveFile = lib.archive();
+                if ( dataSymbolOnly ) {
+                    if ( archiveFile->justInTimeDataOnlyforEachAtom(name, handler) ) {
+                        if ( _options.traceArchives() ) 
+                            logArchive(archiveFile);
+                        _options.snapshot().recordArchive(archiveFile->path());
+                        // found data definition in static library, done
+                        return true;
+                    }
+                }
+                else {
+                    if ( archiveFile->justInTimeforEachAtom(name, handler) ) {
+                        if ( _options.traceArchives() ) 
+                            logArchive(archiveFile);
+                        _options.snapshot().recordArchive(archiveFile->path());
+                        // found definition in static library, done
+                        return true;
+                    }
+                }
+            }
+        }
+        libIterator++;
+    }
 
 	// search indirect dylibs
 	if ( searchDylibs ) {
@@ -879,8 +1132,10 @@ bool InputFiles::searchLibraries(const char* name, bool searchDylibs, bool searc
 				if ( dylibFile->justInTimeforEachAtom(name, handler) ) {
 					// we found a definition in this dylib
 					// done, unless it is a weak definition in which case we keep searching
-					if ( !dylibFile->hasWeakExternals() || !dylibFile->hasWeakDefinition(name))
+                    _options.snapshot().recordDylibSymbol(dylibFile, name);
+					if ( !dylibFile->hasWeakExternals() || !dylibFile->hasWeakDefinition(name)) {
 						return true;
+                    }
 					// else continue search for a non-weak definition
 				}
 			}			
@@ -903,6 +1158,11 @@ bool InputFiles::searchWeakDefInDylib(const char* name) const
 		}
 	}
 	return false;
+}
+	
+static bool vectorContains(const std::vector<ld::dylib::File*>& vec, ld::dylib::File* key)
+{
+	return std::find(vec.begin(), vec.end(), key) != vec.end();
 }
 
 void InputFiles::dylibs(ld::Internal& state)
@@ -928,8 +1188,11 @@ void InputFiles::dylibs(ld::Internal& state)
 		ld::dylib::File* dylibFile = dynamic_cast<ld::dylib::File*>(*it);
 		// only add dylibs that are not "blank" dylib stubs
 		if ( (dylibFile != NULL) && ((dylibFile->installPath() != NULL) || (dylibFile == _bundleLoader)) ) {
-			if ( dylibsOK )
-				state.dylibs.push_back(dylibFile);
+			if ( dylibsOK ) {
+				if ( ! vectorContains(state.dylibs, dylibFile) ) {
+					state.dylibs.push_back(dylibFile);
+				}
+			}
 			else
 				warning("unexpected dylib (%s) on link line", dylibFile->path());
 		}
@@ -938,15 +1201,30 @@ void InputFiles::dylibs(ld::Internal& state)
 	if ( _options.nameSpace() == Options::kTwoLevelNameSpace ) {
 		for (InstallNameToDylib::const_iterator it=_installPathToDylibs.begin(); it != _installPathToDylibs.end(); ++it) {
 			ld::dylib::File* dylibFile = it->second;
-			if ( dylibFile->implicitlyLinked() && dylibsOK ) 
-				state.dylibs.push_back(dylibFile);
+			if ( dylibFile->implicitlyLinked() && dylibsOK ) {
+				if ( ! vectorContains(state.dylibs, dylibFile) ) {
+					state.dylibs.push_back(dylibFile);
+				}
+			}
 		}
 	}
+
+	//fprintf(stderr, "all dylibs:\n");
+	//for(std::vector<ld::dylib::File*>::iterator it=state.dylibs.begin(); it != state.dylibs.end(); ++it) {
+	//	const ld::dylib::File* dylib = *it;
+	//	fprintf(stderr, "    %p %s\n", dylib, dylib->path());
+	//}
+	
 	// and -bundle_loader
 	state.bundleLoader = _bundleLoader;
+	
+	// <rdar://problem/10807040> give an error when -nostdlib is used and libSystem is missing
+	if ( (state.dylibs.size() == 0) && _options.needsEntryPointLoadCommand() ) 
+		throw "dynamic main executables must link with libSystem.dylib";
 }
 
 
 } // namespace tool 
 } // namespace ld 
+
 

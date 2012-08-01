@@ -40,7 +40,7 @@
 #include "MachOFileAbstraction.hpp"
 #include "MachOTrie.hpp"
 #include "macho_dylib_file.h"
-
+#include "../code-sign-blobs/superblob.h"
 
 namespace mach_o {
 namespace dylib {
@@ -144,7 +144,7 @@ class File : public ld::dylib::File
 public:
 	static bool								validFile(const uint8_t* fileContent, bool executableOrDylib);
 											File(const uint8_t* fileContent, uint64_t fileLength, const char* path,   
-													time_t mTime, uint32_t ordinal, bool linkingFlatNamespace, 
+													time_t mTime, ld::File::Ordinal ordinal, bool linkingFlatNamespace, 
 													bool linkingMainExecutable, bool hoistImplicitPublicDylibs, 
 													ld::MacVersionMin macMin, ld::IOSVersionMin iPhoneMin, bool addVers, 
 													bool logAllFiles, const char* installPath, bool indirectDylib);
@@ -165,6 +165,7 @@ public:
 	virtual bool							hasPublicInstallName() const{ return _hasPublicInstallName; }
 	virtual bool							hasWeakDefinition(const char* name) const;
 	virtual bool							allSymbolsAreWeakImported() const;
+	virtual const void*						codeSignatureDR() const		{ return _codeSignatureDR; }
 
 
 protected:
@@ -218,6 +219,7 @@ private:
 	NameSet										_ignoreExports;
 	const char*									_parentUmbrella;
 	ImportAtom<A>*								_importAtom;
+	const void*									_codeSignatureDR;
 	bool										_noRexports;
 	bool										_hasWeakExports;
 	bool										_deadStrippable;
@@ -240,7 +242,7 @@ template <> const char* File<arm>::objCInfoSectionName() { return "__objc_imagei
 template <typename A> const char* File<A>::objCInfoSectionName() { return "__image_info"; }
 
 template <typename A>
-File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, time_t mTime, uint32_t ord,
+File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, time_t mTime, ld::File::Ordinal ord,
 				bool linkingFlatNamespace, bool linkingMainExecutable, bool hoistImplicitPublicDylibs,
 				ld::MacVersionMin macMin, ld::IOSVersionMin iOSMin, bool addVers,
 				bool logAllFiles, const char* targetInstallPath, bool indirectDylib)
@@ -250,7 +252,8 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 	_objcContraint(ld::File::objcConstraintNone),
 	_importProxySection("__TEXT", "__import", ld::Section::typeImportProxies, true),
 	_flatDummySection("__LINKEDIT", "__flat_dummy", ld::Section::typeLinkEdit, true),
-	_parentUmbrella(NULL), _importAtom(NULL), _noRexports(false), _hasWeakExports(false), 
+	_parentUmbrella(NULL), _importAtom(NULL), _codeSignatureDR(NULL), 
+	_noRexports(false), _hasWeakExports(false), 
 	_deadStrippable(false), _hasPublicInstallName(false), 
 	 _providedAtom(false), _explictReExportFound(false)
 {
@@ -281,6 +284,7 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 	// pass 1: get pointers, and see if this dylib uses compressed LINKEDIT format
 	const macho_dysymtab_command<P>* dynamicInfo = NULL;
 	const macho_dyld_info_command<P>* dyldInfo = NULL;
+	const macho_linkedit_data_command<P>* codeSignature = NULL;
 	const macho_nlist<P>* symbolTable = NULL;
 	const char*	strings = NULL;
 	bool compressedLinkEdit = false;
@@ -294,6 +298,8 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 				symtab = (macho_symtab_command<P>*)cmd;
 				symbolTable = (const macho_nlist<P>*)((char*)header + symtab->symoff());
 				strings = (char*)header + symtab->stroff();
+				if ( (symtab->stroff() + symtab->strsize()) > fileLength )
+					throwf("mach-o string pool extends beyond end of file in %s", pth);
 				break;
 			case LC_DYSYMTAB:
 				dynamicInfo = (macho_dysymtab_command<P>*)cmd;
@@ -332,6 +338,9 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 			case LC_VERSION_MIN_IPHONEOS:
 				if ( _addVersionLoadCommand && !indirectDylib && (_macVersionMin != ld::macVersionUnset) )
 					warning("building for MacOSX, but linking against dylib built for iOS: %s", pth);
+				break;
+			case LC_CODE_SIGNATURE:
+				codeSignature = (macho_linkedit_data_command<P>* )cmd;
 				break;
 			case macho_segment_command<P>::CMD:
 				// check for Objective-C info
@@ -460,6 +469,25 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 		_importAtom = new ImportAtom<A>(*this, importNames);
 	}
 	
+	// if the dylib is code signed, look for its Designated Requirement
+	if ( codeSignature != NULL ) {
+		const Security::BlobCore* overallSignature = (Security::BlobCore*)((char*)header + codeSignature->dataoff());
+		typedef Security::SuperBlob<Security::kSecCodeMagicEmbeddedSignature> EmbeddedSignatureBlob;
+		typedef Security::SuperBlob<Security::kSecCodeMagicRequirementSet> InternalRequirementsBlob;
+		const EmbeddedSignatureBlob* signature = EmbeddedSignatureBlob::specific(overallSignature);
+		if ( signature->validateBlob(codeSignature->datasize()) ) {
+			const InternalRequirementsBlob* ireq = signature->find<InternalRequirementsBlob>(Security::cdRequirementsSlot);
+			if ( (ireq != NULL) && ireq->validateBlob() ) {
+				const Security::BlobCore* dr = ireq->find(Security::kSecDesignatedRequirementType);
+				if ( (dr != NULL) && dr->validateBlob(Security::kSecCodeMagicRequirement) ) {
+					// <rdar://problem/10968461> make copy because mapped file is about to be unmapped
+					_codeSignatureDR = ::malloc(dr->length());
+					::memcpy((void*)_codeSignatureDR, dr, dr->length());
+				}
+			}
+		}
+	}
+	
 	// build hash table
 	if ( dyldInfo != NULL ) 
 		buildExportHashTableFromExportInfo(dyldInfo, fileContent);
@@ -575,6 +603,10 @@ void File<A>::addSymbol(const char* name, bool weakDef, bool tlv, pint_t address
 					}
 					else if ( strncmp(symAction, "add$", 4) == 0 ) {
 						this->addSymbol(symName, weakDef, false, 0);
+						return;
+					}
+					else if ( strncmp(symAction, "install_name$", 13) == 0 ) {
+						_dylibInstallPath = symName;
 						return;
 					}
 					else {
@@ -838,8 +870,8 @@ public:
 	static bool										validFile(const uint8_t* fileContent, bool executableOrDyliborBundle);
 	static ld::dylib::File*							parse(const uint8_t* fileContent, uint64_t fileLength, 
 															const char* path, time_t mTime, 
-															uint32_t ordinal, const Options& opts, bool indirectDylib) {
-															 return new File<A>(fileContent, fileLength, path, mTime,
+															ld::File::Ordinal ordinal, const Options& opts, bool indirectDylib) {
+															return new File<A>(fileContent, fileLength, path, mTime,
 																			ordinal, opts.flatNamespace(), 
 																			opts.linkingMainExecutable(),
 																			opts.implicitlyLinkIndirectPublicDylibs(), 
@@ -942,22 +974,28 @@ bool Parser<arm>::validFile(const uint8_t* fileContent, bool executableOrDylibor
 // main function used by linker to instantiate ld::Files
 //
 ld::dylib::File* parse(const uint8_t* fileContent, uint64_t fileLength, 
-							const char* path, time_t modTime, const Options& opts, uint32_t ordinal, 
+							const char* path, time_t modTime, const Options& opts, ld::File::Ordinal ordinal, 
 							bool bundleLoader, bool indirectDylib)
 {
 	switch ( opts.architecture() ) {
+#if SUPPORT_ARCH_x86_64
 		case CPU_TYPE_X86_64:
 			if ( Parser<x86_64>::validFile(fileContent, bundleLoader) )
 				return Parser<x86_64>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
+#endif
+#if SUPPORT_ARCH_i386
 		case CPU_TYPE_I386:
 			if ( Parser<x86>::validFile(fileContent, bundleLoader) )
 				return Parser<x86>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
+#endif
+#if SUPPORT_ARCH_arm_any
 		case CPU_TYPE_ARM:
 			if ( Parser<arm>::validFile(fileContent, bundleLoader) )
 				return Parser<arm>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
+#endif
 	}
 	return NULL;
 }

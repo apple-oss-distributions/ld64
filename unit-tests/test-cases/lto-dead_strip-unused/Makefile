@@ -23,6 +23,7 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
+SHELL = bash # use bash shell so we can redirect just stderr
 
 #
 # <rdar://problem/7438246> LTO with 'dead code strip' can't ignore unused functions with undefined references
@@ -36,6 +37,8 @@ all:
 	${CC} ${CCFLAGS} -flto main.c -c -o main.o 
 	${CC} ${CCFLAGS} main.o bar.o -o main
 	${CC} ${CCFLAGS} main.o bar.o -o main -dead_strip 
+	${CC} ${CCFLAGS} main.o bar.o -dynamiclib -o libmain.dylib -Wl,-exported_symbol,_main
+	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} main.o bar.o -dynamiclib -o libmain.dylib -dead_strip 2>/dev/null
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:

@@ -31,13 +31,13 @@
 #include <mach-o/stab.h>
 #include <mach-o/reloc.h>
 #include <mach-o/x86_64/reloc.h>
-#include <mach-o/arm/reloc.h>
 #include <mach-o/compact_unwind_encoding.h>
 #include <mach/machine.h>
 #include <stddef.h>
 
 #include "FileAbstraction.hpp"
 
+#include "configure.h"
 
 // stuff that will eventually go away once newer cctools headers are widespread
 #ifndef LC_LOAD_UPWARD_DYLIB
@@ -54,9 +54,6 @@
 	#define CPU_SUBTYPE_ARM_V7			((cpu_subtype_t) 9)
 #endif
 
-#ifndef ARM_THUMB_32BIT_BRANCH
-	#define ARM_THUMB_32BIT_BRANCH	7 
-#endif
 #ifndef N_ARM_THUMB_DEF
 	#define N_ARM_THUMB_DEF	0x0008 
 #endif
@@ -206,9 +203,18 @@
 	#define	LC_DYLD_ENVIRONMENT 	0x27
 #endif
 
-// hack until newer <mach-o/arm/reloc.h> everywhere
-#define ARM_RELOC_HALF 8
-#define ARM_RELOC_HALF_SECTDIFF 9
+#ifndef LC_DATA_IN_CODE
+	#define LC_DATA_IN_CODE 0x29 /* table of non-instructions in __text */
+	struct data_in_code_entry {
+		uint32_t	offset;
+		uint16_t	length;
+		uint16_t	kind;
+	};
+#endif
+
+#ifndef LC_DYLIB_CODE_SIGN_DRS
+	#define LC_DYLIB_CODE_SIGN_DRS 0x2B
+#endif
 
 #ifndef CPU_SUBTYPE_ARM_V7F
   #define CPU_SUBTYPE_ARM_V7F    ((cpu_subtype_t) 10)
@@ -217,23 +223,76 @@
   #define CPU_SUBTYPE_ARM_V7K    ((cpu_subtype_t) 12)
 #endif
 
-struct ARMSubType {
-	const char*			subTypeName;
+
+#ifndef LC_SOURCE_VERSION
+	#define LC_SOURCE_VERSION 0x2A
+	struct source_version_command {
+		uint32_t  cmd;	/* LC_SOURCE_VERSION */
+		uint32_t  cmdsize;	/* 16 */
+		uint64_t  version;	/* A.B.C.D.E packed as a24.b10.c10.d10.e10 */
+	};
+#endif
+
+#ifndef LC_MAIN
+	#define LC_MAIN (0x28|LC_REQ_DYLD) /* replacement for LC_UNIXTHREAD */
+	struct entry_point_command {
+		uint32_t  cmd;	/* LC_MAIN only used in MH_EXECUTE filetypes */
+		uint32_t  cmdsize;	/* 24 */
+		uint64_t  entryoff;	/* file (__TEXT) offset of main() */
+		uint64_t  stacksize;/* if not zero, initial stack size */
+	};
+#endif
+
+#ifndef LC_DYLIB_CODE_SIGN_DRS
+	#define LC_DYLIB_CODE_SIGN_DRS 0x2B 
+#endif	
+
+
+struct ArchInfo {
+	const char*			archName;
+	cpu_type_t			cpuType;
+	cpu_subtype_t		cpuSubType;
 	const char*			llvmTriplePrefix;
-	cpu_subtype_t		subType;
+	const char*			llvmTriplePrefixAlt;
+	bool				isSubType;
 	bool				supportsThumb2;
 };
 
-static const ARMSubType ARMSubTypes[] = {
-	{ "armv4t","armv4t-",   CPU_SUBTYPE_ARM_V4T,   false },
-	{ "armv5", "armv5e-",   CPU_SUBTYPE_ARM_V5TEJ, false },
-	{ "armv6", "armv6-",    CPU_SUBTYPE_ARM_V6,    false },
-	{ "armv7", "thumbv7-",  CPU_SUBTYPE_ARM_V7,    true },
-	{ "armv7f", "thumbv7f-", CPU_SUBTYPE_ARM_V7F,   true },
-	{ "armv7k", "thumbv7k-", CPU_SUBTYPE_ARM_V7K,   true },
-	{ 0, NULL, false }
+static const ArchInfo archInfoArray[] = {
+#if SUPPORT_ARCH_x86_64
+	{ "x86_64", CPU_TYPE_X86_64, CPU_SUBTYPE_X86_64_ALL, "x86_64-",  "", false, false },
+#endif
+#if SUPPORT_ARCH_i386
+	{ "i386",   CPU_TYPE_I386,   CPU_SUBTYPE_I386_ALL,   "i386-",    "", false, false },
+#endif
+#if SUPPORT_ARCH_armv4t
+	{ "armv4t", CPU_TYPE_ARM,    CPU_SUBTYPE_ARM_V4T,    "armv4t-",  "", true,  false },
+	#define SUPPORT_ARCH_arm_any 1
+#endif
+#if SUPPORT_ARCH_armv5
+	{ "armv5", CPU_TYPE_ARM,     CPU_SUBTYPE_ARM_V5TEJ,  "armv5e-",  "", true,  false },
+	#define SUPPORT_ARCH_arm_any 1
+#endif
+#if SUPPORT_ARCH_armv6
+	{ "armv6", CPU_TYPE_ARM,     CPU_SUBTYPE_ARM_V6,     "armv6-",   "", true,  false },
+	#define SUPPORT_ARCH_arm_any 1
+#endif
+#if SUPPORT_ARCH_armv7
+	{ "armv7", CPU_TYPE_ARM,     CPU_SUBTYPE_ARM_V7,     "thumbv7-", "armv7-", true,  true },
+	#define SUPPORT_ARCH_arm_any 1
+#endif
+	{ NULL, 0, 0, NULL, NULL, false, false }
 };
 
+
+// weird, but this include must wait until after SUPPORT_ARCH_arm_any is set up
+#if SUPPORT_ARCH_arm_any
+#include <mach-o/arm/reloc.h>
+#endif
+
+// hack until newer <mach-o/arm/reloc.h> everywhere
+#define ARM_RELOC_HALF 8
+#define ARM_RELOC_HALF_SECTDIFF 9
 
 
 
@@ -1278,7 +1337,7 @@ public:
 	uint32_t		version() const							INLINE { return fields.version; }
 	void			set_version(uint32_t value)				INLINE { E::set32(fields.version, value); }
 
-#ifdef LC_SOURCE_VERSION
+#ifdef DICE_KIND_DATA
 	uint32_t		sdk() const								INLINE { return fields.sdk; }
 	void			set_sdk(uint32_t value)					INLINE { E::set32(fields.sdk, value); }
 #else
@@ -1326,6 +1385,70 @@ private:
 	uint32_t	_compactUnwindInfo;
 	pint_t		_personality;
 	pint_t		_lsda;
+};
+
+
+//
+// mach-o source version load command
+//
+template <typename P>
+class macho_source_version_command {
+public:
+	uint32_t		cmd() const								INLINE { return E::get32(fields.cmd); }
+	void			set_cmd(uint32_t value)					INLINE { E::set32(fields.cmd, value); }
+
+	uint32_t		cmdsize() const							INLINE { return E::get32(fields.cmdsize); }
+	void			set_cmdsize(uint32_t value)				INLINE { E::set32(fields.cmdsize, value); }
+
+	uint64_t		version() const							INLINE { return fields.version; }
+	void			set_version(uint64_t value)				INLINE { E::set64(fields.version, value); }
+
+	typedef typename P::E		E;
+private:
+	source_version_command	fields;
+};
+
+
+//
+// mach-o source version load command
+//
+template <typename P>
+class macho_entry_point_command {
+public:
+	uint32_t		cmd() const								INLINE { return E::get32(fields.cmd); }
+	void			set_cmd(uint32_t value)					INLINE { E::set32(fields.cmd, value); }
+
+	uint32_t		cmdsize() const							INLINE { return E::get32(fields.cmdsize); }
+	void			set_cmdsize(uint32_t value)				INLINE { E::set32(fields.cmdsize, value); }
+
+	uint64_t		entryoff() const						INLINE { return fields.entryoff; }
+	void			set_entryoff(uint64_t value)			INLINE { E::set64(fields.entryoff, value); }
+
+	uint64_t		stacksize() const						INLINE { return fields.stacksize; }
+	void			set_stacksize(uint64_t value)			INLINE { E::set64(fields.stacksize, value); }
+
+	typedef typename P::E		E;
+private:
+	entry_point_command	fields;
+};
+
+
+
+template <typename P>
+class macho_data_in_code_entry {
+public:
+	uint32_t		offset() const								INLINE { return E::get32(fields.offset); }
+	void			set_offset(uint32_t value)					INLINE { E::set32(fields.offset, value); }
+
+	uint16_t		length() const								INLINE { return E::get16(fields.length); }
+	void			set_length(uint16_t value)					INLINE { E::set16((uint16_t&)fields.length, value); }
+
+	uint16_t		kind() const								INLINE { return E::get16(fields.kind); }
+	void			set_kind(uint16_t value)					INLINE { E::set16((uint16_t&)fields.kind, value); }
+
+	typedef typename P::E		E;
+private:
+	data_in_code_entry	fields;
 };
 
 

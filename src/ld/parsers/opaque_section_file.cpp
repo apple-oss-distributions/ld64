@@ -61,9 +61,9 @@ class File : public ld::File
 {
 public:
 								File(const char* segmentName, const char* sectionName, const char* pth, 
-									const uint8_t fileContent[], uint64_t fileLength, uint32_t ord, 
+									const uint8_t fileContent[], uint64_t fileLength, 
 									const char* symbolName="sect_create")
-									: ld::File(pth, 0, ord),
+									: ld::File(pth, 0, ld::File::Ordinal::NullOrdinal(), Other),
 									  _atom(*this, symbolName, fileContent, fileLength), 
 									  _section(segmentName, sectionName, ld::Section::typeUnclassified) { }
 	virtual						~File() { }
@@ -90,10 +90,10 @@ Atom::Atom(File& f, const char* n,  const uint8_t* content, uint64_t sz)
 // main function used by linker for -sectcreate
 //
 ld::File* parse(const char* segmentName, const char* sectionName, const char* path, 
-									const uint8_t fileContent[], uint64_t fileLength, uint32_t ordinal, 
+				const uint8_t fileContent[], uint64_t fileLength, 
 									const char* symbolName)
 {
-	return new File(segmentName, sectionName, path, fileContent, fileLength, ordinal, symbolName);
+	return new File(segmentName, sectionName, path, fileContent, fileLength, symbolName);
 }
 
 
