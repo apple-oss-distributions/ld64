@@ -65,7 +65,7 @@ LD_NEW_LINKEDIT = -macosx_version_min 10.6
 CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} ${SDKExtra}
 CXXFLAGS = -Wall -stdlib=libc++ 
 
-IOS_SDK = $(shell xcodebuild -sdk iphoneos6.0.internal -version Path)
+IOS_SDK = $(shell xcodebuild -sdk iphoneos7.0.internal -version Path)
 
 ifeq ($(ARCH),armv6)
   LDFLAGS := -syslibroot $(IOS_SDK)

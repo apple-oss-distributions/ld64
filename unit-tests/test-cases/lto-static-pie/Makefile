@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2010-2012 Apple Inc. All rights reserved.
+# Copyright (c) 2012 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,24 +23,21 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-
-SHELL = bash # use bash shell so we can redirect just stderr
-
 #
-# Check that dylibs can export TLVs
+# verify -preload -pie produces relocations
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} foo.c -dynamiclib -o libfoo.dylib
-	# check trying to access TLV _foo as regular variable is an error
-	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} main.c -DUSE_FOO_WRONG libfoo.dylib -o main 2>/dev/null
-	# check trying to access regular variable _bar as TLV is an error
-	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} main.c -DUSE_BAR_WRONG libfoo.dylib -o main 2>/dev/null
-	# check can link with TLV _foo in dylib
-	${CC} ${CCFLAGS} main.c libfoo.dylib -o main
-	${PASS_IFF_GOOD_MACHO} main
+	${CC} ${CCFLAGS} -flto a.c -c -o a.o
+	${CC} ${CCFLAGS} -flto b.c -c -o b.o
+	${CC} ${CCFLAGS} -flto main.c -c -o main.o
+	${CC} ${CCFLAGS} main.o a.o b.o -static -Wl,-pie -o main-static-pie \
+		-e _entry -nostdlib  
+	${PASS_IFF_GOOD_MACHO} main-static-pie
 
+
+	
 clean:
-	rm -rf libfoo.dylib main
+	rm  a.o b.o main.o main-static-pie

@@ -1016,6 +1016,7 @@
 		F933D91C09291AC90083EAC8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
@@ -1057,8 +1058,12 @@
 				INSTALL_PATH = /usr/bin;
 				LINKER_DISPLAYS_MANGLED_NAMES = NO;
 				MACOSX_DEPLOYMENT_TARGET = "";
-				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CPLUSPLUSFLAGS)",
+				);
 				OTHER_LDFLAGS = (
+					"-stdlib=libc++",
 					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
@@ -1073,13 +1078,14 @@
 		F933D91D09291AC90083EAC8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_DYNAMIC_NO_PIC = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_OPTIMIZATION_LEVEL = 3;
+				GCC_OPTIMIZATION_LEVEL = s;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(GCC_PREPROCESSOR_DEFINITIONS_QUOTED_FOR_TARGET_1)",
 					NDEBUG,
@@ -1116,8 +1122,12 @@
 					"$(DEVELOPER_DIR)/usr/include",
 				);
 				INSTALL_PATH = /usr/bin;
-				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CPLUSPLUSFLAGS)",
+				);
 				OTHER_LDFLAGS = (
+					"-stdlib=libc++",
 					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
@@ -1135,6 +1145,7 @@
 		F933D92009291AC90083EAC8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1154,7 +1165,14 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
-				OTHER_LDFLAGS = "@$(DERIVED_SOURCES_DIR)/LTO_option.txt";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = (
+					"-stdlib=libc++",
+					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
+				);
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
@@ -1170,6 +1188,7 @@
 		F933D92109291AC90083EAC8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1181,7 +1200,14 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
-				OTHER_LDFLAGS = "@$(DERIVED_SOURCES_DIR)/LTO_option.txt";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = (
+					"-stdlib=libc++",
+					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
+				);
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
@@ -1255,13 +1281,14 @@
 		F9849FFA10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_DYNAMIC_NO_PIC = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
-				GCC_OPTIMIZATION_LEVEL = 3;
+				GCC_OPTIMIZATION_LEVEL = s;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(GCC_PREPROCESSOR_DEFINITIONS_QUOTED_FOR_TARGET_1)",
 					"$(GCC_PREPROCESSOR_DEFINITIONS_$(RC_RELEASE))",
@@ -1297,8 +1324,12 @@
 					"$(DEVELOPER_DIR)/usr/include",
 				);
 				INSTALL_PATH = /usr/bin;
-				OTHER_CPLUSPLUSFLAGS = "$(OTHER_CPLUSPLUSFLAGS)";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CPLUSPLUSFLAGS)",
+				);
 				OTHER_LDFLAGS = (
+					"-stdlib=libc++",
 					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
@@ -1316,6 +1347,7 @@
 		F9849FFB10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1335,6 +1367,7 @@
 		F9849FFC10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1343,7 +1376,14 @@
 				GCC_WARN_TYPECHECK_CALLS_TO_PRINTF = YES;
 				HEADER_SEARCH_PATHS = "";
 				INSTALL_PATH = /usr/bin;
-				OTHER_LDFLAGS = "-Wl,-exported_symbol,__mh_execute_header";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = (
+					"-stdlib=libc++",
+					"-Wl,-exported_symbol,__mh_execute_header",
+				);
 				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
 				STRIP_INSTALLED_PRODUCT = YES;
@@ -1354,6 +1394,7 @@
 		F9849FFD10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1366,7 +1407,14 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
-				OTHER_LDFLAGS = "@$(DERIVED_SOURCES_DIR)/LTO_option.txt";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = (
+					"-stdlib=libc++",
+					"@$(DERIVED_SOURCES_DIR)/LTO_option.txt",
+				);
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
@@ -1381,12 +1429,18 @@
 		F9849FFE10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_MODEL_TUNING = G5;
 				HEADER_SEARCH_PATHS = "";
 				INSTALL_PATH = "$(HOME)/bin";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
 			};
@@ -1396,12 +1450,17 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				INSTALL_PATH = /usr/bin;
-				OTHER_LDFLAGS = "-Wl,-exported_symbol,__mh_execute_header";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
 				STRIP_INSTALLED_PRODUCT = YES;
@@ -1490,6 +1549,7 @@
 		F9B670060DDA176100E6D0DA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1498,6 +1558,11 @@
 				GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO = NO;
 				GCC_WARN_TYPECHECK_CALLS_TO_PRINTF = YES;
 				INSTALL_PATH = "$(HOME)/bin";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
 			};
@@ -1506,6 +1571,7 @@
 		F9B670070DDA176100E6D0DA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1514,6 +1580,10 @@
 				GCC_WARN_TYPECHECK_CALLS_TO_PRINTF = YES;
 				HEADER_SEARCH_PATHS = "";
 				INSTALL_PATH = /usr/bin;
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
 				OTHER_LDFLAGS = "-Wl,-exported_symbol,__mh_execute_header";
 				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
@@ -1526,6 +1596,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_ENABLE_FIX_AND_CONTINUE = NO;
@@ -1542,6 +1613,11 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				INSTALL_PATH = /usr/local/bin;
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
 				WARNING_CFLAGS = "-Wall";
@@ -1552,12 +1628,17 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				INSTALL_PATH = /usr/bin;
-				OTHER_LDFLAGS = "-Wl,-exported_symbol,__mh_execute_header";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
 				STRIP_INSTALLED_PRODUCT = YES;
@@ -1569,12 +1650,18 @@
 		F9EA72D0097454D5008B4F1D /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_MODEL_TUNING = G5;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				INSTALL_PATH = "$(HOME)/bin";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
 			};
@@ -1583,12 +1670,18 @@
 		F9EA72D1097454D5008B4F1D /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_MODEL_TUNING = G5;
 				HEADER_SEARCH_PATHS = "";
 				INSTALL_PATH = "$(HOME)/bin";
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
+				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
 			};
@@ -1597,6 +1690,7 @@
 		F9EC77F10A2F8616002A3E39 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_DYNAMIC_NO_PIC = NO;
@@ -1612,6 +1706,7 @@
 		F9EC77F20A2F8616002A3E39 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;

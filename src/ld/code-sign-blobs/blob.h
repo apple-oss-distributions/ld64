@@ -45,6 +45,7 @@
 #include "endian.h"
 #include "memutils.h"
 #include <errno.h>
+#include <cstdio>
 
 namespace Security {
 

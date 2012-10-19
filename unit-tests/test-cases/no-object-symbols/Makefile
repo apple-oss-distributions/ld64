@@ -34,7 +34,7 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	as -arch ${ARCH} -n empty.s -o empty.o
+	${CC} -arch ${ARCH} -c -Wa,-n empty.s -o empty.o
 	${LD} -r empty.o -x -o empty2.o
 	otool -lv empty2.o | egrep 'vmsize 0x0[0]+$$' | ${FAIL_IF_EMPTY}
 	otool -lv empty2.o | grep 'filesize 0' | ${FAIL_IF_EMPTY}

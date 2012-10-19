@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2010-2012 Apple Inc. All rights reserved.
+# Copyright (c) 2012 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,24 +23,18 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-
-SHELL = bash # use bash shell so we can redirect just stderr
-
 #
-# Check that dylibs can export TLVs
+# <rdar://problem/12409381> Assertion failure when linking CoreFoundation with LTO
+#
+# Command line aliases need to have section type reset after lto pass.
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} foo.c -dynamiclib -o libfoo.dylib
-	# check trying to access TLV _foo as regular variable is an error
-	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} main.c -DUSE_FOO_WRONG libfoo.dylib -o main 2>/dev/null
-	# check trying to access regular variable _bar as TLV is an error
-	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} main.c -DUSE_BAR_WRONG libfoo.dylib -o main 2>/dev/null
-	# check can link with TLV _foo in dylib
-	${CC} ${CCFLAGS} main.c libfoo.dylib -o main
-	${PASS_IFF_GOOD_MACHO} main
-
+	${CC} ${CCFLAGS} -flto foo.c -c -o foo.o
+	${CC} ${CCFLAGS} foo.o -dynamiclib -o libfoo.dylib -Wl,-alias,_foo,_bar
+	${PASS_IFF_GOOD_MACHO} libfoo.dylib
+	
 clean:
-	rm -rf libfoo.dylib main
+	rm -rf foo.o libfoo.dylib

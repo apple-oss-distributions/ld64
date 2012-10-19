@@ -34,13 +34,15 @@ all:
 	${CC} ${CCFLAGS} -dynamiclib bar.c -o `pwd`/libbar.dylib
 	${FAIL_IF_BAD_MACHO} libbar.dylib
 
-	# build library the re-exports _bar from base library
+	# build library that re-exports _bar from base library
 	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo.dylib libbar.dylib -exported_symbols_list foo.exp
 	${FAIL_IF_BAD_MACHO} libfoo.dylib
 	${DYLDINFO} -export libfoo.dylib | grep _bar | grep 're-export' | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -export libfoo.dylib | grep _bar_weak | grep 're-export' | grep 'weak_def' |${FAIL_IF_EMPTY}
 	# link against dylib and verify _bar is marked as coming from libfoo
 	${CC} ${CCFLAGS} main1.c libfoo.dylib -o main1
 	${DYLDINFO}  -bind -lazy_bind main1 | grep _bar | grep libfoo | ${FAIL_IF_EMPTY}
+	${DYLDINFO}  -bind -lazy_bind main1 | grep _bar_weak | grep libfoo | ${FAIL_IF_EMPTY}
 
 	# build library the re-exports _bar from base library as _mybar
 	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo2.dylib libbar.dylib -Wl,-alias,_bar,_mybar -exported_symbols_list foo2.exp

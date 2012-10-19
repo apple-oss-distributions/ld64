@@ -404,7 +404,7 @@ void Options::loadSymbolOrderFile(const char* fileOfExports, NameToOrder& orderM
 
 	::close(fd);
 
-	// parse into symbols and add to hash_set
+	// parse into symbols and add to unordered_set
 	unsigned int count = 0;
 	char * const end = &p[stat_buf.st_size];
 	enum { lineStart, inSymbol, inComment } state = lineStart;
@@ -1066,7 +1066,7 @@ void Options::loadExportFile(const char* fileOfExports, const char* option, SetW
 
 	::close(fd);
 
-	// parse into symbols and add to hash_set
+	// parse into symbols and add to unordered_set
 	char * const end = &p[stat_buf.st_size];
 	enum { lineStart, inSymbol, inComment } state = lineStart;
 	char* symbolStart = NULL;
@@ -3231,6 +3231,28 @@ void Options::reconfigureDefaults()
 			break;
 	}
 	
+	// default to adding functions start for dynamic code, static code must opt-in
+	switch ( fOutputKind ) {
+		case Options::kPreload:
+		case Options::kStaticExecutable:
+		case Options::kKextBundle:
+			if ( fDataInCodeInfoLoadCommandForcedOn )
+				fDataInCodeInfoLoadCommand = true;
+			if ( fFunctionStartsForcedOn )
+				fFunctionStartsLoadCommand = true;
+			break;
+		case Options::kObjectFile:
+		case Options::kDynamicExecutable:
+		case Options::kDyld:
+		case Options::kDynamicLibrary:
+		case Options::kDynamicBundle:
+			if ( !fDataInCodeInfoLoadCommandForcedOff )
+				fDataInCodeInfoLoadCommand = true;
+			if ( !fFunctionStartsForcedOff )
+				fFunctionStartsLoadCommand = true;
+			break;
+	}
+		
 	// adjust kext type based on architecture
 	if ( fOutputKind == kKextBundle ) {
 		switch ( fArchitecture ) {
@@ -3641,28 +3663,6 @@ void Options::reconfigureDefaults()
 			break;
 	}
 	
-	// default to adding functions start for dynamic code, static code must opt-in
-	switch ( fOutputKind ) {
-		case Options::kPreload:
-		case Options::kStaticExecutable:
-		case Options::kKextBundle:
-			if ( fDataInCodeInfoLoadCommandForcedOn )
-				fDataInCodeInfoLoadCommand = true;
-			if ( fFunctionStartsForcedOn )
-				fFunctionStartsLoadCommand = true;
-			break;
-		case Options::kObjectFile:
-		case Options::kDynamicExecutable:
-		case Options::kDyld:
-		case Options::kDynamicLibrary:
-		case Options::kDynamicBundle:
-			if ( !fDataInCodeInfoLoadCommandForcedOff )
-				fDataInCodeInfoLoadCommand = true;
-			if ( !fFunctionStartsForcedOff )
-				fFunctionStartsLoadCommand = true;
-			break;
-	}
-		
 	// support re-export of individual symbols in MacOSX 10.7 and iOS 4.2
 	if ( (fOutputKind == kDynamicLibrary) && minOS(ld::mac10_7, ld::iOS_4_2) )
 		fCanReExportSymbols = true;

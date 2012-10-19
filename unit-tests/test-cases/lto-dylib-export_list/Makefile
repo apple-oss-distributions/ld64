@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2010-2012 Apple Inc. All rights reserved.
+# Copyright (c) 2012 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -23,24 +23,21 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-
-SHELL = bash # use bash shell so we can redirect just stderr
-
 #
-# Check that dylibs can export TLVs
+# <rdar://problem/12386559> clang built with LTO has verification errors
+#
+# LTO on coalesced away symbols can cause weak symbols to be exported
+# in spite of -exported_symbols_list.
 #
 
 run: all
 
 all:
-	${CC} ${CCFLAGS} foo.c -dynamiclib -o libfoo.dylib
-	# check trying to access TLV _foo as regular variable is an error
-	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} main.c -DUSE_FOO_WRONG libfoo.dylib -o main 2>/dev/null
-	# check trying to access regular variable _bar as TLV is an error
-	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} main.c -DUSE_BAR_WRONG libfoo.dylib -o main 2>/dev/null
-	# check can link with TLV _foo in dylib
-	${CC} ${CCFLAGS} main.c libfoo.dylib -o main
-	${PASS_IFF_GOOD_MACHO} main
-
+	${CXX} ${CXXFLAGS} -flto foo.cxx -c -o foo.o
+	${CXX} ${CXXFLAGS} -flto bar.cxx -c -o bar.o
+	${CC} ${CCFLAGS} foo.o bar.o -dynamiclib -o libfoo.dylib -exported_symbols_list foo.exp
+	nm -m libfoo.dylib | grep "weak external" | ${FAIL_IF_STDIN}
+	${PASS_IFF_GOOD_MACHO} libfoo.dylib
+	
 clean:
-	rm -rf libfoo.dylib main
+	rm -rf foo.o bar.o libfoo.dylib

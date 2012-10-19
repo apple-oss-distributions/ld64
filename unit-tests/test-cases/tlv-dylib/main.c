@@ -22,13 +22,22 @@
  * @APPLE_LICENSE_HEADER_END@
  */
 
-#if USE_FOO
+#if USE_FOO_WRONG
 	extern int foo;
+#elif USE_BAR_WRONG
+	extern __thread int bar;
+#else
+  extern __thread int foo;
 #endif
+
 
 int main()
 {
-#if USE_FOO
+#if USE_FOO_WRONG
+	foo = 1;
+#elif USE_BAR_WRONG
+	bar = 1;
+#else
 	foo = 1;
 #endif
 	return 0;
