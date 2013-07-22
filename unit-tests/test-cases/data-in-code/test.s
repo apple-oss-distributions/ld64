@@ -4,21 +4,23 @@
 _foo:
 	nop
 	nop
-l$start$data$1:
+ .data_region
 	nop
 	nop
 	nop
-l$start$jt8$2:
+ .data_region jt8
 	nop
 	nop
-l$start$jt16$3: 
+.data_region jt16
 	nop
 	nop
-l$start$code$n4:
+.data_region jt32
 	nop
 	nop
-	
-	
+.end_data_region
+	nop
+	nop
+
 	
 	.subsections_via_symbols
 	

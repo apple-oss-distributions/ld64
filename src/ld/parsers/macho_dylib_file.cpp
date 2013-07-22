@@ -1,3 +1,4 @@
+
 /* -*- mode: C++; c-basic-offset: 4; tab-width: 4 -*-
  *
  * Copyright (c) 2005-2011 Apple Inc. All rights reserved.
@@ -142,7 +143,7 @@ public:
 											File(const uint8_t* fileContent, uint64_t fileLength, const char* path,   
 													time_t mTime, ld::File::Ordinal ordinal, bool linkingFlatNamespace, 
 													bool linkingMainExecutable, bool hoistImplicitPublicDylibs, 
-													ld::MacVersionMin macMin, ld::IOSVersionMin iPhoneMin, bool addVers, 
+													ld::MacVersionMin macMin, ld::IOSVersionMin iPhoneMin, bool allowSimToMacOSX, bool addVers, 
 													bool logAllFiles, const char* installPath, bool indirectDylib);
 	virtual									~File() {}
 
@@ -162,6 +163,7 @@ public:
 	virtual bool							hasWeakDefinition(const char* name) const;
 	virtual bool							allSymbolsAreWeakImported() const;
 	virtual const void*						codeSignatureDR() const		{ return _codeSignatureDR; }
+	virtual bool							installPathVersionSpecific() const { return _installPathOverride; }
 
 
 protected:
@@ -194,6 +196,7 @@ private:
 
 	bool										containsOrReExports(const char* name, bool* weakDef, bool* tlv, pint_t* defAddress) const;
 	bool										isPublicLocation(const char* pth);
+	bool										wrongOS() { return _wrongOS; }
 	void										addSymbol(const char* name, bool weak, bool tlv, pint_t address);
 	void										addDyldFastStub();
 	void										buildExportHashTableFromExportInfo(const macho_dyld_info_command<P>* dyldInfo,
@@ -206,6 +209,7 @@ private:
 	
 	const ld::MacVersionMin						_macVersionMin;
 	const ld::IOSVersionMin						_iOSVersionMin;
+	const bool									_allowSimToMacOSXLinking;
 	const bool									_addVersionLoadCommand;
 	bool										_linkingFlat;
 	bool										_implicitlyLinkPublicDylibs;
@@ -225,7 +229,9 @@ private:
 	bool										_hasPublicInstallName;
 	mutable bool								_providedAtom;
 	bool										_explictReExportFound;
-
+	bool										_wrongOS;
+	bool										_installPathOverride;
+	
 	static bool									_s_logHashtable;
 };
 
@@ -243,10 +249,10 @@ template <typename A> const char* File<A>::objCInfoSectionName() { return "__ima
 template <typename A>
 File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, time_t mTime, ld::File::Ordinal ord,
 				bool linkingFlatNamespace, bool linkingMainExecutable, bool hoistImplicitPublicDylibs,
-				ld::MacVersionMin macMin, ld::IOSVersionMin iOSMin, bool addVers,
+				ld::MacVersionMin macMin, ld::IOSVersionMin iOSMin, bool allowSimToMacOSX, bool addVers,
 				bool logAllFiles, const char* targetInstallPath, bool indirectDylib)
 	: ld::dylib::File(strdup(pth), mTime, ord), 
-	_macVersionMin(macMin), _iOSVersionMin(iOSMin), _addVersionLoadCommand(addVers), 
+	_macVersionMin(macMin), _iOSVersionMin(iOSMin), _allowSimToMacOSXLinking(allowSimToMacOSX), _addVersionLoadCommand(addVers), 
 	_linkingFlat(linkingFlatNamespace), _implicitlyLinkPublicDylibs(hoistImplicitPublicDylibs),
 	_objcContraint(ld::File::objcConstraintNone),
 	_importProxySection("__TEXT", "__import", ld::Section::typeImportProxies, true),
@@ -254,7 +260,7 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 	_parentUmbrella(NULL), _importAtom(NULL), _codeSignatureDR(NULL), 
 	_noRexports(false), _hasWeakExports(false), 
 	_deadStrippable(false), _hasPublicInstallName(false), 
-	 _providedAtom(false), _explictReExportFound(false)
+	 _providedAtom(false), _explictReExportFound(false), _wrongOS(false), _installPathOverride(false)
 {
 	const macho_header<P>* header = (const macho_header<P>*)fileContent;
 	const uint32_t cmd_count = header->ncmds();
@@ -331,12 +337,18 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 				_allowableClients.push_back(strdup(((macho_sub_client_command<P>*)cmd)->client()));
 				break;
 			case LC_VERSION_MIN_MACOSX:
-				if ( _addVersionLoadCommand && !indirectDylib && (_iOSVersionMin != ld::iOSVersionUnset) )
-					warning("building for iOS, but linking against dylib built for MacOSX: %s", pth);
+				if ( (_iOSVersionMin != ld::iOSVersionUnset) && !_allowSimToMacOSXLinking ) { 
+					_wrongOS = true;
+					if ( _addVersionLoadCommand && !indirectDylib )
+						throw "building for iOS Simulator, but linking against dylib built for MacOSX";
+				}
 				break;
 			case LC_VERSION_MIN_IPHONEOS:
-				if ( _addVersionLoadCommand && !indirectDylib && (_macVersionMin != ld::macVersionUnset) )
-					warning("building for MacOSX, but linking against dylib built for iOS: %s", pth);
+				if ( _macVersionMin != ld::macVersionUnset ) {
+					_wrongOS = true;
+					if ( _addVersionLoadCommand && !indirectDylib )
+						throw "building for MacOSX, but linking against dylib built for iOS Simulator";
+				}
 				break;
 			case LC_CODE_SIGNATURE:
 				codeSignature = (macho_linkedit_data_command<P>* )cmd;
@@ -355,6 +367,7 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 							//	};
 							// #define OBJC_IMAGE_SUPPORTS_GC   2
 							// #define OBJC_IMAGE_GC_ONLY       4
+						        // #define OBJC_IMAGE_IS_SIMULATED  32
 							//
 							const uint32_t* contents = (uint32_t*)(&fileContent[sect->offset()]);
 							if ( (sect->size() >= 8) && (contents[0] == 0) ) {
@@ -363,6 +376,8 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* pth, 
 									_objcContraint = ld::File::objcConstraintGC;
 								else if ( (flags & 2) == 2 )
 									_objcContraint = ld::File::objcConstraintRetainReleaseOrGC;
+								else if ( (flags & 32) == 32 )
+									_objcContraint = ld::File::objcConstraintRetainReleaseForSimulator;
 								else
 									_objcContraint = ld::File::objcConstraintRetainRelease;
 							}
@@ -605,6 +620,7 @@ void File<A>::addSymbol(const char* name, bool weakDef, bool tlv, pint_t address
 					}
 					else if ( strncmp(symAction, "install_name$", 13) == 0 ) {
 						_dylibInstallPath = symName;
+						_installPathOverride = true;
 						return;
 					}
 					else {
@@ -794,7 +810,7 @@ void File<A>::processIndirectLibraries(ld::dylib::File::DylibHandler* handler, b
 				if ( log ) fprintf(stderr, "processIndirectLibraries() parent=%s, child=%s\n", this->installPath(), it->path);
 				// a LC_REEXPORT_DYLIB, LC_SUB_UMBRELLA or LC_SUB_LIBRARY says we re-export this child
 				it->dylib = (File<A>*)handler->findDylib(it->path, this->path());
-				if ( it->dylib->hasPublicInstallName() ) {
+				if ( it->dylib->hasPublicInstallName() && !it->dylib->wrongOS() ) {
 					// promote this child to be automatically added as a direct dependent if this already is
 					if ( (this->explicitlyLinked() || this->implicitlyLinked()) && (strcmp(it->path,it->dylib->installPath()) == 0) ) {
 						if ( log ) fprintf(stderr, "processIndirectLibraries() implicitly linking %s\n", it->dylib->installPath());
@@ -866,6 +882,7 @@ public:
 	typedef typename A::P					P;
 
 	static bool										validFile(const uint8_t* fileContent, bool executableOrDyliborBundle);
+	static const char*								fileKind(const uint8_t* fileContent);
 	static ld::dylib::File*							parse(const uint8_t* fileContent, uint64_t fileLength, 
 															const char* path, time_t mTime, 
 															ld::File::Ordinal ordinal, const Options& opts, bool indirectDylib) {
@@ -875,6 +892,7 @@ public:
 																			opts.implicitlyLinkIndirectPublicDylibs(), 
 																			opts.macosxVersionMin(), 
 																			opts.iOSVersionMin(),
+																			opts.allowSimulatorToLinkWithMacOSX(),
 																			opts.addVersionLoadCommand(),
 																			opts.logAllFiles(), 
 																			opts.installPath(),
@@ -968,6 +986,145 @@ bool Parser<arm>::validFile(const uint8_t* fileContent, bool executableOrDylibor
 
 
 
+template <>
+bool Parser<arm64>::validFile(const uint8_t* fileContent, bool executableOrDyliborBundle)
+{
+	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	if ( header->magic() != MH_MAGIC_64 )
+		return false;
+	if ( header->cputype() != CPU_TYPE_ARM64 )
+		return false;
+	switch ( header->filetype() ) {
+		case MH_DYLIB:
+		case MH_DYLIB_STUB:
+			return true;
+		case MH_BUNDLE:
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with bundle (MH_BUNDLE) only dylibs (MH_DYLIB)";
+		case MH_EXECUTE:
+			if ( executableOrDyliborBundle )
+				return true;
+			else
+				throw "can't link with a main executable";
+		default:
+			return false;
+	}
+}
+
+
+bool isDylibFile(const uint8_t* fileContent, cpu_type_t* result, cpu_subtype_t* subResult)
+{
+	if ( Parser<x86_64>::validFile(fileContent, false) ) {
+		*result = CPU_TYPE_X86_64;
+		*subResult = CPU_SUBTYPE_X86_64_ALL;
+		return true;
+	}
+	if ( Parser<x86>::validFile(fileContent, false) ) {
+		*result = CPU_TYPE_I386;
+		*subResult = CPU_SUBTYPE_X86_ALL;
+		return true;
+	}
+	if ( Parser<arm>::validFile(fileContent, false) ) {
+		*result = CPU_TYPE_ARM;
+		const macho_header<Pointer32<LittleEndian> >* header = (const macho_header<Pointer32<LittleEndian> >*)fileContent;
+		*subResult = header->cpusubtype();
+		return true;
+	}
+	if ( Parser<arm64>::validFile(fileContent, false) ) {
+		*result = CPU_TYPE_ARM64;
+		*subResult = CPU_SUBTYPE_ARM64_ALL;
+		return true;
+	}
+	if ( Parser<ppc>::validFile(fileContent, false) ) {
+		*result = CPU_TYPE_POWERPC;
+		const macho_header<Pointer32<BigEndian> >* header = (const macho_header<Pointer32<BigEndian> >*)fileContent;
+		*subResult = header->cpusubtype();
+		return true;
+	}
+	if ( Parser<ppc64>::validFile(fileContent, false) ) {
+		*result = CPU_TYPE_POWERPC64;
+		*subResult = CPU_SUBTYPE_POWERPC_ALL;
+		return true;
+	}
+	return false;
+}
+
+template <>
+const char* Parser<x86>::fileKind(const uint8_t* fileContent)
+{
+	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	if ( header->magic() != MH_MAGIC )
+		return NULL;
+	if ( header->cputype() != CPU_TYPE_I386 )
+		return NULL;
+	return "i386";
+}
+
+template <>
+const char* Parser<x86_64>::fileKind(const uint8_t* fileContent)
+{
+	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	if ( header->magic() != MH_MAGIC_64 )
+		return NULL;
+	if ( header->cputype() != CPU_TYPE_X86_64 )
+		return NULL;
+	return "x86_64";
+}
+
+template <>
+const char* Parser<arm>::fileKind(const uint8_t* fileContent)
+{
+	const macho_header<P>* header = (const macho_header<P>*)fileContent;
+	if ( header->magic() != MH_MAGIC )
+		return NULL;
+	if ( header->cputype() != CPU_TYPE_ARM )
+		return NULL;
+	for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
+		if ( (t->cpuType == CPU_TYPE_ARM) && ((cpu_subtype_t)header->cpusubtype() == t->cpuSubType) ) {
+			return t->archName;
+		}
+	}
+	return "arm???";
+}
+
+#if SUPPORT_ARCH_arm64
+template <>
+const char* Parser<arm64>::fileKind(const uint8_t* fileContent)
+{
+  const macho_header<P>* header = (const macho_header<P>*)fileContent;
+  if ( header->magic() != MH_MAGIC_64 )
+    return NULL;
+  if ( header->cputype() != CPU_TYPE_ARM64 )
+    return NULL;
+  return "arm64";
+}
+#endif
+
+//
+// used by linker is error messages to describe mismatched files
+//
+const char* archName(const uint8_t* fileContent)
+{
+	if ( Parser<x86_64>::validFile(fileContent, true) ) {
+		return Parser<x86_64>::fileKind(fileContent);
+	}
+	if ( Parser<x86>::validFile(fileContent, true) ) {
+		return Parser<x86>::fileKind(fileContent);
+	}
+	if ( Parser<arm>::validFile(fileContent, true) ) {
+		return Parser<arm>::fileKind(fileContent);
+	}
+#if SUPPORT_ARCH_arm64
+	if ( Parser<arm64>::validFile(fileContent, false) ) {
+		return Parser<arm64>::fileKind(fileContent);
+	}
+#endif
+	return NULL;
+}
+
+
 //
 // main function used by linker to instantiate ld::Files
 //
@@ -992,6 +1149,12 @@ ld::dylib::File* parse(const uint8_t* fileContent, uint64_t fileLength,
 		case CPU_TYPE_ARM:
 			if ( Parser<arm>::validFile(fileContent, bundleLoader) )
 				return Parser<arm>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
+			break;
+#endif
+#if SUPPORT_ARCH_arm64
+		case CPU_TYPE_ARM64:
+			if ( Parser<arm64>::validFile(fileContent, bundleLoader) )
+				return Parser<arm64>::parse(fileContent, fileLength, path, modTime, ordinal, opts, indirectDylib);
 			break;
 #endif
 	}

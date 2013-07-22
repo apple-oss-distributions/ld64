@@ -89,7 +89,7 @@ private:
 	void					fillInInternalState();
 	void					fillInHelpersInInternalState();
 	void					removeCoalescedAwayAtoms();
-  void					fillInEntryPoint();
+	void					fillInEntryPoint();
 	void					linkTimeOptimize();
 	void					convertReferencesToIndirect(const ld::Atom& atom);
 	const ld::Atom*			entryPoint(bool searchArchives);
@@ -99,6 +99,7 @@ private:
 	void					remainingUndefines(std::vector<const char*>&);
 	bool					printReferencedBy(const char* name, SymbolTable::IndirectBindingSlot slot);
 	void					tweakWeakness();
+	void					doLinkerOption(const std::vector<const char*>& linkerOption, const char* fileName);
 
 	typedef std::unordered_set<const char*, CStringHash, CStringEquals>  StringSet;
 

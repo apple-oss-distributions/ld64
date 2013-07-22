@@ -31,6 +31,7 @@
 
 #include <vector>
 #include <map>
+#include <set>
 #include <unordered_map>
 
 #include "ld.hpp"
@@ -122,7 +123,7 @@ bool Layout::Comparer::operator()(const ld::Atom* left, const ld::Atom* right)
 {
 	if ( left == right )
 		return false;
-	
+
 	// magic section$start symbol always sorts to the start of its section
 	if ( left->contentType() == ld::Atom::typeSectionStart )
 		return true;
@@ -161,6 +162,32 @@ bool Layout::Comparer::operator()(const ld::Atom* left, const ld::Atom* right)
 		return false;
 	if ( right->contentType() == ld::Atom::typeSectionEnd )
 		return true;
+
+	// aliases sort before their target
+	bool leftIsAlias = left->isAlias();
+	if ( leftIsAlias ) {
+		for (ld::Fixup::iterator fit=left->fixupsBegin(); fit != left->fixupsEnd(); ++fit) {
+			if ( fit->kind == ld::Fixup::kindNoneFollowOn ) {
+				assert(fit->binding == ld::Fixup::bindingDirectlyBound);
+			    if ( fit->u.target == right )
+					return true; // left already before right
+				left = fit->u.target; // sort as if alias was its target
+				break;
+		    }
+		}
+	}
+	bool rightIsAlias = right->isAlias();
+    if ( rightIsAlias ) {
+        for (ld::Fixup::iterator fit=right->fixupsBegin(); fit != right->fixupsEnd(); ++fit) {
+			if ( fit->kind == ld::Fixup::kindNoneFollowOn ) {
+				assert(fit->binding == ld::Fixup::bindingDirectlyBound);
+                if ( fit->u.target == left )
+                    return false; // need to swap, alias is after target
+				right = fit->u.target; // continue with sort as if right was target
+                break;
+			}       
+		}
+    }
 
 	// the __common section can have real or tentative definitions
 	// we want the real ones to sort before tentative ones
@@ -204,8 +231,6 @@ bool Layout::Comparer::operator()(const ld::Atom* left, const ld::Atom* right)
 	int64_t addrDiff = left->objectAddress() - right->objectAddress();
 	if ( addrDiff == 0 ) {
 		// have same address so one might be an alias, and aliases need to sort before target
-		bool leftIsAlias = left->isAlias();
-		bool rightIsAlias = right->isAlias();
 		if ( leftIsAlias != rightIsAlias )
 			return leftIsAlias;
 
@@ -539,6 +564,7 @@ void Layout::doPass()
 	// sort atoms in each section
 	for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
 		ld::Internal::FinalSection* sect = *sit;
+		//fprintf(stderr, "sorting section %s\n", sect->sectionName());
 		std::sort(sect->atoms.begin(), sect->atoms.end(), _comparer);
 	}
 
@@ -547,7 +573,7 @@ void Layout::doPass()
 	//	ld::Internal::FinalSection* sect = *sit;
 	//	for (std::vector<const ld::Atom*>::iterator ait=sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 	//		const ld::Atom* atom = *ait;
-	//		fprintf(stderr, "\t%s\t%s\n", sect->sectionName(), atom->name());
+	//		fprintf(stderr, "\t%p\t%s\t%s\n", atom, sect->sectionName(), atom->name());
 	//	}
 	//}
 

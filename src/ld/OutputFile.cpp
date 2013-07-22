@@ -344,14 +344,25 @@ void OutputFile::setSectionSizesAndAlignments(ld::Internal& state)
 				const ld::Atom* atom = *ait;
 				bool pagePerAtom = false;
 				uint32_t atomAlignmentPowerOf2 = atom->alignment().powerOf2;
+				uint32_t atomModulus = atom->alignment().modulus;
 				if ( _options.pageAlignDataAtoms() && ( strcmp(atom->section().segmentName(), "__DATA") == 0) ) { 
+					// most objc sections cannot be padded
+					bool contiguousObjCSection = ( strncmp(atom->section().sectionName(), "__objc_", 7) == 0 );
+					if ( strcmp(atom->section().sectionName(), "__objc_const") == 0 )
+						contiguousObjCSection = false;
+					if ( strcmp(atom->section().sectionName(), "__objc_data") == 0 )
+						contiguousObjCSection = false;
 					switch ( atom->section().type() ) {
 						case ld::Section::typeUnclassified:
 						case ld::Section::typeTentativeDefs:
 						case ld::Section::typeZeroFill:
+							if ( contiguousObjCSection ) 
+								break;
 							pagePerAtom = true;
-							if ( atomAlignmentPowerOf2 < 12 )
+							if ( atomAlignmentPowerOf2 < 12 ) {
 								atomAlignmentPowerOf2 = 12;
+								atomModulus = 0;
+							}
 							break;
 						default:
 							break;
@@ -362,7 +373,7 @@ void OutputFile::setSectionSizesAndAlignments(ld::Internal& state)
 				// calculate section offset for this atom
 				uint64_t alignment = 1 << atomAlignmentPowerOf2;
 				uint64_t currentModulus = (offset % alignment);
-				uint64_t requiredModulus = atom->alignment().modulus;
+				uint64_t requiredModulus = atomModulus;
 				if ( currentModulus != requiredModulus ) {
 					if ( requiredModulus > currentModulus )
 						offset += requiredModulus-currentModulus;
@@ -965,7 +976,33 @@ void OutputFile::rangeCheckThumbBranch22(int64_t displacement, ld::Internal& sta
 }
 
 
+void OutputFile::rangeCheckARM64Branch26(int64_t displacement, ld::Internal& state, const ld::Atom* atom, const ld::Fixup* fixup)
+{
+	const int64_t bl_128MegLimit = 0x07FFFFFF;
+	if ( (displacement > bl_128MegLimit) || (displacement < (-bl_128MegLimit)) ) {
+		// show layout of final image
+		printSectionLayout(state);
+		
+		const ld::Atom* target;	
+		throwf("b(l) ARM64 branch out of range (%lld max is +/-128MB): from %s (0x%08llX) to %s (0x%08llX)", 
+				displacement, atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fixup), 
+				addressOf(state, fixup, &target));
+	}
+}
 
+void OutputFile::rangeCheckARM64Page21(int64_t displacement, ld::Internal& state, const ld::Atom* atom, const ld::Fixup* fixup)
+{
+	const int64_t adrp_4GigLimit = 0x100000000ULL;
+	if ( (displacement > adrp_4GigLimit) || (displacement < (-adrp_4GigLimit)) ) {
+		// show layout of final image
+		printSectionLayout(state);
+		
+		const ld::Atom* target;	
+		throwf("ARM64 ADRP out of range (%lld max is +/-4GB): from %s (0x%08llX) to %s (0x%08llX)", 
+				displacement, atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fixup), 
+				addressOf(state, fixup, &target));
+	}
+}
 
 
 uint16_t OutputFile::get16LE(uint8_t* loc) { return LittleEndian::get16(*(uint16_t*)loc); }
@@ -1023,16 +1060,18 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 					accumulator -= delta;
 				break;
 			case ld::Fixup::kindAddAddend:
-				// <rdar://problem/8342028> ARM main executables main contain .long constants pointing
-				// into themselves such as jump tables.  These .long should not have thumb bit set
-				// even though the target is a thumb instruction. We can tell it is an interior pointer
-				// because we are processing an addend. 
-				if ( thumbTarget && (toTarget == atom) && ((int32_t)fit->u.addend > 0) ) {
-					accumulator &= (-2);
-					//warning("removing thumb bit from intra-atom pointer in %s %s+0x%0X", 
-					//		atom->section().sectionName(), atom->name(), fit->offsetInAtom);
+				if ( ! fit->contentIgnoresAddend ) {
+					// <rdar://problem/8342028> ARM main executables main contain .long constants pointing
+					// into themselves such as jump tables.  These .long should not have thumb bit set
+					// even though the target is a thumb instruction. We can tell it is an interior pointer
+					// because we are processing an addend. 
+					if ( thumbTarget && (toTarget == atom) && ((int32_t)fit->u.addend > 0) ) {
+						accumulator &= (-2);
+						//warning("removing thumb bit from intra-atom pointer in %s %s+0x%0X", 
+						//		atom->section().sectionName(), atom->name(), fit->offsetInAtom);
+					}
+					accumulator += fit->u.addend;
 				}
-				accumulator += fit->u.addend;
 				break;
 			case ld::Fixup::kindSubtractAddend:
 				accumulator -= fit->u.addend;
@@ -1227,6 +1266,18 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 				if ( _options.outputKind() != Options::kObjectFile ) {
 					// change 32-bit blx call site to 'nop', 'eor r0, r0'
 					set32LE(fixUpLocation, 0x46C04040);
+				}
+				break;
+			case ld::Fixup::kindStoreARM64DtraceCallSiteNop:
+				if ( _options.outputKind() != Options::kObjectFile ) {
+					// change call site to a NOP
+					set32LE(fixUpLocation, 0xD503201F);
+				}
+				break;
+			case ld::Fixup::kindStoreARM64DtraceIsEnableSiteClear:
+				if ( _options.outputKind() != Options::kObjectFile ) {
+					// change call site to 'MOVZ X0,0'
+					set32LE(fixUpLocation, 0xD2800000);
 				}
 				break;
 			case ld::Fixup::kindLazyTarget:
@@ -1504,6 +1555,126 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 					set32LE(fixUpLocation, newInstruction);		
 				}
 				break;
+#if SUPPORT_ARCH_arm64
+			case ld::Fixup::kindStoreTargetAddressARM64Branch26:
+				accumulator = addressOf(state, fit, &toTarget);
+				// fall into kindStoreARM64Branch26 case
+			case ld::Fixup::kindStoreARM64Branch26:
+				if ( fit->contentAddendOnly )
+					delta = accumulator;
+				else
+                    delta = accumulator - (atom->finalAddress() + fit->offsetInAtom);
+				rangeCheckARM64Branch26(delta, state, atom, fit);
+				instruction = get32LE(fixUpLocation);
+				newInstruction = (instruction & 0xFC000000) | ((uint32_t)(delta >> 2) & 0x03FFFFFF);
+				set32LE(fixUpLocation, newInstruction);
+				break;
+			case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
+			case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
+			case ld::Fixup::kindStoreTargetAddressARM64Page21:
+				accumulator = addressOf(state, fit, &toTarget);
+				// fall into kindStoreARM64Branch26 case
+			case ld::Fixup::kindStoreARM64GOTLeaPage21:
+			case ld::Fixup::kindStoreARM64GOTLoadPage21:
+			case ld::Fixup::kindStoreARM64TLVPLoadPage21:
+			case ld::Fixup::kindStoreARM64Page21:
+				{
+					// the ADRP instruction adds the imm << 12 to the page that the pc is on
+					if ( fit->contentAddendOnly )
+						delta = 0;
+					else
+						delta = (accumulator & (-4096)) - ((atom->finalAddress() + fit->offsetInAtom) & (-4096));
+					rangeCheckARM64Page21(delta, state, atom, fit);
+					instruction = get32LE(fixUpLocation);
+					uint32_t immhi = (delta >> 9) & (0x00FFFFE0);
+					uint32_t immlo = (delta << 17) & (0x60000000);
+					newInstruction = (instruction & 0x9F00001F) | immlo | immhi;
+					set32LE(fixUpLocation, newInstruction);
+				}
+				break;
+			case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
+			case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
+				accumulator = addressOf(state, fit, &toTarget);
+				// fall into kindAddressARM64PageOff12 case
+			case ld::Fixup::kindStoreARM64TLVPLoadPageOff12:
+			case ld::Fixup::kindStoreARM64GOTLoadPageOff12:
+			case ld::Fixup::kindStoreARM64PageOff12:
+				{
+					uint32_t offset = accumulator & 0x00000FFF;
+					instruction = get32LE(fixUpLocation);
+					// LDR/STR instruction have implicit scale factor, need to compensate for that
+					if ( instruction & 0x08000000 ) {
+						uint32_t implictShift = ((instruction >> 30) & 0x3);
+						switch ( implictShift ) {
+							case 0:
+								if ( (instruction & 0x04800000) == 0x04800000 ) {
+									// vector and byte LDR/STR have same "size" bits, need to check other bits to differenciate
+									implictShift = 4;
+									if ( (offset & 0xF) != 0 ) {
+											throwf("128-bit LDR/STR not 16-byte aligned: from %s (0x%08llX) to %s (0x%08llX)", 
+												atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fit), 
+												addressOf(state, fit, &toTarget));
+									}
+								}
+								break;
+							case 1:
+								if ( (offset & 0x1) != 0 ) {
+										throwf("16-bit LDR/STR not 2-byte aligned: from %s (0x%08llX) to %s (0x%08llX)", 
+											atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fit), 
+											addressOf(state, fit, &toTarget));
+								}
+								break;
+							case 2:
+								if ( (offset & 0x3) != 0 ) {
+										throwf("32-bit LDR/STR not 4-byte aligned: from %s (0x%08llX) to %s (0x%08llX)", 
+											atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fit), 
+											addressOf(state, fit, &toTarget));
+								}
+								break;
+							case 3:
+								if ( (offset & 0x7) != 0 ) {
+										throwf("64-bit LDR/STR not 8-byte aligned: from %s (0x%08llX) to %s (0x%08llX)", 
+											atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fit), 
+											addressOf(state, fit, &toTarget));
+								}
+								break;
+						}
+						// compensate for implicit scale
+						offset >>= implictShift;
+					}
+					if ( fit->contentAddendOnly )
+						offset = 0;
+					uint32_t imm12 = offset << 10;
+					newInstruction = (instruction & 0xFFC003FF) | imm12;
+					set32LE(fixUpLocation, newInstruction);
+				}
+				break;
+			case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPageOff12:
+				accumulator = addressOf(state, fit, &toTarget);
+				// fall into kindStoreARM64GOTLoadPage21 case
+			case ld::Fixup::kindStoreARM64GOTLeaPageOff12:
+				{
+					// GOT entry was optimized away, change LDR instruction to a ADD
+					instruction = get32LE(fixUpLocation);
+					if ( (instruction & 0xFFC00000) != 0xF9400000 )
+						throwf("GOT load reloc does not point to a LDR instruction in %s", atom->name());
+					uint32_t offset = accumulator & 0x00000FFF;
+					uint32_t imm12 = offset << 10;
+					newInstruction = 0x91000000 | imm12 | (instruction & 0x000003FF);
+					set32LE(fixUpLocation, newInstruction);
+				}
+				break;
+			case ld::Fixup::kindStoreARM64PointerToGOT:
+				set64LE(fixUpLocation, accumulator);
+				break;
+            case ld::Fixup::kindStoreARM64PCRelToGOT:
+				if ( fit->contentAddendOnly )
+					delta = accumulator;
+				else
+					delta = accumulator - (atom->finalAddress() + fit->offsetInAtom);
+				set32LE(fixUpLocation, delta);
+				break;
+#endif
 		}
 	}
 }
@@ -1746,8 +1917,15 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 			fd = open(tmpOutput, O_RDWR|O_CREAT, permissions);
 		}
 		if ( fd == -1 ) 
-			throwf("can't open output file for writing: %s, errno=%d", tmpOutput, errno);
-		ftruncate(fd, _fileSize);
+			throwf("can't open output file for writing '%s', errno=%d", tmpOutput, errno);
+		if ( ftruncate(fd, _fileSize) == -1 ) {
+			int err = errno;
+			unlink(tmpOutput);
+			if ( err == ENOSPC )
+				throwf("not enough disk space for writing '%s'", _options.outputFilePath());
+			else
+				throwf("can't grow file for writing '%s', errno=%d", _options.outputFilePath(), err);
+		}
 		
 		wholeBuffer = (uint8_t *)mmap(NULL, _fileSize, PROT_WRITE|PROT_READ, MAP_SHARED, fd, 0);
 		if ( wholeBuffer == MAP_FAILED )
@@ -1792,6 +1970,10 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 		if ( ::write(fd, wholeBuffer, _fileSize) == -1 ) {
 			throwf("can't write to output file: %s, errno=%d", _options.outputFilePath(), errno);
 		}
+		::close(fd);
+		// <rdar://problem/13118223> NFS: iOS incremental builds in Xcode 4.6 fail with codesign error
+		// NFS seems to pad the end of the file sometimes.  Calling trunc seems to correct it...
+		::truncate(_options.outputFilePath(), _fileSize);
 	}
 }
 
@@ -1837,7 +2019,7 @@ void OutputFile::buildSymbolTable(ld::Internal& state)
 				
 			// in -r mode, clarify symbolTableNotInFinalLinkedImages
 			if ( _options.outputKind() == Options::kObjectFile ) {
-				if ( _options.architecture() == CPU_TYPE_X86_64 ) {
+				if ( (_options.architecture() == CPU_TYPE_X86_64) || (_options.architecture() == CPU_TYPE_ARM64) ) {
 					// x86_64 .o files need labels on anonymous literal strings
 					if ( (sect->type() == ld::Section::typeCString) && (atom->combine() == ld::Atom::combineByNameAndContent) ) {
 						(const_cast<ld::Atom*>(atom))->setSymbolTableInclusion(ld::Atom::symbolTableIn);
@@ -1929,7 +2111,6 @@ void OutputFile::buildSymbolTable(ld::Internal& state)
 				case ld::Atom::scopeLinkageUnit:
 					if ( _options.outputKind() == Options::kObjectFile ) {
 						if ( _options.keepPrivateExterns() ) {
-							assert( (atom->combine() == ld::Atom::combineNever) || (atom->combine() == ld::Atom::combineByName) );
 							_exportedAtoms.push_back(atom);
 						}
 						else if ( _options.keepLocalSymbol(atom->name()) ) {
@@ -2049,8 +2230,28 @@ void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 			}
 			break;
 #endif
+#if SUPPORT_ARCH_arm64
+		case CPU_TYPE_ARM64:
+			if ( _hasLocalRelocations ) {
+				_localRelocsAtom = new LocalRelocationsAtom<arm64>(_options, state, *this);
+				localRelocationsSection = state.addAtom(*_localRelocsAtom);
+			}
+			if ( _hasExternalRelocations ) {
+				_externalRelocsAtom = new ExternalRelocationsAtom<arm64>(_options, state, *this);
+				externalRelocationsSection = state.addAtom(*_externalRelocsAtom);
+			}
+			if ( _hasSymbolTable ) {
+				_indirectSymbolTableAtom = new IndirectSymbolTableAtom<arm64>(_options, state, *this);
+				indirectSymbolTableSection = state.addAtom(*_indirectSymbolTableAtom);
+				_symbolTableAtom = new SymbolTableAtom<arm64>(_options, state, *this);
+				symbolTableSection = state.addAtom(*_symbolTableAtom);
+				_stringPoolAtom = new StringPoolAtom(_options, state, *this, 4);
+				stringPoolSection = state.addAtom(*_stringPoolAtom);
+			}
+			break;
+#endif
 		default:
-			throw "architecture not supported for -preload";
+			throw "-preload not supported";
 	}
 
 }
@@ -2237,6 +2438,64 @@ void OutputFile::addLinkEdit(ld::Internal& state)
 			}
 			break;
 #endif
+#if SUPPORT_ARCH_arm64
+		case CPU_TYPE_ARM64:
+			if ( _hasSectionRelocations ) {
+				_sectionsRelocationsAtom = new SectionRelocationsAtom<arm64>(_options, state, *this);
+				sectionRelocationsSection = state.addAtom(*_sectionsRelocationsAtom);
+			}
+			if ( _hasDyldInfo ) {
+				_rebasingInfoAtom = new RebaseInfoAtom<arm64>(_options, state, *this);
+				rebaseSection = state.addAtom(*_rebasingInfoAtom);
+				
+				_bindingInfoAtom = new BindingInfoAtom<arm64>(_options, state, *this);
+				bindingSection = state.addAtom(*_bindingInfoAtom);
+				
+				_weakBindingInfoAtom = new WeakBindingInfoAtom<arm64>(_options, state, *this);
+				weakBindingSection = state.addAtom(*_weakBindingInfoAtom);
+				
+				_lazyBindingInfoAtom = new LazyBindingInfoAtom<arm64>(_options, state, *this);
+				lazyBindingSection = state.addAtom(*_lazyBindingInfoAtom);
+				
+				_exportInfoAtom = new ExportInfoAtom<arm64>(_options, state, *this);
+				exportSection = state.addAtom(*_exportInfoAtom);
+			}
+			if ( _hasLocalRelocations ) {
+				_localRelocsAtom = new LocalRelocationsAtom<arm64>(_options, state, *this);
+				localRelocationsSection = state.addAtom(*_localRelocsAtom);
+			}
+			if  ( _hasSplitSegInfo ) {
+				_splitSegInfoAtom = new SplitSegInfoAtom<arm64>(_options, state, *this);
+				splitSegInfoSection = state.addAtom(*_splitSegInfoAtom);
+			}
+			if ( _hasFunctionStartsInfo ) {
+				_functionStartsAtom = new FunctionStartsAtom<arm64>(_options, state, *this);
+				functionStartsSection = state.addAtom(*_functionStartsAtom);
+			}
+			if ( _hasDataInCodeInfo ) {
+				_dataInCodeAtom = new DataInCodeAtom<arm64>(_options, state, *this);
+				dataInCodeSection = state.addAtom(*_dataInCodeAtom);
+			}
+			if ( _hasDependentDRInfo ) {
+				_dependentDRInfoAtom = new DependentDRAtom<arm64>(_options, state, *this);
+				dependentDRsSection = state.addAtom(*_dependentDRInfoAtom);
+			}
+			if ( _hasSymbolTable ) {
+				_symbolTableAtom = new SymbolTableAtom<arm64>(_options, state, *this);
+				symbolTableSection = state.addAtom(*_symbolTableAtom);
+			}
+			if ( _hasExternalRelocations ) {
+				_externalRelocsAtom = new ExternalRelocationsAtom<arm64>(_options, state, *this);
+				externalRelocationsSection = state.addAtom(*_externalRelocsAtom);
+			}
+			if ( _hasSymbolTable ) {
+				_indirectSymbolTableAtom = new IndirectSymbolTableAtom<arm64>(_options, state, *this);
+				indirectSymbolTableSection = state.addAtom(*_indirectSymbolTableAtom);
+				_stringPoolAtom = new StringPoolAtom(_options, state, *this, 4);
+				stringPoolSection = state.addAtom(*_stringPoolAtom);
+			}
+			break;
+#endif
 		default:
 			throw "unknown architecture";
 	}
@@ -2254,6 +2513,12 @@ void OutputFile::addLoadCommands(ld::Internal& state)
 #if SUPPORT_ARCH_arm_any
 		case CPU_TYPE_ARM:
 			_headersAndLoadCommandAtom = new HeaderAndLoadCommandsAtom<arm>(_options, state, *this);
+			headerAndLoadCommandsSection = state.addAtom(*_headersAndLoadCommandAtom);
+			break;
+#endif
+#if SUPPORT_ARCH_arm64
+		case CPU_TYPE_ARM64:
+			_headersAndLoadCommandAtom = new HeaderAndLoadCommandsAtom<arm64>(_options, state, *this);
 			headerAndLoadCommandsSection = state.addAtom(*_headersAndLoadCommandAtom);
 			break;
 #endif
@@ -2430,8 +2695,26 @@ bool OutputFile::isPcRelStore(ld::Fixup::Kind kind)
 		case ld::Fixup::kindStoreTargetAddressARMBranch24:
 		case ld::Fixup::kindStoreTargetAddressThumbBranch22:
 		case ld::Fixup::kindStoreTargetAddressARMLoad12:
+#if SUPPORT_ARCH_arm64
+		case ld::Fixup::kindStoreARM64Page21:
+		case ld::Fixup::kindStoreARM64PageOff12:
+		case ld::Fixup::kindStoreARM64GOTLoadPage21:
+		case ld::Fixup::kindStoreARM64GOTLoadPageOff12:
+		case ld::Fixup::kindStoreARM64GOTLeaPage21:
+		case ld::Fixup::kindStoreARM64GOTLeaPageOff12:
+		case ld::Fixup::kindStoreARM64PCRelToGOT:
+		case ld::Fixup::kindStoreTargetAddressARM64Page21:
+		case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPageOff12:
+#endif
 			return true;
 		case ld::Fixup::kindStoreTargetAddressX86BranchPCRel32:
+#if SUPPORT_ARCH_arm64
+		case ld::Fixup::kindStoreTargetAddressARM64Branch26:
+#endif
 			return (_options.outputKind() != Options::kKextBundle);
 		default:
 			break;
@@ -2476,15 +2759,27 @@ bool OutputFile::setsTarget(ld::Fixup::Kind kind)
 		case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoad:
 		case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoadNowLEA:
 		case ld::Fixup::kindStoreTargetAddressX86PCRel32TLVLoad:
+		case ld::Fixup::kindStoreTargetAddressX86PCRel32TLVLoadNowLEA:
 		case ld::Fixup::kindStoreTargetAddressX86Abs32TLVLoad:
 		case ld::Fixup::kindStoreTargetAddressARMBranch24:
 		case ld::Fixup::kindStoreTargetAddressThumbBranch22:
 		case ld::Fixup::kindStoreTargetAddressARMLoad12:
+#if SUPPORT_ARCH_arm64
+		case ld::Fixup::kindStoreTargetAddressARM64Branch26:
+		case ld::Fixup::kindStoreTargetAddressARM64Page21:
+		case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPageOff12:
+#endif
 			return true;
 		case ld::Fixup::kindStoreX86DtraceCallSiteNop:
 		case ld::Fixup::kindStoreX86DtraceIsEnableSiteClear:
 		case ld::Fixup::kindStoreARMDtraceCallSiteNop:
 		case ld::Fixup::kindStoreARMDtraceIsEnableSiteClear:
+		case ld::Fixup::kindStoreARM64DtraceCallSiteNop:
+		case ld::Fixup::kindStoreARM64DtraceIsEnableSiteClear:
 		case ld::Fixup::kindStoreThumbDtraceCallSiteNop:
 		case ld::Fixup::kindStoreThumbDtraceIsEnableSiteClear:
 			return (_options.outputKind() == Options::kObjectFile);
@@ -2590,6 +2885,7 @@ void OutputFile::generateLinkEditInfo(ld::Internal& state)
 			ld::Fixup*			fixupWithTarget = NULL;
 			ld::Fixup*			fixupWithMinusTarget = NULL;
 			ld::Fixup*			fixupWithStore = NULL;
+			ld::Fixup*			fixupWithAddend = NULL;
 			const ld::Atom*		target = NULL;
 			const ld::Atom*		minusTarget = NULL;
 			uint64_t			targetAddend = 0;
@@ -2624,9 +2920,11 @@ void OutputFile::generateLinkEditInfo(ld::Internal& state)
 				switch ( fit->kind ) {
 					case ld::Fixup::kindAddAddend:
 						targetAddend = fit->u.addend;
+						fixupWithAddend = fit;
 						break;
 					case ld::Fixup::kindSubtractAddend:
 						minusTargetAddend = fit->u.addend;
+						fixupWithAddend = fit;
 						break;
 					case ld::Fixup::kindSubtractTargetAddress:
 						switch ( fit->binding ) {
@@ -2662,7 +2960,7 @@ void OutputFile::generateLinkEditInfo(ld::Internal& state)
 				if ( fit->lastInCluster() ) {
 					if ( (fixupWithStore != NULL) && (target != NULL) ) {
 						if ( _options.outputKind() == Options::kObjectFile ) {
-							this->addSectionRelocs(state, sect, atom, fixupWithTarget, fixupWithMinusTarget, fixupWithStore,
+							this->addSectionRelocs(state, sect, atom, fixupWithTarget, fixupWithMinusTarget, fixupWithAddend, fixupWithStore,
 													target, minusTarget, targetAddend, minusTargetAddend);
 						}
 						else {
@@ -2701,10 +2999,19 @@ void OutputFile::noteTextReloc(const ld::Atom* atom, const ld::Atom* target)
 	else if ( _options.positionIndependentExecutable() && (_options.outputKind() == Options::kDynamicExecutable) 
 		&& ((_options.iOSVersionMin() >= ld::iOS_4_3) || (_options.macosxVersionMin() >= ld::mac10_7)) ) {
 		if ( ! this->pieDisabled ) {
-			warning("PIE disabled. Absolute addressing (perhaps -mdynamic-no-pic) not allowed in code signed PIE, "
+#if SUPPORT_ARCH_arm64
+			if ( _options.architecture() == CPU_TYPE_ARM64 ) {
+				const char* demangledName = strdup(_options.demangleSymbol(atom->name()));
+				throwf("Absolute addressing not allowed in arm64 code but used in '%s' referencing '%s'", demangledName, _options.demangleSymbol(target->name()));
+			}
+			else
+#endif
+			 {
+				warning("PIE disabled. Absolute addressing (perhaps -mdynamic-no-pic) not allowed in code signed PIE, "
 				"but used in %s from %s. " 
 				"To fix this warning, don't compile with -mdynamic-no-pic or link with -Wl,-no_pie", 
 				atom->name(), atom->file()->path());
+			}
 		}
 		this->pieDisabled = true;
 	}
@@ -2712,7 +3019,10 @@ void OutputFile::noteTextReloc(const ld::Atom* atom, const ld::Atom* target)
 		throwf("illegal text-relocoation (direct reference) to (global,weak) %s in %s from %s in %s", target->name(), target->file()->path(), atom->name(), atom->file()->path());
 	}
 	else {
-		throwf("illegal text-relocation to %s in %s from %s in %s", target->name(), target->file()->path(), atom->name(), atom->file()->path());
+		if ( (target->file() != NULL) && (atom->file() != NULL) )
+			throwf("illegal text-relocation to '%s' in %s from '%s' in %s", target->name(), target->file()->path(), atom->name(), atom->file()->path());
+        else
+            throwf("illegal text reloc in '%s' to '%s'", atom->name(), target->name());
 	}
 }
 
@@ -2734,6 +3044,11 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 					|| (atom->section().type() == ld::Section::typeDtraceDOF)
 					|| (atom->section().type() == ld::Section::typeUnwindInfo) ) {
 					// ok for __eh_frame and __uwind_info to use pointer diffs to global weak symbols
+					return;
+				}
+				// <rdar://problem/13700961> spurious warning when weak function has reference to itself
+				if ( fixupWithTarget->binding == ld::Fixup::bindingDirectlyBound ) {
+					// ok to ignore pc-rel references within a weak function to itself
 					return;
 				}
 				// Have direct reference to weak-global.  This should be an indrect reference
@@ -2817,8 +3132,11 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 				// this will be done by other cluster on lazy pointer atom
 			}
 		}
-		else if ( (target->contentType() == ld::Atom::typeResolver) && (target->scope() != ld::Atom::scopeGlobal) ) {
+		else if ( target->contentType() == ld::Atom::typeResolver ) {
 			// <rdar://problem/8553647> Hidden resolver functions should not have lazy binding info
+			// <rdar://problem/12629331> Resolver function run before initializers when overriding the dyld shared cache
+			// The lazy pointers used by stubs used when non-lazy binding to a resolver are not normal lazy pointers
+			// and should not be in lazy binding info.
 			needsLazyBinding = false;
 		}
 		else {
@@ -2873,6 +3191,9 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 						needsRebase = false;
 						needsBinding = true;
 					}
+					else if ( _options.forceCoalesce(target->name()) ) {
+						needsWeakBinding = true;
+					}
 				}
 				break;
 			case ld::Atom::definitionAbsolute:
@@ -2880,6 +3201,20 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 		}
 	}
 	
+	// <rdar://problem/13828711> if target is an import alias, use base of alias
+	if ( target->isAlias() && (target->definition() == ld::Atom::definitionProxy) ) {
+		for (ld::Fixup::iterator fit = target->fixupsBegin(), end=target->fixupsEnd(); fit != end; ++fit) {
+			if ( fit->firstInCluster() ) {
+				if ( fit->kind == ld::Fixup::kindNoneFollowOn ) {
+					if ( fit->binding == ld::Fixup::bindingDirectlyBound ) {
+						//fprintf(stderr, "switching import of %s to import of %s\n", target->name(),  fit->u.target->name());
+						target = fit->u.target;
+					}
+				}
+			}
+		}
+	} 
+
 	// record dyld info for this cluster
 	if ( needsRebase ) {
 		if ( inReadOnlySeg ) {
@@ -2887,18 +3222,24 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			sect->hasLocalRelocs = true;  // so dyld knows to change permissions on __TEXT segment
 			rebaseType = REBASE_TYPE_TEXT_ABSOLUTE32;
 		}
-		if ( (addend != 0) && _options.sharedRegionEligible() ) {
-			// make sure the addend does not cause the pointer to point outside the target's segment
-			// if it does, update_dyld_shared_cache will not be able to put this dylib into the shared cache
-			uint64_t targetAddress = target->finalAddress();
-			for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
-				ld::Internal::FinalSection* sct = *sit;
-				uint64_t sctEnd = (sct->address+sct->size);
-				if ( (sct->address <= targetAddress) && (targetAddress < sctEnd) ) {
-					if ( (targetAddress+addend) > sctEnd ) {
-						warning("data symbol %s from %s has pointer to %s + 0x%08llX. "  
-								"That large of an addend may disable %s from being put in the dyld shared cache.", 
-								atom->name(), atom->file()->path(), target->name(), addend, _options.installPath() );
+		if ( _options.sharedRegionEligible() ) {
+			// <rdar://problem/13287063> when range checking, ignore high byte of arm64 addends
+			uint64_t checkAddend = addend;
+			if ( _options.architecture() == CPU_TYPE_ARM64 )
+				checkAddend &= 0x0FFFFFFFFFFFFFFFULL;
+			if ( checkAddend != 0 ) {
+				// make sure the addend does not cause the pointer to point outside the target's segment
+				// if it does, update_dyld_shared_cache will not be able to put this dylib into the shared cache
+				uint64_t targetAddress = target->finalAddress();
+				for (std::vector<ld::Internal::FinalSection*>::iterator sit = state.sections.begin(); sit != state.sections.end(); ++sit) {
+					ld::Internal::FinalSection* sct = *sit;
+					uint64_t sctEnd = (sct->address+sct->size);
+					if ( (sct->address <= targetAddress) && (targetAddress < sctEnd) ) {
+						if ( (targetAddress+checkAddend) > sctEnd ) {
+							warning("data symbol %s from %s has pointer to %s + 0x%08llX. "  
+									"That large of an addend may disable %s from being put in the dyld shared cache.", 
+									atom->name(), atom->file()->path(), target->name(), addend, _options.installPath() );
+						}
 					}
 				}
 			}
@@ -3013,7 +3354,8 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 					if ( (target->combine() == ld::Atom::combineByName) 
 						&& (target->definition() == ld::Atom::definitionRegular)
 						&& (_options.outputKind() != Options::kStaticExecutable)
-						&& (_options.outputKind() != Options::kPreload) ) {
+						&& (_options.outputKind() != Options::kPreload) 
+						&& (atom != target) ) {
 						needsExternReloc = true;
 					}
 					else if ( _options.outputKind() == Options::kDynamicExecutable ) {
@@ -3057,6 +3399,9 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 			}
 			break;
 		case ld::Fixup::kindStoreTargetAddressX86BranchPCRel32:
+#if SUPPORT_ARCH_arm64
+		case ld::Fixup::kindStoreTargetAddressARM64Branch26:
+#endif
 			if ( _options.outputKind() == Options::kKextBundle ) {
 				assert(target != NULL);
 				if ( target->definition() == ld::Atom::definitionProxy ) {
@@ -3088,8 +3433,8 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 
 bool OutputFile::useExternalSectionReloc(const ld::Atom* atom, const ld::Atom* target, ld::Fixup* fixupWithTarget)
 {
-	if ( _options.architecture() == CPU_TYPE_X86_64 ) {
-		// x86_64 uses external relocations for everthing that has a symbol
+	if ( (_options.architecture() == CPU_TYPE_X86_64) || (_options.architecture() == CPU_TYPE_ARM64) ) {
+		// x86_64 and ARM64 use external relocations for everthing that has a symbol
 		return ( target->symbolTableInclusion() != ld::Atom::symbolTableNotIn );
 	}
 	
@@ -3127,11 +3472,29 @@ bool OutputFile::useExternalSectionReloc(const ld::Atom* atom, const ld::Atom* t
 	return false;
 }
 
+bool OutputFile::useSectionRelocAddend(ld::Fixup* fixupWithTarget)
+{
+#if SUPPORT_ARCH_arm64
+	if ( _options.architecture() == CPU_TYPE_ARM64 ) {
+		switch ( fixupWithTarget->kind ) {
+			case ld::Fixup::kindStoreARM64Branch26:
+			case ld::Fixup::kindStoreARM64Page21:
+			case ld::Fixup::kindStoreARM64PageOff12:
+				return true;
+			default:
+				return false;
+		}
+	}
+#endif
+	return false;
+}
+
 
 
 
 void OutputFile::addSectionRelocs(ld::Internal& state, ld::Internal::FinalSection* sect, const ld::Atom* atom, 
-								ld::Fixup* fixupWithTarget, ld::Fixup* fixupWithMinusTarget, ld::Fixup* fixupWithStore,
+								ld::Fixup* fixupWithTarget, ld::Fixup* fixupWithMinusTarget,  
+								ld::Fixup* fixupWithAddend, ld::Fixup* fixupWithStore, 
 								const ld::Atom* target, const ld::Atom* minusTarget, 
 								uint64_t targetAddend, uint64_t minusTargetAddend)
 {
@@ -3155,11 +3518,13 @@ void OutputFile::addSectionRelocs(ld::Internal& state, ld::Internal::FinalSectio
 	bool targetUsesExternalReloc = this->useExternalSectionReloc(atom, target, fixupWithTarget);
 	bool minusTargetUsesExternalReloc = (minusTarget != NULL) && this->useExternalSectionReloc(atom, minusTarget, fixupWithMinusTarget);
 	
-	// in x86_64 .o files an external reloc means the content contains just the addend
-	if ( _options.architecture() == CPU_TYPE_X86_64 ) {
+	// in x86_64 and arm64 .o files an external reloc means the content contains just the addend
+	if ( (_options.architecture() == CPU_TYPE_X86_64) ||(_options.architecture() == CPU_TYPE_ARM64)  ) {
 		if ( targetUsesExternalReloc ) {
 			fixupWithTarget->contentAddendOnly = true;
 			fixupWithStore->contentAddendOnly = true;
+			if ( this->useSectionRelocAddend(fixupWithStore) && (fixupWithAddend != NULL) )
+				fixupWithAddend->contentIgnoresAddend = true;
 		}
 		if ( minusTargetUsesExternalReloc )
 			fixupWithMinusTarget->contentAddendOnly = true;
@@ -3252,11 +3617,25 @@ void OutputFile::makeSplitSegInfo(ld::Internal& state)
 					case ld::Fixup::kindStoreX86PCRel32GOTLoad:
 					case ld::Fixup::kindStoreX86PCRel32GOTLoadNowLEA:
 					case ld::Fixup::kindStoreX86PCRel32GOT:
+					case ld::Fixup::kindStoreX86PCRel32TLVLoad:
+					case ld::Fixup::kindStoreX86PCRel32TLVLoadNowLEA:
 					case ld::Fixup::kindStoreTargetAddressX86PCRel32:
 					case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoad:
 					case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoadNowLEA:
+					case ld::Fixup::kindStoreTargetAddressX86PCRel32TLVLoad:
+					case ld::Fixup::kindStoreTargetAddressX86PCRel32TLVLoadNowLEA:
                     case ld::Fixup::kindStoreARMLow16:
                     case ld::Fixup::kindStoreThumbLow16: 
+#if SUPPORT_ARCH_arm64
+					case ld::Fixup::kindStoreARM64Page21:
+					case ld::Fixup::kindStoreARM64GOTLoadPage21:
+					case ld::Fixup::kindStoreARM64GOTLeaPage21:
+					case ld::Fixup::kindStoreARM64TLVPLoadPage21:
+					case ld::Fixup::kindStoreTargetAddressARM64Page21:
+					case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
+					case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
+					case ld::Fixup::kindStoreARM64PCRelToGOT:
+#endif
 						assert(target != NULL);
 						if ( strcmp(sect->segmentName(), target->section().segmentName()) != 0 ) {	
 							_splitSegInfos.push_back(SplitSegInfoEntry(atom->finalAddress()+fit->offsetInAtom,fit->kind));

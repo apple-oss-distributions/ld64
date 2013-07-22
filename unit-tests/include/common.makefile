@@ -125,6 +125,17 @@ else
   FILEARCH = $(ARCH)
 endif
 
+ifeq ($(ARCH),arm64)
+  LDFLAGS := -syslibroot $(IOS_SDK)
+  CC = $(shell xcrun --sdk iphoneos.internal -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=7.0 -isysroot $(IOS_SDK)
+  CXX = $(shell xcrun --sdk iphoneos.internal -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=7.0 -isysroot $(IOS_SDK)
+  VERSION_NEW_LINKEDIT = -miphoneos-version-min=7.0
+  VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
+  LD_SYSROOT = -syslibroot $(IOS_SDK)
+  LD_NEW_LINKEDIT = -ios_version_min 7.0
+else
+  FILEARCH = $(ARCH)
+endif
 
 RM      = rm
 RMFLAGS = -rf

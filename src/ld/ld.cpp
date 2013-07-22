@@ -333,8 +333,11 @@ uint32_t InternalState::FinalSection::sectionOrder(const ld::Section& sect, uint
 				else
 					return INT_MAX-2;
 			default:
+				// <rdar://problem/14348664> __DATA,__const section should be near __mod_init_func not __data
+				if ( strcmp(sect.sectionName(), "__const") == 0 )
+					return 14;
 				// <rdar://problem/7435296> Reorder sections to reduce page faults in object files
-				if ( strcmp(sect.sectionName(), "__objc_classlist") == 0 ) 
+				else if ( strcmp(sect.sectionName(), "__objc_classlist") == 0 ) 
 					return 20;
 				else if ( strcmp(sect.sectionName(), "__objc_nlclslist") == 0 ) 
 					return 21;
@@ -587,10 +590,9 @@ static void printTime(const char* msg, uint64_t partTime, uint64_t totalTime)
 	static uint64_t sUnitsPerSecond = 0;
 	if ( sUnitsPerSecond == 0 ) {
 		struct mach_timebase_info timeBaseInfo;
-		if ( mach_timebase_info(&timeBaseInfo) == KERN_SUCCESS ) {
-			sUnitsPerSecond = 1000000000ULL * timeBaseInfo.denom / timeBaseInfo.numer;
-			//fprintf(stderr, "sUnitsPerSecond=%llu\n", sUnitsPerSecond);
-		}
+		if ( mach_timebase_info(&timeBaseInfo) != KERN_SUCCESS )
+      return;
+    sUnitsPerSecond = 1000000000ULL * timeBaseInfo.denom / timeBaseInfo.numer;
 	}
 	if ( partTime < sUnitsPerSecond ) {
 		uint32_t milliSecondsTimeTen = (partTime*10000)/sUnitsPerSecond;

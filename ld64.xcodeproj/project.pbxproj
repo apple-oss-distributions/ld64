@@ -87,7 +87,7 @@
 /* Begin PBXBuildRule section */
 		F9E8D4BD07FCAF2000FD5801 /* PBXBuildRule */ = {
 			isa = PBXBuildRule;
-			compilerSpec = com.apple.compilers.llvm.clang.1_0;
+			compilerSpec = com.apple.compilers.gcc;
 			fileType = sourcecode.c;
 			isEditable = 1;
 			outputFiles = (
@@ -248,8 +248,9 @@
 		F9023C3F06D5A254001BBF46 /* ld.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ld.cpp; path = src/ld/ld.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F92D9C2710657AAB00FF369B /* stub_x86_64_classic.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; path = stub_x86_64_classic.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F933D9460929277C0083EAC8 /* FileAbstraction.hpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.h; name = FileAbstraction.hpp; path = src/abstraction/FileAbstraction.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		F933D9470929277C0083EAC8 /* MachOFileAbstraction.hpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.h; name = MachOFileAbstraction.hpp; path = src/abstraction/MachOFileAbstraction.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F933D9470929277C0083EAC8 /* MachOFileAbstraction.hpp */ = {isa = PBXFileReference; fileEncoding = 30; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; name = MachOFileAbstraction.hpp; path = src/abstraction/MachOFileAbstraction.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F933DC37092A82480083EAC8 /* Architectures.hpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.h; name = Architectures.hpp; path = src/ld/Architectures.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F93A9BEC12C2E51900BAA11D /* stub_arm64.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; path = stub_arm64.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F93CB246116E69EB003233B8 /* tlvp.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = tlvp.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F93CB247116E69EB003233B8 /* tlvp.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = tlvp.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F971EED306D5ACF60041D381 /* ObjectDump */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ObjectDump; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -312,8 +313,8 @@
 		F9BA955D10A233000097A440 /* huge.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = huge.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9BA963310A2545C0097A440 /* compact_unwind.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = compact_unwind.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9BA963410A2545C0097A440 /* compact_unwind.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = compact_unwind.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		F9C0D48A06DD1E1B001C7193 /* Options.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = Options.cpp; path = src/ld/Options.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		F9C0D48B06DD1E1B001C7193 /* Options.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = Options.h; path = src/ld/Options.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F9C0D48A06DD1E1B001C7193 /* Options.cpp */ = {isa = PBXFileReference; fileEncoding = 30; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = Options.cpp; path = src/ld/Options.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F9C0D48B06DD1E1B001C7193 /* Options.h */ = {isa = PBXFileReference; fileEncoding = 30; indentWidth = 4; lastKnownFileType = sourcecode.c.h; name = Options.h; path = src/ld/Options.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9C12E9F0ED63DB1005BC69D /* dyldinfo.1 */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = text.man; name = dyldinfo.1; path = doc/man/man1/dyldinfo.1; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9CC24141461FB4300A92174 /* blob.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = blob.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9CC24151461FB4300A92174 /* blob.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = blob.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
@@ -436,6 +437,7 @@
 				F9AA65101051BD2B003E3539 /* stubs.cpp */,
 				F9AA650F1051BD2B003E3539 /* stub_arm.hpp */,
 				F984A13B10B614CF009E9878 /* stub_arm_classic.hpp */,
+				F93A9BEC12C2E51900BAA11D /* stub_arm64.hpp */,
 				F9BA8A7F1096150F0097A440 /* stub_x86.hpp */,
 				F9BA8A7E1096150F0097A440 /* stub_x86_classic.hpp */,
 				F989D0391062E6350014B60C /* stub_x86_64.hpp */,
@@ -1479,6 +1481,10 @@
 				GCC_MODEL_TUNING = G5;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				INSTALL_PATH = /usr/local/lib;
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
 				PREBINDING = NO;
 				PRODUCT_NAME = prunetrie;
 			};
@@ -1504,6 +1510,10 @@
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				GCC_WARN_ABOUT_MISSING_PROTOTYPES = YES;
 				INSTALL_PATH = /usr/local/lib;
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
 				PREBINDING = NO;
 				PRODUCT_NAME = prunetrie;
 			};
@@ -1519,6 +1529,10 @@
 				GCC_MODEL_TUNING = G5;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				INSTALL_PATH = /usr/local/lib;
+				OTHER_CPLUSPLUSFLAGS = (
+					"-stdlib=libc++",
+					"$(OTHER_CFLAGS)",
+				);
 				PREBINDING = NO;
 				PRODUCT_NAME = prunetrie;
 			};

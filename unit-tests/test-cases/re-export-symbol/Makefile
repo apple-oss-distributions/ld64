@@ -44,10 +44,12 @@ all:
 	${DYLDINFO}  -bind -lazy_bind main1 | grep _bar | grep libfoo | ${FAIL_IF_EMPTY}
 	${DYLDINFO}  -bind -lazy_bind main1 | grep _bar_weak | grep libfoo | ${FAIL_IF_EMPTY}
 
-	# build library the re-exports _bar from base library as _mybar
-	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo2.dylib libbar.dylib -Wl,-alias,_bar,_mybar -exported_symbols_list foo2.exp
+	# build library that re-exports _bar from base library as _mybar
+	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo2.dylib libbar.dylib -Wl,-alias,_bar,_mybar -exported_symbols_list foo2.exp -DUSE_MY
 	${FAIL_IF_BAD_MACHO} libfoo2.dylib
 	${DYLDINFO} -export libfoo2.dylib | grep _mybar | grep 're-export' | grep _bar | ${FAIL_IF_EMPTY} 
+	${DYLDINFO} -lazy_bind libfoo2.dylib | grep _bar | grep libbar | ${FAIL_IF_EMPTY} 
+	${DYLDINFO} -bind libfoo2.dylib | grep _bar | grep libbar | ${FAIL_IF_EMPTY} 
 	# link against dylib and verify _mybar is marked as coming from libfoo
 	${CC} ${CCFLAGS} main2.c libfoo2.dylib -o main2
 	${DYLDINFO}  -bind -lazy_bind main2 | grep _mybar | grep libfoo2 | ${FAIL_IF_EMPTY}

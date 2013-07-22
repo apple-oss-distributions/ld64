@@ -106,6 +106,8 @@ public:
 																					{ return _debugInfoModTime; }
 	virtual const std::vector<ld::relocatable::File::Stab>*	stabs()	const			{ return NULL; }
 	virtual bool										canScatterAtoms() const		{ return true; }
+	virtual LinkerOptionsList*							linkerOptions() const		{ return NULL; }
+
 
 	lto_module_t										module()					{ return _module; }
 	class InternalAtom&									internalAtom()				{ return _internalAtom; }
@@ -290,7 +292,9 @@ ld::relocatable::File* Parser::parseMachOFile(const uint8_t* p, size_t len, cons
 	objOpts.architecture		= options.arch;
 	objOpts.objSubtypeMustMatch = false; 
 	objOpts.logAllFiles			= false;
-	objOpts.convertUnwindInfo	= true;
+	objOpts.warnUnwindConversionProblems	= options.needsUnwindInfoSection;
+	objOpts.keepDwarfUnwind		= options.keepDwarfUnwind;
+	objOpts.forceDwarfConversion = false;
 	objOpts.subType				= 0;
 	
 	// mach-o parsing is done in-memory, but need path for debug notes
@@ -447,6 +451,16 @@ void Atom::setCompiledAtom(const ld::Atom& atom)
 
 
 
+// <rdar://problem/12379604> The order that files are merged must match command line order
+struct CommandLineOrderFileSorter
+{
+     bool operator()(File* left, File* right)
+     {
+        return ( left->ordinal() < right->ordinal() );
+     }
+};
+
+
 bool Parser::optimize(  const std::vector<const ld::Atom*>&	allAtoms,
 						ld::Internal&						state,
 						const OptimizeOptions&				options,
@@ -469,10 +483,16 @@ bool Parser::optimize(  const std::vector<const ld::Atom*>&	allAtoms,
 	
 	// create optimizer and add each Reader
 	lto_code_gen_t generator = ::lto_codegen_create();
+	// <rdar://problem/12379604> The order that files are merged must match command line order
+	std::sort(_s_files.begin(), _s_files.end(), CommandLineOrderFileSorter());
+	ld::File::Ordinal lastOrdinal;
 	for (std::vector<File*>::iterator it=_s_files.begin(); it != _s_files.end(); ++it) {
-		if ( logBitcodeFiles ) fprintf(stderr, "lto_codegen_add_module(%s)\n", (*it)->path());
-		if ( ::lto_codegen_add_module(generator, (*it)->module()) )
-			throwf("lto: could not merge in %s because '%s', using libLTO version '%s'", (*it)->path(), ::lto_get_error_message(), ::lto_get_version());
+		File* f = *it;
+		assert(f->ordinal() > lastOrdinal);
+		if ( logBitcodeFiles ) fprintf(stderr, "lto_codegen_add_module(%s)\n", f->path());
+		if ( ::lto_codegen_add_module(generator, f->module()) )
+			throwf("lto: could not merge in %s because '%s', using libLTO version '%s'", f->path(), ::lto_get_error_message(), ::lto_get_version());
+		lastOrdinal = f->ordinal();
 	}
 
 	// add any -mllvm command line options
@@ -480,6 +500,10 @@ bool Parser::optimize(  const std::vector<const ld::Atom*>&	allAtoms,
 		if ( logExtraOptions ) fprintf(stderr, "passing option to llvm: %s\n", *it);
 		::lto_codegen_debug_options(generator, *it);
 	}
+
+	// <rdar://problem/13687397> Need a way for LTO to get cpu variants (until that info is in bitcode)
+	if ( options.mcpu != NULL )
+		::lto_codegen_set_cpu(generator, options.mcpu);
 
 	// The atom graph uses directed edges (references). Collect all references where 
 	// originating atom is not part of any LTO Reader. This allows optimizer to optimize an 
@@ -775,7 +799,8 @@ void Parser::AtomSyncer::doAtom(const ld::Atom& machoAtom)
 						fit->u.target = pos->second;
 					}
 					else {
-						if ( _deadllvmAtoms.find(targetName) != _deadllvmAtoms.end() ) {
+						// <rdar://problem/12859831> Don't unbind follow-on reference into by-name reference 
+						if ( (_deadllvmAtoms.find(targetName) != _deadllvmAtoms.end()) && (fit->kind != ld::Fixup::kindNoneFollowOn) ) {
 							// target was coalesed away and replace by mach-o atom from a non llvm .o file
 							fit->binding = ld::Fixup::bindingByNameUnbound;
 							fit->u.name = targetName;

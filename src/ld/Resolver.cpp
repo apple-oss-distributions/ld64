@@ -132,6 +132,7 @@ public:
 
 	void									setFinalAliasOf() const {
 												(const_cast<AliasAtom*>(this))->setAttributesFromAtom(_aliasOf);
+												(const_cast<AliasAtom*>(this))->setScope(ld::Atom::scopeGlobal);
 											}
 															
 private:
@@ -281,13 +282,21 @@ void Resolver::initializeState()
 		_internal.objcObjectConstraint = ld::File::objcConstraintGC;
 	
 	_internal.cpuSubType = _options.subArchitecture();
+	
+	// In -r mode, look for -linker_option additions
+	if ( _options.outputKind() == Options::kObjectFile ) {
+		ld::relocatable::File::LinkerOptionsList lo = _options.linkerOptions();
+		for (relocatable::File::LinkerOptionsList::const_iterator it=lo.begin(); it != lo.end(); ++it) {
+			doLinkerOption(*it, "command line");
+		}
+	}
 }
 
 void Resolver::buildAtomList()
 {
 	// each input files contributes initial atoms
 	_atoms.reserve(1024);
-	_inputFiles.forEachInitialAtom(*this);
+	_inputFiles.forEachInitialAtom(*this, _internal);
     
 	_completedInitialObjectFiles = true;
 	
@@ -295,12 +304,46 @@ void Resolver::buildAtomList()
 }
 
 
+void Resolver::doLinkerOption(const std::vector<const char*>& linkerOption, const char* fileName)
+{
+	if ( linkerOption.size() == 1 ) {
+		const char* lo1 = linkerOption.front();
+		if ( strncmp(lo1, "-l", 2) == 0 ) {
+			_internal.linkerOptionLibraries.insert(&lo1[2]);
+		}
+		else {
+			warning("unknown linker option from object file ignored: '%s' in %s", lo1, fileName);
+		}
+	}
+	else if ( linkerOption.size() == 2 ) {
+		const char* lo2a = linkerOption[0];
+		const char* lo2b = linkerOption[1];
+		if ( strcmp(lo2a, "-framework") == 0 ) {
+			_internal.linkerOptionFrameworks.insert(lo2b);
+		}
+		else {
+			warning("unknown linker option from object file ignored: '%s' '%s' from %s", lo2a, lo2b, fileName);
+		}
+	}
+	else {
+		warning("unknown linker option from object file ignored, starting with: '%s' from %s", linkerOption.front(), fileName);
+	}
+}
+
 void Resolver::doFile(const ld::File& file)
 {
 	const ld::relocatable::File* objFile = dynamic_cast<const ld::relocatable::File*>(&file);
 	const ld::dylib::File* dylibFile = dynamic_cast<const ld::dylib::File*>(&file);
 
 	if ( objFile != NULL ) {
+		// if file has linker options, process them
+		ld::relocatable::File::LinkerOptionsList* lo = objFile->linkerOptions();
+		if ( lo != NULL ) {
+			for (relocatable::File::LinkerOptionsList::const_iterator it=lo->begin(); it != lo->end(); ++it) {
+				this->doLinkerOption(*it, file.path());
+			}
+		}
+		
 		// update which form of ObjC is being used
 		switch ( file.objCConstraint() ) {
 			case ld::File::objcConstraintNone:
@@ -312,16 +355,31 @@ void Resolver::doFile(const ld::File& file)
 					throwf("command line specified -objc_gc_only, but file is retain/release based: %s", file.path());
 				if ( _options.objcGc() )
 					throwf("command line specified -objc_gc, but file is retain/release based: %s", file.path());
-				_internal.objcObjectConstraint = ld::File::objcConstraintRetainRelease;
+				if ( !_options.targetIOSSimulator() && (_internal.objcObjectConstraint != ld::File::objcConstraintRetainReleaseForSimulator) )
+					_internal.objcObjectConstraint = ld::File::objcConstraintRetainRelease;
 				break;
 			case ld::File::objcConstraintRetainReleaseOrGC:
 				if ( _internal.objcObjectConstraint == ld::File::objcConstraintNone )
 					_internal.objcObjectConstraint = ld::File::objcConstraintRetainReleaseOrGC;
+				if ( _options.targetIOSSimulator() )
+					warning("linking ObjC for iOS Simulator, but object file (%s) was compiled for MacOSX", file.path());
 				break;
 			case ld::File::objcConstraintGC:
 				if ( _internal.objcObjectConstraint == ld::File::objcConstraintRetainRelease )
 					throwf("%s built with incompatible Garbage Collection settings to link with previous .o files", file.path());
 				_internal.objcObjectConstraint = ld::File::objcConstraintGC;
+				if ( _options.targetIOSSimulator() )
+					warning("linking ObjC for iOS Simulator, but object file (%s) was compiled for MacOSX", file.path());
+				break;
+			case ld::File::objcConstraintRetainReleaseForSimulator:
+				if ( _internal.objcObjectConstraint == ld::File::objcConstraintNone ) {
+					if ( !_options.targetIOSSimulator() && (_options.outputKind() != Options::kObjectFile) )
+						warning("ObjC object file (%s) was compiled for iOS Simulator, but linking for MacOSX", file.path());
+					_internal.objcObjectConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
+				}
+				else if ( _internal.objcObjectConstraint != ld::File::objcConstraintRetainReleaseForSimulator ) {
+					_internal.objcObjectConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
+				}
 				break;
 		}
 	
@@ -376,16 +434,30 @@ void Resolver::doFile(const ld::File& file)
 					throwf("command line specified -objc_gc_only, but dylib is retain/release based: %s", file.path());
 				if ( _options.objcGc() )
 					throwf("command line specified -objc_gc, but dylib is retain/release based: %s", file.path());
+				if ( _options.targetIOSSimulator() )
+					warning("linking ObjC for iOS Simulator, but dylib (%s) was compiled for MacOSX", file.path());
 				_internal.objcDylibConstraint = ld::File::objcConstraintRetainRelease;
 				break;
 			case ld::File::objcConstraintRetainReleaseOrGC:
 				if ( _internal.objcDylibConstraint == ld::File::objcConstraintNone )
 					_internal.objcDylibConstraint = ld::File::objcConstraintRetainReleaseOrGC;
+				if ( _options.targetIOSSimulator() )
+					warning("linking ObjC for iOS Simulator, but dylib (%s) was compiled for MacOSX", file.path());
 				break;
 			case ld::File::objcConstraintGC:
 				if ( _internal.objcDylibConstraint == ld::File::objcConstraintRetainRelease )
 					throwf("%s built with incompatible Garbage Collection settings to link with previous dylibs", file.path());
-				_internal.objcDylibConstraint = ld::File::objcConstraintGC;
+				if ( _options.targetIOSSimulator() )
+					warning("linking ObjC for iOS Simulator, but dylib (%s) was compiled for MacOSX", file.path());
+ 				_internal.objcDylibConstraint = ld::File::objcConstraintGC;
+				break;
+			case ld::File::objcConstraintRetainReleaseForSimulator:
+				if ( _internal.objcDylibConstraint == ld::File::objcConstraintNone )
+					_internal.objcDylibConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
+				else if ( _internal.objcDylibConstraint != ld::File::objcConstraintRetainReleaseForSimulator ) {
+					warning("ObjC dylib (%s) was compiled for iOS Simulator, but dylibs others were compiled for MacOSX", file.path());
+					_internal.objcDylibConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
+				}
 				break;
 		}
 	}
@@ -510,6 +582,8 @@ bool Resolver::isDtraceProbe(ld::Fixup::Kind kind)
 		case ld::Fixup::kindStoreX86DtraceIsEnableSiteClear:
 		case ld::Fixup::kindStoreARMDtraceCallSiteNop:
 		case ld::Fixup::kindStoreARMDtraceIsEnableSiteClear:
+		case ld::Fixup::kindStoreARM64DtraceCallSiteNop:
+		case ld::Fixup::kindStoreARM64DtraceIsEnableSiteClear:
 		case ld::Fixup::kindStoreThumbDtraceCallSiteNop:
 		case ld::Fixup::kindStoreThumbDtraceIsEnableSiteClear:
 		case ld::Fixup::kindDtraceExtra:
@@ -638,7 +712,21 @@ void Resolver::resolveUndefines()
 			}
 		}
 	}
-		
+	
+	// Use linker options to resolve an remaining undefined symbols
+	if ( !_internal.linkerOptionLibraries.empty() || !_internal.linkerOptionFrameworks.empty() ) {
+		std::vector<const char*> undefineNames;
+		_symbolTable.undefines(undefineNames);
+		if ( undefineNames.size() != 0 ) {
+			for (std::vector<const char*>::iterator it = undefineNames.begin(); it != undefineNames.end(); ++it) {
+				const char* undef = *it;
+				if ( ! _symbolTable.hasName(undef) ) {
+					_inputFiles.searchLibraries(undef, true, true, false, *this);
+				}
+			}
+		}
+	}
+	
 	// create proxies as needed for undefined symbols
 	if ( (_options.undefinedTreatment() != Options::kUndefinedError) || (_options.outputKind() == Options::kObjectFile) ) {
 		std::vector<const char*> undefineNames;
@@ -697,6 +785,7 @@ void Resolver::markLive(const ld::Atom& atom, WhyLiveBackChain* previous)
 			case ld::Fixup::kindNoneGroupSubordinate:
 			case ld::Fixup::kindNoneGroupSubordinateFDE:
 			case ld::Fixup::kindNoneGroupSubordinateLSDA:
+			case ld::Fixup::kindNoneGroupSubordinatePersonality:
 			case ld::Fixup::kindSetTargetAddress:
 			case ld::Fixup::kindSubtractTargetAddress:
 			case ld::Fixup::kindStoreTargetAddressLittleEndian32:
@@ -713,6 +802,12 @@ void Resolver::markLive(const ld::Atom& atom, WhyLiveBackChain* previous)
 			case ld::Fixup::kindStoreTargetAddressX86Abs32TLVLoadNowLEA:
 			case ld::Fixup::kindStoreTargetAddressARMBranch24:
 			case ld::Fixup::kindStoreTargetAddressThumbBranch22:
+#if SUPPORT_ARCH_arm64
+			case ld::Fixup::kindStoreTargetAddressARM64Branch26:
+			case ld::Fixup::kindStoreTargetAddressARM64Page21:
+			case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
+			case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
+#endif
 				if ( fit->binding == ld::Fixup::bindingByContentBound ) {
 					// normally this was done in convertReferencesToIndirect()
 					// but a archive loaded .o file may have a forward reference
@@ -1338,7 +1433,10 @@ void Resolver::linkTimeOptimize()
 	optOpt.relocatable					= (_options.outputKind() == Options::kObjectFile);
 	optOpt.allowTextRelocs				= _options.allowTextRelocs();
 	optOpt.linkerDeadStripping			= _options.deadCodeStrip();
+	optOpt.needsUnwindInfoSection		= _options.needsUnwindInfoSection();
+	optOpt.keepDwarfUnwind				= _options.keepDwarfUnwind();
 	optOpt.arch							= _options.architecture();
+	optOpt.mcpu							= _options.mcpuLTO();
 	optOpt.llvmOptions					= &_options.llvmOptions();
 	
 	std::vector<const ld::Atom*>		newAtoms;

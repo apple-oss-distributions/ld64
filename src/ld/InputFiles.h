@@ -63,7 +63,7 @@ public:
 	virtual ld::dylib::File*	findDylib(const char* installPath, const char* fromPath);
 	
 	// iterates all atoms in initial files
-	void						forEachInitialAtom(ld::File::AtomHandler&);
+	void						forEachInitialAtom(ld::File::AtomHandler&, ld::Internal& state);
 	// searches libraries for name
 	bool						searchLibraries(const char* name, bool searchDylibs, bool searchArchives,  
 																  bool dataSymbolOnly, ld::File::AtomHandler&) const;
@@ -90,12 +90,15 @@ private:
 	void						logTraceInfo (const char* format, ...) const;
 	void						logDylib(ld::File*, bool indirect);
 	void						logArchive(ld::File*) const;
+	void						markExplicitlyLinkedDylibs();
 	void						createIndirectDylibs();
 	void						checkDylibClientRestrictions(ld::dylib::File*);
 	void						createOpaqueFileSections();
+	void						addLinkerOptionLibraries(ld::Internal& state);
+	bool						libraryAlreadyLoaded(const char* path);
 	
 	// for pipelined linking
-    void                      waitForInputFiles();
+    void						waitForInputFiles();
 	static void					waitForInputFiles(InputFiles *inputFiles);
 
 	// for threaded input file processing
@@ -111,7 +114,6 @@ private:
 	InstallNameToDylib			_installPathToDylibs;
 	std::set<ld::dylib::File*>	_allDylibs;
 	ld::dylib::File*			_bundleLoader;
-	bool						_allDirectDylibsLoaded;
 	bool						_inferredArch;
     struct strcompclass {
         bool operator() (const char *a, const char *b) const { return ::strcmp(a, b) < 0; }
@@ -132,6 +134,7 @@ private:
 	int							_remainingInputFiles;	// number of input files still to parse
 	
 	ld::File::Ordinal			_indirectDylibOrdinal;
+	ld::File::Ordinal			_linkerOptionOrdinal;
     
     class LibraryInfo {
         ld::File* _lib;

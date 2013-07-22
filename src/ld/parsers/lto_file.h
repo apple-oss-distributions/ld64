@@ -53,7 +53,10 @@ struct OptimizeOptions {
 	bool								relocatable;
 	bool								allowTextRelocs; 
 	bool								linkerDeadStripping; 
+	bool								needsUnwindInfoSection; 
+	bool								keepDwarfUnwind; 
 	cpu_type_t							arch;
+	const char*							mcpu;
 	const std::vector<const char*>*		llvmOptions;
 };
 

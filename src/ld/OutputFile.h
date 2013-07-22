@@ -154,7 +154,8 @@ private:
 	void						setSectionSizesAndAlignments(ld::Internal& state);
 	void						addSectionRelocs(ld::Internal& state, ld::Internal::FinalSection* sect,  
 												const ld::Atom* atom, ld::Fixup* fixupWithTarget, 
-												ld::Fixup* fixupWithMinusTarget, ld::Fixup* fixupWithStore,
+												ld::Fixup* fixupWithMinusTarget, ld::Fixup* fixupWithAddend,
+												 ld::Fixup* fixupWithStore,
 												const ld::Atom* target, const ld::Atom* minusTarget, 
 												uint64_t targetAddend, uint64_t minusTargetAddend);
 	void						addDyldInfo(ld::Internal& state, ld::Internal::FinalSection* sect,  
@@ -169,6 +170,7 @@ private:
 												uint64_t targetAddend, uint64_t minusTargetAddend);
 	bool						useExternalSectionReloc(const ld::Atom* atom, const ld::Atom* target, 
 															ld::Fixup* fixupWithTarget);
+	bool						useSectionRelocAddend(ld::Fixup* fixupWithTarget);
 	uint64_t					pageAlign(uint64_t addr);
 	uint64_t					pageAlign(uint64_t addr, uint64_t pageSize);
 	void						setLoadCommandsPadding(ld::Internal& state);
@@ -215,6 +217,12 @@ private:
 																							const ld::Fixup* fixup);
 	void						rangeCheckThumbBranch22(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
 																							const ld::Fixup* fixup);
+	void						rangeCheckARM64Branch26(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
+																							const ld::Fixup* fixup);
+	void						rangeCheckARM64Page21(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
+																							const ld::Fixup* fixup);
+																							
+																							
 	uint64_t					sectionOffsetOf(const ld::Internal& state, const ld::Fixup* fixup);
 	uint64_t					tlvTemplateOffsetOf(const ld::Internal& state, const ld::Fixup* fixup);
 	void						dumpAtomsBySection(ld::Internal& state, bool);

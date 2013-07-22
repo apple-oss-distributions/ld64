@@ -804,6 +804,39 @@ void dumper::dumpFixup(const ld::Fixup* ref)
 		case ld::Fixup::kindStoreThumbHigh16:
 			printf(", then store high-16 in Thumb movt");
 			break;
+		case ld::Fixup::kindStoreARM64Branch26:
+			printf(", then store as ARM64 26-bit pcrel branch");
+			break;
+		case ld::Fixup::kindStoreARM64Page21:
+			printf(", then store as ARM64 21-bit pcrel ADRP");
+			break;
+		case ld::Fixup::kindStoreARM64PageOff12:
+			printf(", then store as ARM64 12-bit offset");
+			break;
+		case ld::Fixup::kindStoreARM64GOTLoadPage21:
+			printf(", then store as ARM64 21-bit pcrel ADRP of GOT");
+			break;
+		case ld::Fixup::kindStoreARM64GOTLoadPageOff12:
+			printf(", then store as ARM64 12-bit page offset of GOT");
+			break;
+		case ld::Fixup::kindStoreARM64GOTLeaPage21:
+			printf(", then store as ARM64 21-bit pcrel ADRP of GOT lea");
+			break;
+		case ld::Fixup::kindStoreARM64GOTLeaPageOff12:
+			printf(", then store as ARM64 12-bit page offset of GOT lea");
+			break;
+		case ld::Fixup::kindStoreARM64TLVPLoadPage21:
+			printf(", then store as ARM64 21-bit pcrel ADRP of TLVP");
+			break;
+		case ld::Fixup::kindStoreARM64TLVPLoadPageOff12:
+			printf(", then store as ARM64 12-bit page offset of TLVP");
+			break;
+		case ld::Fixup::kindStoreARM64PointerToGOT:
+			printf(", then store as 64-bit pointer to GOT entry");
+			break;
+		case ld::Fixup::kindStoreARM64PCRelToGOT:
+			printf(", then store as 32-bit delta to GOT entry");
+			break;
 		case ld::Fixup::kindDtraceExtra:
 			printf("dtrace static probe extra info");
 			break;
@@ -824,6 +857,12 @@ void dumper::dumpFixup(const ld::Fixup* ref)
 			break;
 		case ld::Fixup::kindStoreThumbDtraceIsEnableSiteClear:
 			printf("Thumb dtrace static is-enabled site");
+			break;
+		case ld::Fixup::kindStoreARM64DtraceCallSiteNop:
+			printf("ARM64 dtrace static probe site");
+			break;
+		case ld::Fixup::kindStoreARM64DtraceIsEnableSiteClear:
+			printf("ARM64 dtrace static is-enabled site");
 			break;
 		case ld::Fixup::kindLazyTarget:
 			printf("lazy reference to external symbol %s", referenceTargetAtomName(ref));
@@ -898,6 +937,28 @@ void dumper::dumpFixup(const ld::Fixup* ref)
 		case ld::Fixup::kindSetTargetTLVTemplateOffsetLittleEndian32:
 		case ld::Fixup::kindSetTargetTLVTemplateOffsetLittleEndian64:
 			printf("tlv template offset of %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64Branch26:
+			printf("ARM64 store 26-bit pcrel branch to %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64Page21:
+			printf("ARM64 store 21-bit pcrel ADRP to %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
+			printf("ARM64 store 12-bit page offset of %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
+			printf("ARM64 store 21-bit pcrel ADRP to GOT for %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
+			printf("ARM64 store 12-bit page offset of GOT of %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
+			printf("ARM64 store 21-bit pcrel ADRP for lea of %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPageOff12:
+			printf("ARM64 store 12-bit page offset of lea of %s", referenceTargetAtomName(ref));
+			break;
 		//default:
 		//	printf("unknown fixup");
 		//	break;
@@ -1116,7 +1177,9 @@ static ld::relocatable::File* createReader(const char* path)
 	objOpts.architecture		= sPreferredArch;
 	objOpts.objSubtypeMustMatch = false;
 	objOpts.logAllFiles			= false;
-	objOpts.convertUnwindInfo	= true;
+	objOpts.warnUnwindConversionProblems	= true;
+	objOpts.keepDwarfUnwind		= false;
+	objOpts.forceDwarfConversion = false;
 	objOpts.subType				= sPreferredSubArch;
 #if 1
 	if ( ! foundFatSlice ) {

@@ -29,9 +29,12 @@ include ${TESTROOT}/include/common.makefile
 
 all: 
 	${CC} ${CCFLAGS} -c test.s -o test.o
+	${CC} ${CCFLAGS} test.o -dynamiclib -o libtest.dylib
+	dyldinfo -arch ${ARCH} -data_in_code libtest.dylib| ${FAIL_IF_EMPTY}
 	${LD} -r -arch ${ARCH} test.o -o test2.o
-	#nm main | grep _dtrace_probe | ${FAIL_IF_EMPTY}
-	#${PASS_IFF_GOOD_MACHO} main
+	${CC} ${CCFLAGS} test2.o -dynamiclib -o libtest2.dylib
+	dyldinfo -arch ${ARCH} -data_in_code libtest2.dylib| ${FAIL_IF_EMPTY}
+	${PASS_IFF_GOOD_MACHO} libtest.dylib
 	
 clean:
-	rm -rf test.o test2.o
+	rm -rf test.o test2.o libtest.dylib libtest2.dylib
