@@ -394,6 +394,18 @@
 	};
 #endif
 
+#ifndef LC_LINKER_OPTIMIZATION_HINTS 
+	#define LC_LINKER_OPTIMIZATION_HINTS   0x2E
+	#define LOH_ARM64_ADRP_ADRP				1
+	#define LOH_ARM64_ADRP_LDR				2
+	#define LOH_ARM64_ADRP_ADD_LDR			3
+	#define LOH_ARM64_ADRP_LDR_GOT_LDR		4
+	#define LOH_ARM64_ADRP_ADD_STR			5
+	#define LOH_ARM64_ADRP_LDR_GOT_STR		6
+	#define LOH_ARM64_ADRP_ADD				7
+	#define LOH_ARM64_ADRP_LDR_GOT			8
+#endif
+
 #ifndef EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE
 	#define EXPORT_SYMBOL_FLAGS_KIND_ABSOLUTE			0x02
 #endif
@@ -415,6 +427,9 @@
 	#define CPU_SUBTYPE_ARM_V7EM	((cpu_subtype_t) 16) 
 #endif	
 
+#ifndef CPU_SUBTYPE_X86_64_H
+	#define CPU_SUBTYPE_X86_64_H	((cpu_subtype_t) 8) 
+#endif	
 
 struct ArchInfo {
 	const char*			archName;
@@ -428,7 +443,10 @@ struct ArchInfo {
 
 static const ArchInfo archInfoArray[] = {
 #if SUPPORT_ARCH_x86_64
-	{ "x86_64", CPU_TYPE_X86_64, CPU_SUBTYPE_X86_64_ALL, "x86_64-",  "", false, false },
+	{ "x86_64", CPU_TYPE_X86_64, CPU_SUBTYPE_X86_64_ALL, "x86_64-",  "", true, false },
+#endif
+#if SUPPORT_ARCH_x86_64h
+	{ "x86_64h", CPU_TYPE_X86_64, CPU_SUBTYPE_X86_64_H,	 "x86_64h-",  "", true, false },
 #endif
 #if SUPPORT_ARCH_i386
 	{ "i386",   CPU_TYPE_I386,   CPU_SUBTYPE_I386_ALL,   "i386-",    "", false, false },

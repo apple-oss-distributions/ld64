@@ -110,6 +110,7 @@ private:
 	uint8_t*					copyDependentDRLoadCommand(uint8_t* p) const;
 	uint8_t*					copyDyldEnvLoadCommand(uint8_t* p, const char* env) const;
 	uint8_t*					copyLinkerOptionsLoadCommand(uint8_t* p, const std::vector<const char*>&) const;
+	uint8_t*					copyOptimizationHintsLoadCommand(uint8_t* p) const;
 
 	uint32_t					sectionFlags(ld::Internal::FinalSection* sect) const;
 	bool						sectionTakesNoDiskSpace(ld::Internal::FinalSection* sect) const;
@@ -137,6 +138,7 @@ private:
 	bool						_hasDataInCodeLoadCommand;
 	bool						_hasSourceVersionLoadCommand;
 	bool						_hasDependentDRInfo;
+	bool						_hasOptimizationHints;
 	uint32_t					_dylibLoadCommmandsCount;
 	uint32_t					_allowableClientLoadCommmandsCount;
 	uint32_t					_dyldEnvironExrasCount;
@@ -176,6 +178,7 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	_hasRoutinesLoadCommand = (opts.initFunctionName() != NULL);
 	_hasSymbolTableLoadCommand = true;
 	_hasUUIDLoadCommand = (opts.UUIDMode() != Options::kUUIDNone);
+	_hasOptimizationHints = (_state.someObjectHasOptimizationHints && (opts.outputKind() == Options::kObjectFile));
 	switch ( opts.outputKind() ) {
 		case Options::kDynamicExecutable:
 		case Options::kDynamicLibrary:
@@ -426,6 +429,9 @@ uint64_t HeaderAndLoadCommandsAtom<A>::size() const
 	
 	if ( _hasDependentDRInfo ) 
 		sz += sizeof(macho_linkedit_data_command<P>);
+	
+	if ( _hasOptimizationHints )
+		sz += sizeof(macho_linkedit_data_command<P>);
 		
 	return sz;
 }
@@ -503,6 +509,9 @@ uint32_t HeaderAndLoadCommandsAtom<A>::commandsCount() const
 
 	if ( _hasDependentDRInfo ) 
 		++count;
+	
+	if ( _hasOptimizationHints )
+		++count;
 		
 	return count;
 }
@@ -561,9 +570,9 @@ uint32_t HeaderAndLoadCommandsAtom<A>::flags() const
 					bits |= MH_FORCE_FLAT;
 					break;
 			}
-			if ( _writer.hasWeakExternalSymbols || _writer.overridesWeakExternalSymbols )
+			if ( _state.hasWeakExternalSymbols || _writer.overridesWeakExternalSymbols )
 				bits |= MH_WEAK_DEFINES;
-			if ( _writer.usesWeakExternalSymbols || _writer.hasWeakExternalSymbols )
+			if ( _writer.usesWeakExternalSymbols || _state.hasWeakExternalSymbols )
 				bits |= MH_BINDS_TO_WEAK;
 			if ( _options.prebind() )
 				bits |= MH_PREBOUND;
@@ -578,7 +587,7 @@ uint32_t HeaderAndLoadCommandsAtom<A>::flags() const
 				bits |= MH_PIE;
 			if ( _options.markAutoDeadStripDylib() ) 
 				bits |= MH_DEAD_STRIPPABLE_DYLIB;
-			if ( _writer.hasThreadLocalVariableDefinitions )
+			if ( _state.hasThreadLocalVariableDefinitions )
 				bits |= MH_HAS_TLV_DESCRIPTORS;
 			if ( _options.hasNonExecutableHeap() )
 				bits |= MH_NO_HEAP_EXECUTION;
@@ -610,10 +619,10 @@ uint32_t HeaderAndLoadCommandsAtom<x86>::cpuSubType() const
 template <>
 uint32_t HeaderAndLoadCommandsAtom<x86_64>::cpuSubType() const
 {
-	if ( (_options.outputKind() == Options::kDynamicExecutable) && (_options.macosxVersionMin() >= ld::mac10_5) )
-		return (CPU_SUBTYPE_X86_64_ALL | 0x80000000);
+	if ( (_options.outputKind() == Options::kDynamicExecutable) && (_state.cpuSubType == CPU_SUBTYPE_X86_64_ALL) && (_options.macosxVersionMin() >= ld::mac10_5) )
+		return (_state.cpuSubType | 0x80000000);
 	else
-		return CPU_SUBTYPE_X86_64_ALL;
+		return _state.cpuSubType;
 }
 
 template <>
@@ -1409,6 +1418,19 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyDependentDRLoadCommand(uint8_t* p) co
 }
 
 
+
+template <typename A>
+uint8_t* HeaderAndLoadCommandsAtom<A>::copyOptimizationHintsLoadCommand(uint8_t* p) const
+{
+	macho_linkedit_data_command<P>* cmd = (macho_linkedit_data_command<P>*)p;
+	cmd->set_cmd(LC_LINKER_OPTIMIZATION_HINTS);
+	cmd->set_cmdsize(sizeof(macho_linkedit_data_command<P>));
+	cmd->set_dataoff(_writer.optimizationHintsSection->fileOffset);
+	cmd->set_datasize(_writer.optimizationHintsSection->size);
+	return p + sizeof(macho_linkedit_data_command<P>);
+}
+
+
 template <typename A>
 void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 {
@@ -1521,6 +1543,9 @@ void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 	
 	if ( _hasDependentDRInfo ) 
 		p = this->copyDependentDRLoadCommand(p);
+ 
+	if ( _hasOptimizationHints )
+		p = this->copyOptimizationHintsLoadCommand(p);
  
 }
 

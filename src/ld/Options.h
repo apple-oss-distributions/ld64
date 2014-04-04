@@ -172,6 +172,14 @@ public:
 		const char*			alias;
 	};
 
+	struct SectionRename {
+		const char*			fromSegment;
+		const char*			fromSection;
+		const char*			toSegment;
+		const char*			toSection;
+	};
+
+
 	enum { depLinkerVersion=0x00, depObjectFile=0x10, depDirectDylib=0x10, depIndirectDylib=0x10, 
 		  depUpwardDirectDylib=0x10, depUpwardIndirectDylib=0x10, depArchive=0x10,
 		  depFileList=0x10, depSection=0x10, depBundleLoader=0x10, depMisc=0x10, depNotFound=0x11,
@@ -335,7 +343,10 @@ public:
 	bool						objcCategoryMerging() const { return fObjcCategoryMerging; }
 	bool						pageAlignDataAtoms() const { return fPageAlignDataAtoms; }
 	bool						keepDwarfUnwind() const { return fKeepDwarfUnwind; }
+	bool						verboseOptimizationHints() const { return fVerboseOptimizationHints; }
+	bool						ignoreOptimizationHints() const { return fIgnoreOptimizationHints; }
 	bool						generateDtraceDOF() const { return fGenerateDtraceDOF; }
+	bool						allowBranchIslands() const { return fAllowBranchIslands; }
 	bool						hasWeakBitTweaks() const;
 	bool						forceWeak(const char* symbolName) const;
 	bool						forceNotWeak(const char* symbolName) const;
@@ -362,6 +373,7 @@ public:
 								linkerOptions() const { return fLinkerOptions; }
 	FileInfo					findFramework(const char* frameworkName) const;
 	FileInfo					findLibrary(const char* rootName, bool dylibsOnly=false) const;
+	const std::vector<SectionRename>& sectionRenames() const { return fSectionRenames; }
 
 private:
 	typedef std::unordered_map<const char*, unsigned int, ld::CStringHash, ld::CStringEquals> NameToOrder;
@@ -424,6 +436,7 @@ private:
 	void						warnObsolete(const char* arg);
 	uint32_t					parseProtection(const char* prot);
 	void						loadSymbolOrderFile(const char* fileOfExports, NameToOrder& orderMapping);
+	void						addSectionRename(const char* srcSegment, const char* srcSection, const char* dstSegment, const char* dstSection);
 
 
 
@@ -591,7 +604,10 @@ private:
 	bool								fKeepDwarfUnwind;
 	bool								fKeepDwarfUnwindForcedOn;
 	bool								fKeepDwarfUnwindForcedOff;
+	bool								fVerboseOptimizationHints;
+	bool								fIgnoreOptimizationHints;
 	bool								fGenerateDtraceDOF;
+	bool								fAllowBranchIslands;
 	DebugInfoStripping					fDebugInfoStripping;
 	const char*							fTraceOutputFile;
 	ld::MacVersionMin					fMacVersionMin;
@@ -613,6 +629,7 @@ private:
 	std::vector<const char*>			fSDKPaths;
 	std::vector<const char*>			fDyldEnvironExtras;
 	std::vector< std::vector<const char*> > fLinkerOptions;
+	std::vector<SectionRename>			fSectionRenames;
 	bool								fSaveTempFiles;
     mutable Snapshot					fLinkSnapshot;
     bool								fSnapshotRequested;

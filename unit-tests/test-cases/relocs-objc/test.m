@@ -48,7 +48,7 @@
 
 
 
-@interface Base
+@interface Base : NSObject
 @end
 
 

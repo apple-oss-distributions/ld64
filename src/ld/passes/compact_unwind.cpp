@@ -159,7 +159,7 @@ UnwindInfoAtom<A>::UnwindInfoAtom(const std::vector<UnwindEntry>& entries, uint6
 	// calculate worst case size for all unwind info pages when allocating buffer
 	const unsigned int entriesPerRegularPage = (4096-sizeof(unwind_info_regular_second_level_page_header))/sizeof(unwind_info_regular_second_level_entry);
 	assert(uniqueEntries.size() > 0);
-	const unsigned int pageCount = ((uniqueEntries.size() - 1)/entriesPerRegularPage) + 1;
+	const unsigned int pageCount = ((uniqueEntries.size() - 1)/entriesPerRegularPage) + 2;
 	_pagesForDelete = (uint8_t*)calloc(pageCount,4096);
 	if ( _pagesForDelete == NULL ) {
 		warning("could not allocate space for compact unwind info");
@@ -186,7 +186,11 @@ UnwindInfoAtom<A>::UnwindInfoAtom(const std::vector<UnwindEntry>& entries, uint6
 		secondLevelPagesStarts[secondLevelPageCount] = pageEnd;
 		secondLevelFirstFuncs[secondLevelPageCount] = uniqueEntries[endIndex].func;
 		++secondLevelPageCount;
-		pageSize = 4096;  // last page can be odd size, make rest up to 4096 bytes in size
+		// if this requires more than one page, align so that next starts on page boundary
+		if ( (pageSize != 4096) && (endIndex > 0) ) {
+			pageEnd = (uint8_t*)((uintptr_t)(pageEnd) & -4096);
+			pageSize = 4096;  // last page can be odd size, make rest up to 4096 bytes in size
+		}
 	}
 	_pages = pageEnd;
 	_pagesSize = &_pagesForDelete[pageCount*4096] - pageEnd;

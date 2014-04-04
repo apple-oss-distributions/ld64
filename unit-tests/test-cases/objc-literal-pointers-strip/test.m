@@ -25,8 +25,10 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <Foundation/Foundation.h>
 
-@interface Foo @end
+@interface Foo : NSObject
+@end
 @implementation Foo
 +(void)initialize { }
 +(void)foo {

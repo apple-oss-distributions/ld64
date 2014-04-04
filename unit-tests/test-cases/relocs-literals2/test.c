@@ -48,7 +48,7 @@ long double getLongDouble() { return 3.0; }
 
 // rdar://problem/4732996
 const char* stringFutz(int x) {
-	return "hello" + 0x1000 + x;
+	return &"hello"[0x1000 + x];
 }
 
-const char*	usesAddend = "teststr" + 0x2000;
+const char*	usesAddend = &"teststr"[0x2000];

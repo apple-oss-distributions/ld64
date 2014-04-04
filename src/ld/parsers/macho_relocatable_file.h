@@ -38,6 +38,8 @@ struct ParserOptions {
 	bool			warnUnwindConversionProblems;
 	bool			keepDwarfUnwind;
 	bool			forceDwarfConversion;
+	bool			neverConvertDwarf;
+	bool			verboseOptimizationHints;
 	uint32_t		subType;
 };
 

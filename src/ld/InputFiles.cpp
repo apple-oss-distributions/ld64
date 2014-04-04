@@ -282,6 +282,8 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	objOpts.warnUnwindConversionProblems	= _options.needsUnwindInfoSection();
 	objOpts.keepDwarfUnwind		= _options.keepDwarfUnwind();
 	objOpts.forceDwarfConversion= (_options.outputKind() == Options::kDyld);
+	objOpts.neverConvertDwarf   = !_options.needsUnwindInfoSection();
+	objOpts.verboseOptimizationHints = _options.verboseOptimizationHints();
 	objOpts.subType				= _options.subArchitecture();
 	ld::relocatable::File* objResult = mach_o::relocatable::parse(p, len, info.path, info.modTime, info.ordinal, objOpts);
 	if ( objResult != NULL ) {
@@ -291,7 +293,7 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	}
 
 	// see if it is an llvm object file
-	objResult = lto::parse(p, len, info.path, info.modTime, info.ordinal, _options.architecture(), _options.subArchitecture(), _options.logAllFiles());
+	objResult = lto::parse(p, len, info.path, info.modTime, info.ordinal, _options.architecture(), _options.subArchitecture(), _options.logAllFiles(), _options.verboseOptimizationHints());
 	if ( objResult != NULL ) {
 		OSAtomicAdd64(len, &_totalObjectSize);
 		OSAtomicIncrement32(&_totalObjectLoaded);
@@ -561,7 +563,7 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state)
 				}
 			}
 			catch (const char* msg) {
-				throwf("in '%s', %s", info.path, msg);
+				warning("Auto-Linking supplied '%s', %s", info.path, msg);
 			}
 		}
 	}
@@ -589,7 +591,7 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state)
 				}
 			}
 			catch (const char* msg) {
-				throwf("in '%s', %s", info.path, msg);
+				warning("Auto-Linking supplied '%s', %s", info.path, msg);
 			}
 		}
 	}

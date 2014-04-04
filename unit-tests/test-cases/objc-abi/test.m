@@ -1,5 +1,5 @@
 
-@interface Foo 
+@interface Foo
 @end
 
 @implementation Foo

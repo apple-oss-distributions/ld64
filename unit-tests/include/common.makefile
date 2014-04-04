@@ -13,7 +13,7 @@ MYDIR=$(shell cd ../../bin;pwd)
 LD			= ld
 OBJECTDUMP	= ObjectDump
 MACHOCHECK	= machocheck
-OTOOL		= otool
+OTOOL =   /Applications/Xcode.app/Contents/Developer/Toolchains/iOS7.0.xctoolchain/usr/bin/otool
 REBASE		= rebase
 DYLDINFO	= dyldinfo
 
@@ -65,7 +65,7 @@ LD_NEW_LINKEDIT = -macosx_version_min 10.6
 CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} ${SDKExtra}
 CXXFLAGS = -Wall -stdlib=libc++ 
 
-IOS_SDK = $(shell xcodebuild -sdk iphoneos7.0.internal -version Path)
+IOS_SDK = $(shell xcodebuild -sdk iphoneos7.0.internal -version Path  2>/dev/null)
 
 ifeq ($(ARCH),armv6)
   LDFLAGS := -syslibroot $(IOS_SDK)
@@ -127,12 +127,16 @@ endif
 
 ifeq ($(ARCH),arm64)
   LDFLAGS := -syslibroot $(IOS_SDK)
-  CC = $(shell xcrun --sdk iphoneos.internal -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=7.0 -isysroot $(IOS_SDK)
+  CC = /Applications/Xcode.app/Contents/Developer/Toolchains/iOS7.1.xctoolchain/usr/bin/clang -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=7.0 -isysroot $(IOS_SDK)
+  #CC = $(shell xcrun --sdk iphoneos.internal -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=7.0 -isysroot $(IOS_SDK)
+  #CC =  /Applications/Xcode.app/Contents/Developer/Toolchains/iOS7.0.xctoolchain/usr/bin/clang-loh -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=7.0 -isysroot $(IOS_SDK)
   CXX = $(shell xcrun --sdk iphoneos.internal -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=7.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=7.0
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)
   LD_NEW_LINKEDIT = -ios_version_min 7.0
+  OTOOL =   /Applications/Xcode.app/Contents/Developer/Toolchains/iOS7.1.xctoolchain/usr/bin/otool
+  #OTOOL =  $(shell xcrun --sdk iphoneos.internal -find otool)
 else
   FILEARCH = $(ARCH)
 endif

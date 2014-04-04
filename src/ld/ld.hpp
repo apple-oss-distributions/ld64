@@ -166,7 +166,8 @@ enum MacVersionMin { macVersionUnset=0, mac10_4=0x000A0400, mac10_5=0x000A0500,
 						mac10_9=0x000A0900, mac10_Future=0x10000000 };
 enum IOSVersionMin { iOSVersionUnset=0, iOS_2_0=0x00020000, iOS_3_1=0x00030100, 
 						iOS_4_2=0x00040200, iOS_4_3=0x00040300, iOS_5_0=0x00050000,
-						iOS_6_0=0x00060000, iOS_7_0=0x00070000, iOS_Future=0x10000000};
+						iOS_6_0=0x00060000, iOS_7_0=0x00070000,  
+						iOS_Future=0x10000000};
  
 namespace relocatable {
 	//
@@ -409,6 +410,7 @@ struct Fixup
 					kindStoreARM64GOTLoadPage21, kindStoreARM64GOTLoadPageOff12,
 					kindStoreARM64GOTLeaPage21, kindStoreARM64GOTLeaPageOff12,
 					kindStoreARM64TLVPLoadPage21, kindStoreARM64TLVPLoadPageOff12,
+					kindStoreARM64TLVPLoadNowLeaPage21, kindStoreARM64TLVPLoadNowLeaPageOff12,
 					kindStoreARM64PointerToGOT, kindStoreARM64PCRelToGOT,
 #endif
 					// dtrace probes
@@ -419,9 +421,13 @@ struct Fixup
 					kindStoreThumbDtraceCallSiteNop, kindStoreThumbDtraceIsEnableSiteClear,
 					// lazy binding
 					kindLazyTarget, kindSetLazyOffset,
+					// islands
+					kindIslandTarget,
 					// data-in-code markers
 					kindDataInCodeStartData, kindDataInCodeStartJT8, kindDataInCodeStartJT16, 
 					kindDataInCodeStartJT32, kindDataInCodeStartJTA32, kindDataInCodeEnd,
+					// linker optimzation hints
+					kindLinkerOptimizationHint,
 					// pointer store combinations
 					kindStoreTargetAddressLittleEndian32,	// kindSetTargetAddress + kindStoreLittleEndian32
 					kindStoreTargetAddressLittleEndian64,	// kindSetTargetAddress + kindStoreLittleEndian64
@@ -451,6 +457,10 @@ struct Fixup
 					kindStoreTargetAddressARM64GOTLoadPageOff12,// kindSetTargetAddress + kindStoreARM64GOTLoadPageOff12
 					kindStoreTargetAddressARM64GOTLeaPage21,	// kindSetTargetAddress + kindStoreARM64GOTLeaPage21
 					kindStoreTargetAddressARM64GOTLeaPageOff12,	// kindSetTargetAddress + kindStoreARM64GOTLeaPageOff12
+					kindStoreTargetAddressARM64TLVPLoadPage21,	// kindSetTargetAddress + kindStoreARM64TLVPLoadPage21
+					kindStoreTargetAddressARM64TLVPLoadPageOff12,// kindSetTargetAddress + kindStoreARM64TLVPLoadPageOff12
+					kindStoreTargetAddressARM64TLVPLoadNowLeaPage21,	// kindSetTargetAddress + kindStoreARM64TLVPLoadNowLeaPage21
+					kindStoreTargetAddressARM64TLVPLoadNowLeaPageOff12,	// kindSetTargetAddress + kindStoreARM64TLVPLoadNowLeaPageOff12
 #endif
 			};
 
@@ -516,6 +526,23 @@ struct Fixup
 		contentAddendOnly(false), contentDetlaToAddendOnly(false), contentIgnoresAddend(false) 
 			{ u.addend = addend; }
 			
+#if SUPPORT_ARCH_arm64
+	Fixup(Kind k, uint32_t lohKind, uint32_t off1, uint32_t off2) :
+		offsetInAtom(off1), kind(k), clusterSize(k1of1),  
+		weakImport(false), binding(Fixup::bindingNone), contentAddendOnly(false), 
+		contentDetlaToAddendOnly(false), contentIgnoresAddend(false) {
+			assert(k == kindLinkerOptimizationHint);
+			LOH_arm64 extra;
+			extra.addend = 0;
+			extra.info.kind = lohKind;
+			extra.info.count = 1;
+			extra.info.delta1 = 0;
+			extra.info.delta2 = (off2 - off1) >> 2;
+			u.addend = extra.addend; 
+		}
+#endif			
+			
+
 	bool firstInCluster() const { 
 		switch (clusterSize) {
 			case k1of1:
@@ -543,6 +570,20 @@ struct Fixup
 		}
 		return false;
 	}
+	
+#if SUPPORT_ARCH_arm64
+	union LOH_arm64 {
+		uint64_t	addend;
+		struct {
+			unsigned	kind	:  6,
+						count	:  2,	// 00 => 1 addr, 11 => 4 addrs
+						delta1 : 14,	// 16-bit delta, low 2 bits assumed zero
+						delta2 : 14,
+						delta3 : 14,
+						delta4 : 14;	
+		} info;
+	};
+#endif
 	
 };
 
@@ -707,6 +748,7 @@ public:
 		}
 		return false;
 	}
+	virtual void							setFile(const File* f)		{ }
 	
 	virtual UnwindInfo::iterator			beginUnwind() const { return NULL; }
 	virtual UnwindInfo::iterator			endUnwind() const	{ return NULL; }
@@ -805,7 +847,8 @@ public:
 		bool							hasExternalRelocs;
 	};
 	
-
+	virtual uint64_t					assignFileOffsets() = 0;
+	virtual void						setSectionSizesAndAlignments() = 0;
 	virtual ld::Internal::FinalSection*	addAtom(const Atom&) = 0;
 	virtual ld::Internal::FinalSection* getFinalSection(const ld::Section& inputSection) = 0;
 	virtual								~Internal() {}
@@ -816,7 +859,10 @@ public:
 											objcDylibConstraint(ld::File::objcConstraintNone), 
 											cpuSubType(0), 
 											allObjectFilesScatterable(true), 
-											someObjectFileHasDwarf(false), usingHugeSections(false) { }
+											someObjectFileHasDwarf(false), usingHugeSections(false),
+											hasThreadLocalVariableDefinitions(false),
+											hasWeakExternalSymbols(false),
+											someObjectHasOptimizationHints(false) { }
 										
 	std::vector<FinalSection*>					sections;
 	std::vector<ld::dylib::File*>				dylibs;
@@ -835,6 +881,9 @@ public:
 	bool										allObjectFilesScatterable;
 	bool										someObjectFileHasDwarf;
 	bool										usingHugeSections;
+	bool										hasThreadLocalVariableDefinitions;
+	bool										hasWeakExternalSymbols;
+	bool										someObjectHasOptimizationHints;
 };
 
 

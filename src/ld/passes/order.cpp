@@ -531,22 +531,32 @@ void Layout::buildOrdinalOverrideMap()
 		warning("only %u out of %lu order_file symbols were applicable", matchCount, _options.orderedSymbolsCount() );
 	}
 
-
 	// <rdar://problem/8612550> When order file used on data, turn ordered zero fill symbols into zeroed data
 	if ( ! moveToData.empty() ) {
+		// <rdar://problem/14919139> only move zero fill symbols to __data if there is a __data section
+		ld::Internal::FinalSection* dataSect = NULL;
 		for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
 			ld::Internal::FinalSection* sect = *sit;
-			switch ( sect->type() ) {
-				case ld::Section::typeZeroFill:
-				case ld::Section::typeTentativeDefs:
-					sect->atoms.erase(std::remove_if(sect->atoms.begin(), sect->atoms.end(), InSet(moveToData)), sect->atoms.end());
-					break;
-				case ld::Section::typeUnclassified:
-					if ( (strcmp(sect->sectionName(), "__data") == 0) && (strcmp(sect->segmentName(), "__DATA") == 0) )
-						sect->atoms.insert(sect->atoms.end(), moveToData.begin(), moveToData.end());
-					break;
-				default:
-					break;
+			if ( sect->type() == ld::Section::typeUnclassified ) {
+				if ( (strcmp(sect->sectionName(), "__data") == 0) && (strcmp(sect->segmentName(), "__DATA") == 0) )
+					dataSect = sect;
+			}
+		}
+
+		if ( dataSect != NULL ) {
+			// add atoms to __data
+			dataSect->atoms.insert(dataSect->atoms.end(), moveToData.begin(), moveToData.end());
+			// remove atoms from original sections
+			for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
+				ld::Internal::FinalSection* sect = *sit;
+				switch ( sect->type() ) {
+					case ld::Section::typeZeroFill:
+					case ld::Section::typeTentativeDefs:
+						sect->atoms.erase(std::remove_if(sect->atoms.begin(), sect->atoms.end(), InSet(moveToData)), sect->atoms.end());
+						break;
+					default:
+						break;
+				}
 			}
 		}
 	}

@@ -35,11 +35,11 @@ _prejunk:
 #if __thumb2__
 	// thumb2 branches are +/- 16MB
 _space1:
-    .space 14*1024*1024
+    .space 13*1024*1024
 _space2:
-    .space 14*1024*1024
+    .space 13*1024*1024
 _space3:
-    .space 14*1024*1024
+    .space 13*1024*1024
 
 
 #elif __thumb__

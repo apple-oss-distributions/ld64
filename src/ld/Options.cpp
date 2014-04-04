@@ -175,7 +175,8 @@ Options::Options(int argc, const char* argv[])
 	  fTargetIOSSimulator(false), fExportDynamic(false), fAbsoluteSymbols(false),
 	  fAllowSimulatorToLinkWithMacOSX(false), fKeepDwarfUnwind(true),
 	  fKeepDwarfUnwindForcedOn(false), fKeepDwarfUnwindForcedOff(false),
-	  fGenerateDtraceDOF(true),
+	  fVerboseOptimizationHints(false), fIgnoreOptimizationHints(false),
+	  fGenerateDtraceDOF(true), fAllowBranchIslands(true),
 	  fDebugInfoStripping(kDebugInfoMinimal), fTraceOutputFile(NULL), 
 	  fMacVersionMin(ld::macVersionUnset), fIOSVersionMin(ld::iOSVersionUnset), 
 	  fSaveTempFiles(false), fSnapshotRequested(false), fPipelineFifo(NULL), 
@@ -631,7 +632,21 @@ Options::FileInfo Options::findLibrary(const char* rootName, bool dylibsOnly) co
 		}
 	}
 	else {
-		bool lookForDylibs = ( fOutputKind != Options::kDyld);
+		bool lookForDylibs = false;
+		switch ( fOutputKind ) {
+			case Options::kDynamicExecutable:
+			case Options::kDynamicLibrary:
+			case Options::kDynamicBundle:
+			case Options::kObjectFile:  // <rdar://problem/15914513> 
+				lookForDylibs = true;
+				break;
+			case Options::kStaticExecutable:
+			case Options::kDyld:
+			case Options::kPreload:
+			case Options::kKextBundle:
+				lookForDylibs = false;
+				break;
+		}
 		switch ( fLibrarySearchMode ) {
 		case kSearchAllDirsForDylibsThenAllDirsForArchives:
 				// first look in all directories for just for dylibs
@@ -1717,6 +1732,27 @@ void Options::addSection(const char* segment, const char* section, const char* p
 	fExtraSections.push_back(info);
 }
 
+void Options::addSectionRename(const char* srcSegment, const char* srcSection, const char* dstSegment, const char* dstSection)
+{
+	if ( strlen(srcSegment) > 16 )
+		throw "-rename_section segment name max 16 chars";
+	if ( strlen(srcSection) > 16 )
+		throw "-rename_section section name max 16 chars";
+	if ( strlen(dstSegment) > 16 )
+		throw "-rename_section segment name max 16 chars";
+	if ( strlen(dstSection) > 16 )
+		throw "-rename_section section name max 16 chars";
+
+	SectionRename info;
+	info.fromSegment = srcSegment;
+	info.fromSection = srcSection;
+	info.toSegment = dstSegment;
+	info.toSection = dstSection;
+
+	fSectionRenames.push_back(info);
+}
+
+
 void Options::addSectionAlignment(const char* segment, const char* section, const char* alignmentStr)
 {
 	if ( strlen(segment) > 16 )
@@ -2571,18 +2607,6 @@ void Options::parse(int argc, const char* argv[])
                 snapshotFileArgIndex = 1;
 				parseAliasFile(argv[++i]);
 			}
-			// put this last so that it does not interfer with other options starting with 'i'
-			else if ( strncmp(arg, "-i", 2) == 0 ) {
-				const char* colon = strchr(arg, ':');
-				if ( colon == NULL )
-					throwf("unknown option: %s", arg);
-				Options::AliasPair pair;
-				char* temp = new char[colon-arg];
-				strlcpy(temp, &arg[2], colon-arg-1);
-				pair.realName = &colon[1];
-				pair.alias = temp;
-				fAliases.push_back(pair);
-			}
 			else if ( strcmp(arg, "-save-temps") == 0 ) {
 				fSaveTempFiles = true;
 			}
@@ -2923,8 +2947,35 @@ void Options::parse(int argc, const char* argv[])
 				fKeepDwarfUnwindForcedOn = false;
 				fKeepDwarfUnwindForcedOff = true;
 			}
+			else if ( strcmp(arg, "-verbose_optimization_hints") == 0 ) {
+				fVerboseOptimizationHints = true;
+			}
+			else if ( strcmp(arg, "-ignore_optimization_hints") == 0 ) {
+				fIgnoreOptimizationHints = true;
+			}
 			else if ( strcmp(arg, "-no_dtrace_dof") == 0 ) {
 				fGenerateDtraceDOF = false;
+			}
+			else if ( strcmp(arg, "-rename_section") == 0 ) {
+				 if ( (argv[i+1]==NULL) || (argv[i+2]==NULL) || (argv[i+3]==NULL) || (argv[i+4]==NULL) )
+					throw "-rename_section missing <segment> <section> <segment> <section>";
+				addSectionRename(argv[i+1], argv[i+2], argv[i+3], argv[i+4]);
+				i += 4;
+			}
+			else if ( strcmp(arg, "-no_branch_islands") == 0 ) {
+				fAllowBranchIslands = false;
+			}
+			// put this last so that it does not interfer with other options starting with 'i'
+			else if ( strncmp(arg, "-i", 2) == 0 ) {
+				const char* colon = strchr(arg, ':');
+				if ( colon == NULL )
+					throwf("unknown option: %s", arg);
+				Options::AliasPair pair;
+				char* temp = new char[colon-arg];
+				strlcpy(temp, &arg[2], colon-arg-1);
+				pair.realName = &colon[1];
+				pair.alias = temp;
+				fAliases.push_back(pair);
 			}
 			else {
 				throwf("unknown option: %s", arg);
@@ -3388,6 +3439,11 @@ void Options::reconfigureDefaults()
 				fFunctionStartsLoadCommand = true;
 			break;
 		case Options::kObjectFile:
+			if ( !fDataInCodeInfoLoadCommandForcedOff )
+				fDataInCodeInfoLoadCommand = true;
+			if ( fFunctionStartsForcedOn )
+				fFunctionStartsLoadCommand = true;
+			break;
 		case Options::kDynamicExecutable:
 		case Options::kDyld:
 		case Options::kDynamicLibrary:
@@ -3624,7 +3680,11 @@ void Options::reconfigureDefaults()
 	// <rdar://problem/5366363> -r -x implies -S
 	if ( (fOutputKind == Options::kObjectFile) && (fLocalSymbolHandling == kLocalSymbolsNone) )
 		fDebugInfoStripping = Options::kDebugInfoNone;			
-		
+
+	// <rdar://problem/15252891> -r implies -no_uuid
+	if ( fOutputKind == Options::kObjectFile )
+		fUUIDMode = kUUIDNone;
+
 	// choose how to process unwind info
 	switch ( fArchitecture ) {
 		case CPU_TYPE_I386:		
@@ -3709,9 +3769,17 @@ void Options::reconfigureDefaults()
 			fMakeCompressedDyldInfo = false;
 	}
 
-	// only ARM enforces that cpu-sub-types must match
-	if ( fArchitecture != CPU_TYPE_ARM )
-		fAllowCpuSubtypeMismatches = true;
+	// only ARM and x86_64 enforces that cpu-sub-types must match
+	switch ( fArchitecture ) {
+		case CPU_TYPE_ARM:
+		case CPU_TYPE_X86_64:
+			break;
+		case CPU_TYPE_I386:
+		case CPU_TYPE_ARM64:
+			fAllowCpuSubtypeMismatches = true;
+			break;
+	}
+		
 		
 	// only final linked images can not optimize zero fill sections
 	if ( fOutputKind == Options::kObjectFile )
@@ -3794,7 +3862,10 @@ void Options::reconfigureDefaults()
 	if ( fMacVersionMin >= ld::mac10_7 ) {
 		fTLVSupport = true;
 	}
-	
+	else if ( (fArchitecture == CPU_TYPE_ARM64) && (fIOSVersionMin >= 0x00080000) ) {
+		fTLVSupport = true;
+	}
+
 	// default to adding version load command for dynamic code, static code must opt-in
 	switch ( fOutputKind ) {
 		case Options::kObjectFile:
@@ -4466,6 +4537,10 @@ void Options::checkIllegalOptionCombinations()
 	// -dyld_env can only be used with main executables
 	if ( (fOutputKind != Options::kDynamicExecutable) && (fDyldEnvironExtras.size() != 0) )
 		throw "-dyld_env can only used used when created main executables";
+
+	// -rename_sections can only be used in -r mode
+	if ( (fSectionRenames.size() != 0) && (fOutputKind != Options::kObjectFile) )
+		throw "-rename_sections can only used used in -r mode";
 }	
 
 

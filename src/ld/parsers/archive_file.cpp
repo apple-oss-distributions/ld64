@@ -381,7 +381,7 @@ typename File<A>::MemberState& File<A>::makeObjectFileForMember(const Entry* mem
 		// see if member is llvm bitcode file
 		result = lto::parse(member->content(), member->contentSize(), 
 								mPath, member->modificationTime(), ordinal, 
-								_objOpts.architecture, _objOpts.subType, _logAllFiles);
+								_objOpts.architecture, _objOpts.subType, _logAllFiles, _objOpts.verboseOptimizationHints);
 		if ( result != NULL ) {
 			MemberState state = {result, member, false, false, memberIndex};
 			_instantiatedEntries[member] = state;

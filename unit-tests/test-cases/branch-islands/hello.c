@@ -5,7 +5,10 @@ extern void foo();
 int main()
 {
 	fprintf(stdout, "hello\n");
-    foo();
+  foo();
 	return 0;
 }
 
+void back()
+{
+}

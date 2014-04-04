@@ -297,6 +297,10 @@ them to use no space on disk.  This option suppresses that optimization, so zero
 space on disk in a final linked image.
 .It Fl merge_zero_fill_sections
 Causes all zero-fill sections in the __DATA segment to be merged into one __zerofill section.
+.It Fl no_branch_islands
+Disables linker creation of branch islands which allows images to be created that are larger than the
+maximum branch distance. Useful with -preload when code is in multiple sections but all are within
+the branch range.
 .El
 .Ss Options when creating a dynamic library (dylib) 
 .Bl -tag
@@ -380,6 +384,8 @@ Don't turn private external (aka visibility=hidden) symbols into static symbols,
 but rather leave them as private external in the resulting object file.
 .It Fl d
 Force definition of common symbols.  That is, transform tentative definitions into real definitions.
+.It Fl rename_section Ar fromSegment fromSection toSegment toSection
+Renames section fromSegment/fromSection to toSegment/toSection.
 .El
 .Ss Options that control symbol resolution
 .Bl -tag

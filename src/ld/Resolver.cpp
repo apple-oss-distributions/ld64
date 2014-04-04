@@ -418,7 +418,16 @@ void Resolver::doFile(const ld::File& file)
 				break;
 				
 			case CPU_TYPE_X86_64:
-				_internal.cpuSubType = CPU_SUBTYPE_X86_64_ALL;
+				if ( _options.subArchitecture() != nextObjectSubType ) {
+					if ( _options.allowSubArchitectureMismatches() ) {
+						warning("object file %s was built for different x86_64 sub-type (%d) than link command line (%d)", 
+							file.path(), nextObjectSubType, _options.subArchitecture());
+					}
+					else {
+						throwf("object file %s was built for different x86_64 sub-type (%d) than link command line (%d)", 
+							file.path(), nextObjectSubType, _options.subArchitecture());
+					}
+				}
 				break;
 		}
 	}
@@ -466,7 +475,9 @@ void Resolver::doFile(const ld::File& file)
 
 void Resolver::doAtom(const ld::Atom& atom)
 {
-	//fprintf(stderr, "Resolver::doAtom(%p), name=%s, sect=%s\n", &atom, atom.name(), atom.section().sectionName());
+	//fprintf(stderr, "Resolver::doAtom(%p), name=%s, sect=%s, scope=%d\n", &atom, atom.name(), atom.section().sectionName(), atom.scope());
+	if ( _ltoCodeGenFinished && (atom.contentType() == ld::Atom::typeLTOtemporary) && (atom.scope() != ld::Atom::scopeTranslationUnit) )
+		warning("'%s' is implemented in bitcode, but it was loaded too late", atom.name());
 
 	// add to list of known atoms
 	_atoms.push_back(&atom);
@@ -601,6 +612,8 @@ void Resolver::convertReferencesToIndirect(const ld::Atom& atom)
 	const ld::Atom* dummy;
 	ld::Fixup::iterator end = atom.fixupsEnd();
 	for (ld::Fixup::iterator fit=atom.fixupsBegin(); fit != end; ++fit) {
+		if ( fit->kind == ld::Fixup::kindLinkerOptimizationHint )
+			_internal.someObjectHasOptimizationHints = true;
 		switch ( fit->binding ) { 
 			case ld::Fixup::bindingByNameUnbound:
 				if ( isDtraceProbe(fit->kind) && (_options.outputKind() != Options::kObjectFile ) ) {
@@ -732,8 +745,14 @@ void Resolver::resolveUndefines()
 		std::vector<const char*> undefineNames;
 		_symbolTable.undefines(undefineNames);
 		for(std::vector<const char*>::iterator it = undefineNames.begin(); it != undefineNames.end(); ++it) {
-			// make proxy
-			this->doAtom(*new UndefinedProxyAtom(*it));
+			const char* undefName = *it;
+			// <rdar://problem/14547001> "ld -r -exported_symbol _foo" has wrong error message if _foo is undefined
+			bool makeProxy = true;
+			if ( (_options.outputKind() == Options::kObjectFile) && _options.hasExportMaskList() && _options.shouldExport(undefName) ) 
+				makeProxy = false;
+			
+			if ( makeProxy ) 
+				this->doAtom(*new UndefinedProxyAtom(undefName));
 		}
 	}
 	
@@ -952,6 +971,7 @@ void Resolver::deadStripOptimize(bool force)
 	if ( _haveLLVMObjs && !force ) {
 		// <rdar://problem/9777977> don't remove combinable atoms, they may come back in lto output
 		_atoms.erase(std::remove_if(_atoms.begin(), _atoms.end(), NotLiveLTO()), _atoms.end());
+		_symbolTable.removeDeadAtoms();
 	}
 	else {
 		_atoms.erase(std::remove_if(_atoms.begin(), _atoms.end(), NotLive()), _atoms.end());
@@ -1420,6 +1440,9 @@ void Resolver::linkTimeOptimize()
 	if ( ! _haveLLVMObjs )
 		return;
 
+	// <rdar://problem/15314161> LTO: Symbol multiply defined error should specify exactly where the symbol is found
+    _symbolTable.checkDuplicateSymbols();
+
 	// run LLVM lto code-gen
 	lto::OptimizeOptions optOpt;
 	optOpt.outputFilePath				= _options.outputFilePath();
@@ -1443,12 +1466,12 @@ void Resolver::linkTimeOptimize()
 	std::vector<const char*>			additionalUndefines; 
 	if ( ! lto::optimize(_atoms, _internal, optOpt, *this, newAtoms, additionalUndefines) )
 		return; // if nothing done
-		
+	_ltoCodeGenFinished = true;
 	
 	// add all newly created atoms to _atoms and update symbol table
 	for(std::vector<const ld::Atom*>::iterator it = newAtoms.begin(); it != newAtoms.end(); ++it)
 		this->doAtom(**it);
-		
+
 	// some atoms might have been optimized way (marked coalesced), remove them
 	this->removeCoalescedAwayAtoms();
 
@@ -1463,6 +1486,10 @@ void Resolver::linkTimeOptimize()
 		aliasAtom->setFinalAliasOf();
 	}
 	
+	// <rdar://problem/14609792> add any auto-link libraries requested by LTO output to dylibs to search
+	_inputFiles.addLinkerOptionLibraries(_internal);
+	_inputFiles.createIndirectDylibs();
+
 	// resolve new undefines (e.g calls to _malloc and _memcpy that llvm compiler conjures up)
 	for(std::vector<const char*>::iterator uit = additionalUndefines.begin(); uit != additionalUndefines.end(); ++uit) {
 		const char *targetName = *uit;
@@ -1500,6 +1527,7 @@ void Resolver::linkTimeOptimize()
 	}
 	else {
 		// last chance to check for undefines
+		this->resolveUndefines();
 		this->checkUndefines(true);
 
 		// check new code does not override some dylib
@@ -1540,6 +1568,14 @@ void Resolver::tweakWeakness()
 	}
 }
 
+void Resolver::dumpAtoms() 
+{
+	fprintf(stderr, "Resolver all atoms:\n");
+	for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+		const ld::Atom* atom = *it;
+		fprintf(stderr, "  %p name=%s, def=%d\n", atom, atom->name(), atom->definition());
+	}
+}
 
 void Resolver::resolve()
 {

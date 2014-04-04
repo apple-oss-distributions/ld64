@@ -24,7 +24,7 @@
  
 #include <Foundation/Foundation.h>
 
-@interface Test
+@interface Test : NSObject
 {
 	BOOL		one;
 	NSString*	two;			

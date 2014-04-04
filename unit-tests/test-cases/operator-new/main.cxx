@@ -48,7 +48,7 @@ public:
 };
 
 void Foo::print() {
-	printf("%d\n", a);
+	printf("%d %d\n", a, b);
 }
 
 

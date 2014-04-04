@@ -15,7 +15,7 @@ all:
 	${FAIL_IF_BAD_MACHO} test
 	${CC} ${CCFLAGS} test.c -DDSO_DEF=1 -o test-def 2>warnings.txt
 	${FAIL_IF_BAD_MACHO} test-def
-	${CC} ${CCFLAGS} test.c -DDSO_TENT=1 -o test-tent
+	${CC} ${CCFLAGS} test.c -DDSO_TENT=1 -o test-tent -Wl,-w
 	${PASS_IFF_GOOD_MACHO} test-tent
 
 

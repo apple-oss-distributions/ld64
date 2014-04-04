@@ -68,11 +68,9 @@ public:
 	uint64_t					fileSize() const { return _fileSize; }
 	
 	
-	bool						hasWeakExternalSymbols;
 	bool						usesWeakExternalSymbols;
 	bool						overridesWeakExternalSymbols;
 	bool						_noReExportedDylibs;
-	bool						hasThreadLocalVariableDefinitions;
 	bool						pieDisabled;
 	bool						hasDataInCode;
 	ld::Internal::FinalSection*	headerAndLoadCommandsSection;
@@ -84,6 +82,7 @@ public:
 	ld::Internal::FinalSection*	splitSegInfoSection;
 	ld::Internal::FinalSection*	functionStartsSection;
 	ld::Internal::FinalSection*	dataInCodeSection;
+	ld::Internal::FinalSection*	optimizationHintsSection;
 	ld::Internal::FinalSection*	dependentDRsSection;
 	ld::Internal::FinalSection*	symbolTableSection;
 	ld::Internal::FinalSection*	stringPoolSection;
@@ -150,8 +149,6 @@ private:
 	void						generateLinkEditInfo(ld::Internal& state);
 	void						buildSymbolTable(ld::Internal& state);
 	void						writeOutputFile(ld::Internal& state);
-	void						assignFileOffsets(ld::Internal& state);
-	void						setSectionSizesAndAlignments(ld::Internal& state);
 	void						addSectionRelocs(ld::Internal& state, ld::Internal::FinalSection* sect,  
 												const ld::Atom* atom, ld::Fixup* fixupWithTarget, 
 												ld::Fixup* fixupWithMinusTarget, ld::Fixup* fixupWithAddend,
@@ -201,6 +198,10 @@ private:
 	bool						hasZeroForFileOffset(const ld::Section* sect);
 	
 	void						printSectionLayout(ld::Internal& state);
+	
+	bool						checkThumbBranch22Displacement(int64_t displacement);
+	bool						checkArmBranch24Displacement(int64_t displacement);
+
 	void						rangeCheck8(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
 																							const ld::Fixup* fixup);
 	void						rangeCheck16(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
@@ -231,6 +232,19 @@ private:
 	void						noteTextReloc(const ld::Atom* atom, const ld::Atom* target);
 
 	
+	struct InstructionInfo {
+		uint32_t			offsetInAtom;
+		const ld::Fixup*	fixup; 
+		const ld::Atom*		target;	
+		uint64_t			targetAddress;
+		uint8_t*			instructionContent;
+		uint64_t			instructionAddress;
+		uint32_t			instruction;
+	};
+
+	void setInfo(ld::Internal& state, const ld::Atom* atom, uint8_t* buffer, const std::map<uint32_t, const Fixup*>& usedHints, 
+						uint32_t offsetInAtom, uint32_t delta, InstructionInfo* info);
+
 	static uint16_t				get16LE(uint8_t* loc);
 	static void					set16LE(uint8_t* loc, uint16_t value);
 	static uint32_t				get32LE(uint8_t* loc);
@@ -261,6 +275,7 @@ private:
 		  bool								_hasDynamicSymbolTable;
 		  bool								_hasLocalRelocations;
 		  bool								_hasExternalRelocations;
+		  bool								_hasOptimizationHints;
 	uint64_t								_fileSize;
 	std::map<uint64_t, uint32_t>			_lazyPointerAddressToInfoOffset;
 	uint32_t								_encryptedTEXTstartOffset;
@@ -297,6 +312,7 @@ public:
 	class LinkEditAtom*						_functionStartsAtom;
 	class LinkEditAtom*						_dataInCodeAtom;
 	class LinkEditAtom*						_dependentDRInfoAtom;
+	class LinkEditAtom*						_optimizationHintsAtom;
 };
 
 } // namespace tool 

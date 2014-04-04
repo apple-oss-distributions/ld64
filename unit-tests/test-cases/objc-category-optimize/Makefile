@@ -29,7 +29,7 @@ include ${TESTROOT}/include/common.makefile
 OPTIONS = 
 
 ifeq ($(ARCH),i386)
-	OPTIONS = -fobjc-abi-version=2 -Wl,-objc_abi_version,2 -isysroot /Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator5.0.sdk -fobjc-legacy-dispatch
+	OPTIONS = -mios-simulator-version-min=6.0 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator7.0.sdk/
 endif
 
 ifeq ($(ARCH),arm)

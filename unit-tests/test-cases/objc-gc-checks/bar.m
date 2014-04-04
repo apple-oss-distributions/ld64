@@ -1,5 +1,6 @@
+#include <Foundation/Foundation.h>
 
-@interface Bar  {
+@interface Bar : NSObject {
 	int f;
 }
 - (void) doit;

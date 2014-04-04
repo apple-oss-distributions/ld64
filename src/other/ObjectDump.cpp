@@ -870,6 +870,9 @@ void dumper::dumpFixup(const ld::Fixup* ref)
 		case ld::Fixup::kindSetLazyOffset:
 			printf("offset of lazy binding info for %s", referenceTargetAtomName(ref));
 			break;
+		case ld::Fixup::kindIslandTarget:
+			printf("ultimate target of island %s", referenceTargetAtomName(ref));
+			break;
 		case ld::Fixup::kindDataInCodeStartData:
 			printf("start of data in code");
 			break;
@@ -887,6 +890,46 @@ void dumper::dumpFixup(const ld::Fixup* ref)
 			break;
 		case ld::Fixup::kindDataInCodeEnd:
 			printf("end of data in code");
+			break;
+		case ld::Fixup::kindLinkerOptimizationHint:
+#if SUPPORT_ARCH_arm64
+			ld::Fixup::LOH_arm64 extra;
+			extra.addend = ref->u.addend;
+			printf("ARM64 hint: ");
+			switch(extra.info.kind) {
+				case LOH_ARM64_ADRP_ADRP:
+					printf("ADRP-ADRP");
+					break;
+				case LOH_ARM64_ADRP_LDR:
+					printf("ADRP-LDR");
+					break;
+				case LOH_ARM64_ADRP_ADD_LDR:
+					printf("ADRP-ADD-LDR");
+					break;
+				case LOH_ARM64_ADRP_LDR_GOT_LDR:
+					printf("ADRP-LDR-GOT-LDR");
+					break;
+				case LOH_ARM64_ADRP_ADD_STR:
+					printf("ADRP-ADD-STR");
+					break;
+				case LOH_ARM64_ADRP_LDR_GOT_STR:
+					printf("ADRP-LDR-GOT-STR");
+					break;
+				case LOH_ARM64_ADRP_ADD:
+					printf("ADRP-ADD");
+					break;
+				default:
+					printf("kind=%d", extra.info.kind);
+					break;
+			}
+			printf(", offset1=0x%X", (extra.info.delta1 << 2)  + ref->offsetInAtom);
+			if ( extra.info.count > 0 )
+				printf(", offset2=0x%X", (extra.info.delta2 << 2) + ref->offsetInAtom);
+			if ( extra.info.count > 1 )
+				printf(", offset3=0x%X", (extra.info.delta3 << 2)  + ref->offsetInAtom);
+			if ( extra.info.count > 2 )
+				printf(", offset4=0x%X", (extra.info.delta4 << 2)  + ref->offsetInAtom);
+#endif			
 			break;
 		case ld::Fixup::kindStoreTargetAddressLittleEndian32:
 			printf("store 32-bit little endian address of %s", referenceTargetAtomName(ref));
@@ -946,6 +989,12 @@ void dumper::dumpFixup(const ld::Fixup* ref)
 			break;
 		case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
 			printf("ARM64 store 12-bit page offset of %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPage21:
+			printf("ARM64 store 21-bit pcrel ADRP to TLV for %s", referenceTargetAtomName(ref));
+			break;
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPageOff12:
+			printf("ARM64 store 12-bit page offset of TLV of %s", referenceTargetAtomName(ref));
 			break;
 		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
 			printf("ARM64 store 21-bit pcrel ADRP to GOT for %s", referenceTargetAtomName(ref));
@@ -1180,6 +1229,7 @@ static ld::relocatable::File* createReader(const char* path)
 	objOpts.warnUnwindConversionProblems	= true;
 	objOpts.keepDwarfUnwind		= false;
 	objOpts.forceDwarfConversion = false;
+	objOpts.verboseOptimizationHints = true;
 	objOpts.subType				= sPreferredSubArch;
 #if 1
 	if ( ! foundFatSlice ) {
@@ -1196,7 +1246,7 @@ static ld::relocatable::File* createReader(const char* path)
 		return objResult;
 
 	// see if it is an llvm object file
-	objResult = lto::parse(p, fileLen, path, stat_buf.st_mtime, ld::File::Ordinal::NullOrdinal(), sPreferredArch, sPreferredSubArch, false);
+	objResult = lto::parse(p, fileLen, path, stat_buf.st_mtime, ld::File::Ordinal::NullOrdinal(), sPreferredArch, sPreferredSubArch, false, true);
 	if ( objResult != NULL ) 
 		return objResult;
 

@@ -27,6 +27,8 @@ include ${TESTROOT}/include/common.makefile
 # Validate cpu subtypes processing
 #
 
+CC_ARM = $(shell xcrun -find clang)  -miphoneos-version-min=5.0 -isysroot ${IOS_SDK}
+
 test: test-${ARCH}
 
 test-ppc64:
@@ -42,31 +44,31 @@ test-armv6: test-arm
 test-armv7: test-arm
 
 test-arm:
-	clang  foo.c -arch armv4t -c -o foo-v4.o
+	${CC_ARM}  foo.c -arch armv4t -c -o foo-v4.o
 	${FAIL_IF_BAD_OBJ} foo-v4.o
-	clang  foo.c -arch armv5  -c -o foo-v5.o
+	${CC_ARM}  foo.c -arch armv5  -c -o foo-v5.o
 	${FAIL_IF_BAD_OBJ} foo-v5.o
-	clang  foo.c -arch armv6  -c -o foo-v6.o
+	${CC_ARM}  foo.c -arch armv6  -c -o foo-v6.o
 	${FAIL_IF_BAD_OBJ} foo-v6.o
-	clang  foo.c -arch armv7  -c -o foo-v7.o
+	${CC_ARM}  foo.c -arch armv7  -c -o foo-v7.o
 	${FAIL_IF_BAD_OBJ} foo-v7.o
-	clang  foo.c -arch xscale  -c -o foo-xscale.o
+	${CC_ARM}  foo.c -arch xscale  -c -o foo-xscale.o
 	${FAIL_IF_BAD_OBJ} foo-xscale.o
-	clang  main.c -arch armv4t  -c -o main-v4.o
+	${CC_ARM}  main.c -arch armv4t  -c -o main-v4.o
 	${FAIL_IF_BAD_OBJ} main-v4.o
-	clang  main.c -arch armv5  -c -o main-v5.o
+	${CC_ARM}  main.c -arch armv5  -c -o main-v5.o
 	${FAIL_IF_BAD_OBJ} main-v5.o
-	clang  main.c -arch armv6  -c -o main-v6.o
+	${CC_ARM}  main.c -arch armv6  -c -o main-v6.o
 	${FAIL_IF_BAD_OBJ} main-v6.o
-	clang  main.c -arch xscale  -c -o main-xscale.o
+	${CC_ARM}  main.c -arch xscale  -c -o main-xscale.o
 	${FAIL_IF_BAD_OBJ} main-xscale.o
-	clang  main.c -arch armv7  -c -o main-v7.o
+	${CC_ARM}  main.c -arch armv7  -c -o main-v7.o
 	${FAIL_IF_BAD_OBJ} main-v7.o
 
 	# check V4+V4 -> V4
-	${LD} -r main-v4.o foo-v4.o -o all.o
-	${FAIL_IF_BAD_OBJ} all.o
-	otool -hv all.o | grep V4T | ${FAIL_IF_EMPTY}
+#	${LD} -r main-v4.o foo-v4.o -o all.o
+#	${FAIL_IF_BAD_OBJ} all.o
+#	otool -hv all.o | grep V4T | ${FAIL_IF_EMPTY}
 
 	# check V4+V5 -> V5
 	#${LD} -r main-v4.o foo-v5.o -o all.o
@@ -84,9 +86,9 @@ test-arm:
 	#otool -hv all.o | grep XSCALE | ${FAIL_IF_EMPTY}
 
 	# check V5+V5 -> V5
-	${LD} -r main-v5.o foo-v5.o -o all.o
-	${FAIL_IF_BAD_OBJ} all.o
-	otool -hv all.o | grep V5 | ${FAIL_IF_EMPTY}
+#	${LD} -r main-v5.o foo-v5.o -o all.o
+#	${FAIL_IF_BAD_OBJ} all.o
+#	otool -hv all.o | grep V5 | ${FAIL_IF_EMPTY}
 
 	# check V5+V6 -> V6
 	#${LD} -r main-v5.o foo-v6.o -o all.o

@@ -95,7 +95,8 @@ public:
 	typedef typename A::sint_t		sint_t;	
 
 	static const char* parseCFIs(A& addressSpace, pint_t ehSectionStart, uint32_t sectionLength, 
-                            const pint_t cuStarts[], uint32_t cuCount, bool keepDwarfWhichHasCU, bool forceDwarfConversion,
+                            const pint_t cuStarts[], uint32_t cuCount, 
+                            bool keepDwarfWhichHasCU, bool forceDwarfConversion, bool neverConvertToCU,
                             CFI_Atom_Info<A>* infos, uint32_t& infosCount, void* ref, WarnFunc warn);
 
 
@@ -172,7 +173,8 @@ private:
 
 template <typename A, typename R>
 const char* DwarfInstructions<A,R>::parseCFIs(A& addressSpace, pint_t ehSectionStart, uint32_t sectionLength, 
-                                      const pint_t cuStarts[], uint32_t cuCount,  bool keepDwarfWhichHasCU,  bool forceDwarfConversion,
+                                      const pint_t cuStarts[], uint32_t cuCount,  
+                                      bool keepDwarfWhichHasCU,  bool forceDwarfConversion, bool neverConvertToCU,
                                       CFI_Atom_Info<A>* infos, uint32_t& infosCount, void* ref, WarnFunc warn)
 {
 	typename CFI_Parser<A>::CIE_Info cieInfo;
@@ -270,7 +272,7 @@ const char* DwarfInstructions<A,R>::parseCFIs(A& addressSpace, pint_t ehSectionS
 					++entry;
 			}
 			else {
-				if ( (cuCount != 0) && !forceDwarfConversion ) {
+				if ( neverConvertToCU || ((cuCount != 0) && !forceDwarfConversion) ) {
 					// Have some compact unwind, so this is a new .o file, therefore anything without
 					// compact unwind must be something not expressable in compact unwind.
 					R dummy;

@@ -1555,6 +1555,68 @@ void DependentDRAtom<A>::encode() const
 
 
 
+template <typename A>
+class OptimizationHintsAtom : public LinkEditAtom
+{
+public:
+												OptimizationHintsAtom(const Options& opts, ld::Internal& state, OutputFile& writer)
+													: LinkEditAtom(opts, state, writer, _s_section, sizeof(pint_t)) { 
+														assert(opts.outputKind() == Options::kObjectFile);
+													}
+
+	// overrides of ld::Atom
+	virtual const char*							name() const		{ return "linker optimization hints"; }
+	// overrides of LinkEditAtom
+	virtual void								encode() const;
+
+private:
+	typedef typename A::P						P;
+	typedef typename A::P::E					E;
+	typedef typename A::P::uint_t				pint_t;
+
+	static ld::Section			_s_section;
+
+};
+
+template <typename A>
+ld::Section OptimizationHintsAtom<A>::_s_section("__LINKEDIT", "__opt_hints", ld::Section::typeLinkEdit, true);
+
+template <typename A>
+void OptimizationHintsAtom<A>::encode() const
+{
+	if ( _state.someObjectHasOptimizationHints ) {
+		for (std::vector<ld::Internal::FinalSection*>::iterator sit = _state.sections.begin(); sit != _state.sections.end(); ++sit) {
+			ld::Internal::FinalSection* sect = *sit;
+			if ( sect->type() != ld::Section::typeCode )
+				continue;
+			for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
+				const ld::Atom*	atom = *ait;
+				uint64_t address = atom->finalAddress();
+				for (ld::Fixup::iterator fit = atom->fixupsBegin(); fit != atom->fixupsEnd(); ++fit) {
+					if ( fit->kind != ld::Fixup::kindLinkerOptimizationHint) 
+						continue;
+					ld::Fixup::LOH_arm64 extra;
+					extra.addend = fit->u.addend;
+					_encodedData.append_uleb128(extra.info.kind);
+					_encodedData.append_uleb128(extra.info.count+1);
+					_encodedData.append_uleb128((extra.info.delta1 << 2) + fit->offsetInAtom + address);
+					if ( extra.info.count > 0 )
+						_encodedData.append_uleb128((extra.info.delta2 << 2) + fit->offsetInAtom + address);
+					if ( extra.info.count > 1 )
+						_encodedData.append_uleb128((extra.info.delta3 << 2) + fit->offsetInAtom + address);
+					if ( extra.info.count > 2 )
+						_encodedData.append_uleb128((extra.info.delta4 << 2) + fit->offsetInAtom + address);
+				}
+			}
+		}
+			
+		this->_encodedData.pad_to_size(sizeof(pint_t));
+	}
+	
+	this->_encoded = true;
+}
+
+
 } // namespace tool 
 } // namespace ld 
 

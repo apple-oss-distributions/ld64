@@ -95,7 +95,9 @@ public:
 				_fixup1(0,  ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressARM64Page21,    compressedImageCache(pass)),
 				_fixup2(4,  ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressARM64PageOff12, compressedImageCache(pass)), 
 				_fixup3(12, ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressARM64Page21,    compressedFastBinder(pass)), 
-				_fixup4(16, ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressARM64PageOff12, compressedFastBinder(pass)) 
+				_fixup4(16, ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressARM64PageOff12, compressedFastBinder(pass)), 
+				_fixup5(ld::Fixup::kindLinkerOptimizationHint, LOH_ARM64_ADRP_ADD, 0, 4), 
+				_fixup6(ld::Fixup::kindLinkerOptimizationHint, LOH_ARM64_ADRP_LDR, 12, 16) 
 					{ pass.addAtom(*this); }
 
 	virtual ld::File*						file() const					{ return NULL; }
@@ -112,7 +114,7 @@ public:
 	}
 	virtual void							setScope(Scope)					{ }
 	virtual ld::Fixup::iterator				fixupsBegin() const				{ return &_fixup1; }
-	virtual ld::Fixup::iterator				fixupsEnd()	const				{ return &((ld::Fixup*)&_fixup4)[1]; }
+	virtual ld::Fixup::iterator				fixupsEnd()	const				{ return &((ld::Fixup*)&_fixup6)[1]; }
 
 private:
 	static ld::Atom* compressedImageCache(ld::passes::stubs::Pass& pass) {
@@ -130,6 +132,8 @@ private:
 	ld::Fixup								_fixup2;
 	ld::Fixup								_fixup3;
 	ld::Fixup								_fixup4;
+	ld::Fixup								_fixup5;
+	ld::Fixup								_fixup6;
 	
 	static ld::Section						_s_section;
 };
@@ -287,8 +291,9 @@ public:
 				_stubTo(stubTo), 
 				_lazyPointer(pass, stubTo, stubToGlobalWeakDef, stubToResolver, weakImport),
 				_fixup1(0, ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressARM64Page21, &_lazyPointer),
-				_fixup2(4, ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressARM64PageOff12, &_lazyPointer) 
-					{ pass.addAtom(*this); }
+				_fixup2(4, ld::Fixup::k1of1, ld::Fixup::kindStoreTargetAddressARM64PageOff12, &_lazyPointer),
+				_fixup3(ld::Fixup::kindLinkerOptimizationHint, LOH_ARM64_ADRP_LDR, 0, 4) 
+					{ pass.addAtom(*this); 	}
 
 	virtual const ld::File*					file() const					{ return _stubTo.file(); }
 	virtual const char*						name() const					{ return _stubTo.name(); }
@@ -301,13 +306,14 @@ public:
 	}
 	virtual void							setScope(Scope)					{ }
 	virtual ld::Fixup::iterator				fixupsBegin() const				{ return &_fixup1; }
-	virtual ld::Fixup::iterator				fixupsEnd()	const 				{ return &((ld::Fixup*)&_fixup2)[1]; }
+	virtual ld::Fixup::iterator				fixupsEnd()	const 				{ return &((ld::Fixup*)&_fixup3)[1]; }
 
 private:
 	const ld::Atom&							_stubTo;
 	LazyPointerAtom							_lazyPointer;
 	mutable ld::Fixup						_fixup1;
 	mutable ld::Fixup						_fixup2;
+	mutable ld::Fixup						_fixup3;
 	
 	static ld::Section						_s_section;
 };

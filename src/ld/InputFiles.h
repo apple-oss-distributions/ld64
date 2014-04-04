@@ -74,6 +74,9 @@ public:
 	
 	bool						inferredArch() const { return _inferredArch; }
 	
+	void						addLinkerOptionLibraries(ld::Internal& state);
+	void						createIndirectDylibs();
+
 	// for -print_statistics
 	volatile int64_t			_totalObjectSize;
 	volatile int64_t			_totalArchiveSize;
@@ -91,10 +94,8 @@ private:
 	void						logDylib(ld::File*, bool indirect);
 	void						logArchive(ld::File*) const;
 	void						markExplicitlyLinkedDylibs();
-	void						createIndirectDylibs();
 	void						checkDylibClientRestrictions(ld::dylib::File*);
 	void						createOpaqueFileSections();
-	void						addLinkerOptionLibraries(ld::Internal& state);
 	bool						libraryAlreadyLoaded(const char* path);
 	
 	// for pipelined linking

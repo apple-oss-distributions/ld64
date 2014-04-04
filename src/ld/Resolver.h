@@ -62,7 +62,8 @@ public:
 								: _options(opts), _inputFiles(inputs), _internal(state), 
 								  _symbolTable(opts, state.indirectBindingTable),
 								  _haveLLVMObjs(false),
-								  _completedInitialObjectFiles(false) {}
+								  _completedInitialObjectFiles(false),
+								  _ltoCodeGenFinished(false) {}
 								
 
 		virtual void		doAtom(const ld::Atom&);
@@ -100,6 +101,7 @@ private:
 	bool					printReferencedBy(const char* name, SymbolTable::IndirectBindingSlot slot);
 	void					tweakWeakness();
 	void					doLinkerOption(const std::vector<const char*>& linkerOption, const char* fileName);
+	void					dumpAtoms();
 
 	typedef std::unordered_set<const char*, CStringHash, CStringEquals>  StringSet;
 
@@ -127,6 +129,7 @@ private:
 	SymbolTable						_symbolTable;
 	bool							_haveLLVMObjs;
 	bool							_completedInitialObjectFiles;
+	bool							_ltoCodeGenFinished;
 };
 
 

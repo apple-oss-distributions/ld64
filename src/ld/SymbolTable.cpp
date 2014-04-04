@@ -588,6 +588,19 @@ SymbolTable::IndirectBindingSlot SymbolTable::findSlotForName(const char* name)
 	return slot;
 }
 
+void SymbolTable::removeDeadAtoms()
+{
+	for (NameToSlot::iterator it=_byNameTable.begin(); it != _byNameTable.end(); ++it) {
+		IndirectBindingSlot slot = it->second;
+		const ld::Atom* atom = _indirectBindingTable[slot];
+		if ( atom != NULL ) {
+			if ( !atom->live() && !atom->dontDeadStrip() ) {
+				//fprintf(stderr, "removing from symbolTable[%u] %s\n", slot, atom->name());
+				_indirectBindingTable[slot] = NULL;
+			}
+		}
+	}
+}
 
 // find existing or create new slot
 SymbolTable::IndirectBindingSlot SymbolTable::findSlotForContent(const ld::Atom* atom, const ld::Atom** existingAtom)

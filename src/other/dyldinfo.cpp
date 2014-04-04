@@ -1339,7 +1339,7 @@ void DyldInfoPrinter<A>::processExportGraphNode(const uint8_t* const start, cons
 											char* cummulativeString, int curStrOffset) 
 {
 	const uint8_t* const me = p;
-	const uint8_t terminalSize = read_uleb128(p, end);
+	const uint64_t terminalSize = read_uleb128(p, end);
 	const uint8_t* children = p + terminalSize;
 	if ( terminalSize != 0 ) {
 		uint32_t flags = read_uleb128(p, end);
