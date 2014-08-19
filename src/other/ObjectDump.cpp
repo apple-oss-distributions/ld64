@@ -1242,6 +1242,7 @@ static ld::relocatable::File* createReader(const char* path)
 	objOpts.keepDwarfUnwind		= false;
 	objOpts.forceDwarfConversion = false;
 	objOpts.verboseOptimizationHints = true;
+	objOpts.armUsesZeroCostExceptions = true;
 	objOpts.subType				= sPreferredSubArch;
 #if 1
 	if ( ! foundFatSlice ) {

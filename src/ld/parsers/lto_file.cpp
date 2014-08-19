@@ -302,6 +302,7 @@ ld::relocatable::File* Parser::parseMachOFile(const uint8_t* p, size_t len, cons
 	objOpts.forceDwarfConversion = false;
 	objOpts.neverConvertDwarf   = false;
 	objOpts.verboseOptimizationHints = options.verboseOptimizationHints;
+	objOpts.armUsesZeroCostExceptions = options.armUsesZeroCostExceptions;
 
 	objOpts.subType				= 0;
 	
@@ -485,8 +486,6 @@ void Parser::ltoDiagnosticHandler(lto_codegen_diagnostic_severity_t severity, co
 	switch ( severity ) {
 #if LTO_API_VERSION >= 10
 		case LTO_DS_REMARK:
-			fprintf(stderr, "ld: LTO remark: %s\n", message);
-			break;
 #endif
 		case LTO_DS_NOTE:
 		case LTO_DS_WARNING:
