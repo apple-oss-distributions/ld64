@@ -28,14 +28,14 @@ struct stuff { int a; int b; };
 struct stuff stuff1 __attribute__ ((section ("__DATA,__my"))) = { 1, 2};
 struct stuff stuff2 __attribute__ ((section ("__DATA,__my"))) = { 3 ,4 };
 
-extern struct stuff*  stuff_start  __asm("section$start$__DATA$__my");
-extern struct stuff*  stuff_end    __asm("section$end$__DATA$__my");
+extern struct stuff  stuff_start  __asm("section$start$__DATA$__my");
+extern struct stuff  stuff_end    __asm("section$end$__DATA$__my");
 
 
 int main()
 {
 	struct stuff* p;
-	for (p = stuff_start; p < stuff_end; ++p) {
+	for (p = &stuff_start; p < &stuff_end; ++p) {
 		p->a = 0;
 	}
 	return 0;

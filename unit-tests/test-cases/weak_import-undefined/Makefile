@@ -37,4 +37,4 @@ all:
 	${PASS_IFF_GOOD_MACHO}  weak
 	
 clean:
-	rm -rf main
+	rm -rf weak

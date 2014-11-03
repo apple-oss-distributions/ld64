@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2006 Apple Computer, Inc. All rights reserved.
+# Copyright (c) 2006-2014 Apple Computer, Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -31,14 +31,16 @@ include ${TESTROOT}/include/common.makefile
 # No differences means this test passes
 #
 
+CC=/Volumes/my/src/puzzlebox/build/Debug+Asserts/bin/clang
+
 run: all
 
 all:
-	${CC} ${ASMFLAGS} aliases.s -c -o aliases.${ARCH}.o
-	${LD} -arch ${ARCH} -r -keep_private_externs aliases.${ARCH}.o -o aliases-r.${ARCH}.o
-	${FAIL_IF_ERROR} ${OBJECTDUMP} -no_content -no_sort aliases.${ARCH}.o > aliases.${ARCH}.o.dump
-	${FAIL_IF_ERROR} ${OBJECTDUMP} -no_content -no_sort aliases-r.${ARCH}.o > aliases-r.${ARCH}.o.dump
-	${PASS_IFF} diff aliases.${ARCH}.o.dump aliases-r.${ARCH}.o.dump
+	${CC} -arch ${ARCH} ${ASMFLAGS} aliases.s -c -o aliases.o
+	${LD} -arch ${ARCH} -r -keep_private_externs aliases.o -o aliases-r.o
+	${FAIL_IF_ERROR} ${OBJECTDUMP} -no_content -no_sort aliases.o > aliases.o.dump
+	${FAIL_IF_ERROR} ${OBJECTDUMP} -no_content -no_sort aliases-r.o > aliases-r.o.dump
+	${PASS_IFF} diff aliases.o.dump aliases-r.o.dump
 
 clean:
 	rm -rf *.o *.dump

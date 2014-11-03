@@ -146,6 +146,7 @@ public:
 	virtual bool						forEachAtom(AtomHandler&) const = 0;
 	virtual bool						justInTimeforEachAtom(const char* name, AtomHandler&) const = 0;
 	virtual ObjcConstraint				objCConstraint() const			{ return objcConstraintNone; }
+	virtual uint8_t						swiftVersion() const			{ return 0; }
 	virtual uint32_t					cpuSubType() const		{ return 0; }
 	virtual uint32_t					subFileCount() const	{ return 1; }
     bool								fileExists() const     { return _modTime != 0; }
@@ -166,7 +167,7 @@ enum MacVersionMin { macVersionUnset=0, mac10_4=0x000A0400, mac10_5=0x000A0500,
 						mac10_9=0x000A0900, mac10_Future=0x10000000 };
 enum IOSVersionMin { iOSVersionUnset=0, iOS_2_0=0x00020000, iOS_3_1=0x00030100, 
 						iOS_4_2=0x00040200, iOS_4_3=0x00040300, iOS_5_0=0x00050000,
-						iOS_6_0=0x00060000, iOS_7_0=0x00070000,  
+						iOS_6_0=0x00060000, iOS_7_0=0x00070000, iOS_8_0=0x00080000,
 						iOS_Future=0x10000000};
  
 namespace relocatable {
@@ -270,6 +271,10 @@ namespace dylib {
 		virtual bool						allSymbolsAreWeakImported() const = 0;
 		virtual const void*					codeSignatureDR() const = 0;
 		virtual bool						installPathVersionSpecific() const { return false; }
+		virtual bool						appExtensionSafe() const = 0;
+		virtual MacVersionMin				macMinVersion() const { return macVersionUnset; }
+		virtual IOSVersionMin				iOSMinVersion() const { return iOSVersionUnset; }
+
 	protected:
 		const char*							_dylibInstallPath;
 		uint32_t							_dylibTimeStamp;
@@ -310,7 +315,7 @@ class Section
 {
 public:
 	enum Type { typeUnclassified, typeCode, typePageZero, typeImportProxies, typeLinkEdit, typeMachHeader, typeStack,
-				typeLiteral4, typeLiteral8, typeLiteral16, typeConstants, typeTempLTO, 
+				typeLiteral4, typeLiteral8, typeLiteral16, typeConstants, typeTempLTO, typeTempAlias,
 				typeCString, typeNonStdCString, typeCStringPointer, typeUTF16Strings, typeCFString, typeObjC1Classes,
 				typeCFI, typeLSDA, typeDtraceDOF, typeUnwindInfo, typeObjCClassRefs, typeObjC2CategoryList,
 				typeZeroFill, typeTentativeDefs, typeLazyPointer, typeStub, typeNonLazyPointer, typeDyldInfo, 
@@ -526,7 +531,6 @@ struct Fixup
 		contentAddendOnly(false), contentDetlaToAddendOnly(false), contentIgnoresAddend(false) 
 			{ u.addend = addend; }
 			
-#if SUPPORT_ARCH_arm64
 	Fixup(Kind k, uint32_t lohKind, uint32_t off1, uint32_t off2) :
 		offsetInAtom(off1), kind(k), clusterSize(k1of1),  
 		weakImport(false), binding(Fixup::bindingNone), contentAddendOnly(false), 
@@ -540,7 +544,6 @@ struct Fixup
 			extra.info.delta2 = (off2 - off1) >> 2;
 			u.addend = extra.addend; 
 		}
-#endif			
 			
 
 	bool firstInCluster() const { 
@@ -571,7 +574,6 @@ struct Fixup
 		return false;
 	}
 	
-#if SUPPORT_ARCH_arm64
 	union LOH_arm64 {
 		uint64_t	addend;
 		struct {
@@ -583,7 +585,6 @@ struct Fixup
 						delta4 : 14;	
 		} info;
 	};
-#endif
 	
 };
 
@@ -755,9 +756,6 @@ public:
 	virtual LineInfo::iterator				beginLineInfo() const { return NULL; }
 	virtual LineInfo::iterator				endLineInfo() const { return NULL; }
 											
-protected:
-	enum AddressMode { modeSectionOffset, modeFinalAddress };
-
 											void setAttributesFromAtom(const Atom& a) { 
 													_section = a._section; 
 													_alignmentModulus = a._alignmentModulus;
@@ -775,6 +773,9 @@ protected:
 													_coalescedAway = a._coalescedAway;
 													_weakImportState = a._weakImportState;
 												}
+
+protected:
+	enum AddressMode { modeSectionOffset, modeFinalAddress };
 
 	const Section *						_section;
 	uint64_t							_address;
@@ -857,7 +858,7 @@ public:
 											lazyBindingHelper(NULL), compressedFastBinderProxy(NULL),
 											objcObjectConstraint(ld::File::objcConstraintNone), 
 											objcDylibConstraint(ld::File::objcConstraintNone), 
-											cpuSubType(0), 
+											swiftVersion(0), cpuSubType(0), 
 											allObjectFilesScatterable(true), 
 											someObjectFileHasDwarf(false), usingHugeSections(false),
 											hasThreadLocalVariableDefinitions(false),
@@ -877,6 +878,7 @@ public:
 	const Atom*									compressedFastBinderProxy;
 	ld::File::ObjcConstraint					objcObjectConstraint;
 	ld::File::ObjcConstraint					objcDylibConstraint;
+	uint8_t										swiftVersion;
 	uint32_t									cpuSubType;
 	bool										allObjectFilesScatterable;
 	bool										someObjectFileHasDwarf;

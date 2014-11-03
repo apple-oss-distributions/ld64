@@ -13,7 +13,7 @@ MYDIR=$(shell cd ../../bin;pwd)
 LD			= ld
 OBJECTDUMP	= ObjectDump
 MACHOCHECK	= machocheck
-OTOOL =   /Applications/Xcode.app/Contents/Developer/Toolchains/iOS7.0.xctoolchain/usr/bin/otool
+OTOOL =   xcrun otool
 REBASE		= rebase
 DYLDINFO	= dyldinfo
 
@@ -65,7 +65,7 @@ LD_NEW_LINKEDIT = -macosx_version_min 10.6
 CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} ${SDKExtra}
 CXXFLAGS = -Wall -stdlib=libc++ 
 
-IOS_SDK = $(shell xcodebuild -sdk iphoneos7.0.internal -version Path  2>/dev/null)
+IOS_SDK = $(shell xcodebuild -sdk iphoneos8.0.internal -version Path  2>/dev/null)
 
 ifeq ($(ARCH),armv6)
   LDFLAGS := -syslibroot $(IOS_SDK)

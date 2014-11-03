@@ -31,11 +31,20 @@ _temp:	nop
 _foo:	nop
 		nop
 
+/* this should make an alias "_fooalt" for "_foo" */
 		.globl _fooalt
 		.globl _fooalt2
-/* this should make an alias "_fooalt" for "_foo" */
 _fooalt = _foo	
 _fooalt2 = _foo	
+
+    .global _myAlias
+_myAlias  = _myBase
+
+    .global _myHiddenAlias
+    .private_extern _myHiddenAlias
+_myHiddenAlias  = _myHiddenBase
+
+
 
 _bar:	nop
 		nop

@@ -245,7 +245,12 @@
 		B3B672441406D44300A376BB /* Snapshot.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; name = Snapshot.h; path = src/ld/Snapshot.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		B3C7A09914295B9C005FC714 /* compile_stubs */ = {isa = PBXFileReference; lastKnownFileType = text.script.csh; path = compile_stubs; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9023C3906D5A23E001BBF46 /* ld */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ld; sourceTree = BUILT_PRODUCTS_DIR; };
-		F9023C3F06D5A254001BBF46 /* ld.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ld.cpp; path = src/ld/ld.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F9023C3F06D5A254001BBF46 /* ld.cpp */ = {isa = PBXFileReference; fileEncoding = 30; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ld.cpp; path = src/ld/ld.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F91B7B0318987D5F0099486F /* AddressSpace.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = AddressSpace.hpp; sourceTree = "<group>"; };
+		F91B7B0418987D5F0099486F /* DwarfInstructions.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = DwarfInstructions.hpp; sourceTree = "<group>"; };
+		F91B7B0518987D5F0099486F /* DwarfParser.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = DwarfParser.hpp; sourceTree = "<group>"; };
+		F91B7B0618987D5F0099486F /* InternalMacros.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = InternalMacros.h; sourceTree = "<group>"; };
+		F91B7B0718987D5F0099486F /* Registers.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = Registers.hpp; sourceTree = "<group>"; };
 		F92D9C2710657AAB00FF369B /* stub_x86_64_classic.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; path = stub_x86_64_classic.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F933D9460929277C0083EAC8 /* FileAbstraction.hpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.h; name = FileAbstraction.hpp; path = src/abstraction/FileAbstraction.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F933D9470929277C0083EAC8 /* MachOFileAbstraction.hpp */ = {isa = PBXFileReference; fileEncoding = 30; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; name = MachOFileAbstraction.hpp; path = src/abstraction/MachOFileAbstraction.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
@@ -401,6 +406,18 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		F91B7B0218987D5F0099486F /* libunwind */ = {
+			isa = PBXGroup;
+			children = (
+				F91B7B0318987D5F0099486F /* AddressSpace.hpp */,
+				F91B7B0418987D5F0099486F /* DwarfInstructions.hpp */,
+				F91B7B0518987D5F0099486F /* DwarfParser.hpp */,
+				F91B7B0618987D5F0099486F /* InternalMacros.h */,
+				F91B7B0718987D5F0099486F /* Registers.hpp */,
+			);
+			path = libunwind;
+			sourceTree = "<group>";
+		};
 		F9AA650B1051BD2B003E3539 /* passes */ = {
 			isa = PBXGroup;
 			children = (
@@ -449,6 +466,7 @@
 		F9AA65861051E750003E3539 /* parsers */ = {
 			isa = PBXGroup;
 			children = (
+				F91B7B0218987D5F0099486F /* libunwind */,
 				F9AA6784105700C2003E3539 /* opaque_section_file.cpp */,
 				F9AA6785105700C2003E3539 /* opaque_section_file.h */,
 				F9AA65D71051EC4A003E3539 /* archive_file.cpp */,
