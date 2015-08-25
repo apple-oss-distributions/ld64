@@ -43,6 +43,7 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		B028FCF21A9E7C3F00E3584B /* bitcode_bundle.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B028FCF11A9E7C3F00E3584B /* bitcode_bundle.cpp */; };
 		B3B672421406D42800A376BB /* Snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B3B672411406D42800A376BB /* Snapshot.cpp */; };
 		F9023C4E06D5A272001BBF46 /* ld.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9023C3F06D5A254001BBF46 /* ld.cpp */; };
 		F933E3D9092E855B0083EAC8 /* ObjectDump.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F971EED706D5AD240041D381 /* ObjectDump.cpp */; };
@@ -82,6 +83,7 @@
 		F9EA7584097882F3008B4F1D /* debugline.c in Sources */ = {isa = PBXBuildFile; fileRef = F9EA7582097882F3008B4F1D /* debugline.c */; };
 		F9EA75BC09788857008B4F1D /* debugline.c in Sources */ = {isa = PBXBuildFile; fileRef = F9EA7582097882F3008B4F1D /* debugline.c */; };
 		F9EC78060A2F8674002A3E39 /* rebase.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9EC78050A2F8674002A3E39 /* rebase.cpp */; };
+		FA95D6141AB25CF400395811 /* textstub_dylib_file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = FA95D6121AB25CF400395811 /* textstub_dylib_file.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXBuildRule section */
@@ -241,6 +243,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		B028FCF01A9E7B4A00E3584B /* bitcode_bundle.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bitcode_bundle.h; sourceTree = "<group>"; };
+		B028FCF11A9E7C3F00E3584B /* bitcode_bundle.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = bitcode_bundle.cpp; sourceTree = "<group>"; };
+		B091FB641ABA3AFB00CC8193 /* Bitcode.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = Bitcode.hpp; path = src/ld/Bitcode.hpp; sourceTree = "<group>"; };
 		B3B672411406D42800A376BB /* Snapshot.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = Snapshot.cpp; path = src/ld/Snapshot.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		B3B672441406D44300A376BB /* Snapshot.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; name = Snapshot.h; path = src/ld/Snapshot.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		B3C7A09914295B9C005FC714 /* compile_stubs */ = {isa = PBXFileReference; lastKnownFileType = text.script.csh; path = compile_stubs; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
@@ -333,6 +338,8 @@
 		F9EA7583097882F3008B4F1D /* debugline.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = debugline.h; path = src/ld/debugline.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9EC77EE0A2F85F6002A3E39 /* rebase */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = rebase; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9EC78050A2F8674002A3E39 /* rebase.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = rebase.cpp; path = src/other/rebase.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		FA95D6121AB25CF400395811 /* textstub_dylib_file.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = textstub_dylib_file.cpp; sourceTree = "<group>"; usesTabs = 1; };
+		FA95D6131AB25CF400395811 /* textstub_dylib_file.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = textstub_dylib_file.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -421,6 +428,8 @@
 		F9AA650B1051BD2B003E3539 /* passes */ = {
 			isa = PBXGroup;
 			children = (
+				B028FCF11A9E7C3F00E3584B /* bitcode_bundle.cpp */,
+				B028FCF01A9E7B4A00E3584B /* bitcode_bundle.h */,
 				F984A38010BB4B0D009E9878 /* branch_island.cpp */,
 				F984A38110BB4B0D009E9878 /* branch_island.h */,
 				F9AA44DA1294885F00CB8390 /* branch_shim.cpp */,
@@ -466,6 +475,8 @@
 		F9AA65861051E750003E3539 /* parsers */ = {
 			isa = PBXGroup;
 			children = (
+				FA95D6121AB25CF400395811 /* textstub_dylib_file.cpp */,
+				FA95D6131AB25CF400395811 /* textstub_dylib_file.hpp */,
 				F91B7B0218987D5F0099486F /* libunwind */,
 				F9AA6784105700C2003E3539 /* opaque_section_file.cpp */,
 				F9AA6785105700C2003E3539 /* opaque_section_file.h */,
@@ -525,6 +536,7 @@
 				F9AA650B1051BD2B003E3539 /* passes */,
 				F9AA65861051E750003E3539 /* parsers */,
 				F933DC37092A82480083EAC8 /* Architectures.hpp */,
+				B091FB641ABA3AFB00CC8193 /* Bitcode.hpp */,
 				F9EA7582097882F3008B4F1D /* debugline.c */,
 				F9EA7583097882F3008B4F1D /* debugline.h */,
 				B3B672411406D42800A376BB /* Snapshot.cpp */,
@@ -772,7 +784,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 1;
 			shellPath = /bin/sh;
-			shellScript = "\nif [ -n \"${DT_TOOLCHAIN_DIR}\" ]\nthen\n\tmkdir -p  \"${DSTROOT}/${DT_TOOLCHAIN_DIR}\"\n\tmv ${DSTROOT}/usr \"${DSTROOT}/${DT_TOOLCHAIN_DIR}\"\nelse\n\tif [ -n \"${RC_PURPLE}\" ]\n\tthen\n\t\tmkdir -p  ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer/\n\t\tmv ${DSTROOT}/usr ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer\n\telse\n\t\tmkdir -p  ${DSTROOT}/Developer/usr/bin\n\t\tcp ${DSTROOT}/usr/bin/ld  ${DSTROOT}/Developer/usr/bin\n\tfi\nfi\n\n";
+			shellScript = "\nif [ -n \"${DT_TOOLCHAIN_DIR}\" ]\nthen\n\tmkdir -p  \"${DSTROOT}/${DT_VARIANT}/${DT_TOOLCHAIN_DIR}\"\n\tmv ${DSTROOT}/usr \"${DSTROOT}/${DT_VARIANT}/${DT_TOOLCHAIN_DIR}\"\nelse\n\tif [ -n \"${RC_PURPLE}\" ]\n\tthen\n\t\tmkdir -p  ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer/\n\t\tmv ${DSTROOT}/usr ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer\n\telse\n\t\tmkdir -p  ${DSTROOT}/Developer/usr/bin\n\t\tcp ${DSTROOT}/usr/bin/ld  ${DSTROOT}/Developer/usr/bin\n\tfi\nfi\n\n";
 			showEnvVarsInLog = 0;
 		};
 		F9CCF765144CE244007CB524 /* make configure.h */ = {
@@ -894,6 +906,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				FA95D6141AB25CF400395811 /* textstub_dylib_file.cpp in Sources */,
 				F9C0D4BD06DD28D2001C7193 /* Options.cpp in Sources */,
 				F9023C4E06D5A272001BBF46 /* ld.cpp in Sources */,
 				F9AA65891051E750003E3539 /* macho_relocatable_file.cpp in Sources */,
@@ -918,6 +931,7 @@
 				F93CB248116E69EB003233B8 /* tlvp.cpp in Sources */,
 				F9AA44DC1294885F00CB8390 /* branch_shim.cpp in Sources */,
 				B3B672421406D42800A376BB /* Snapshot.cpp in Sources */,
+				B028FCF21A9E7C3F00E3584B /* bitcode_bundle.cpp in Sources */,
 				F9CC24191461FB4300A92174 /* blob.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -1037,6 +1051,8 @@
 		F933D91C09291AC90083EAC8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
@@ -1080,13 +1096,16 @@
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
 				LINKER_DISPLAYS_MANGLED_NAMES = NO;
 				MACOSX_DEPLOYMENT_TARGET = "";
+				ONLY_ACTIVE_ARCH = NO;
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CPLUSPLUSFLAGS)",
 				);
 				OTHER_LDFLAGS = (
 					"-stdlib=libc++",
+					"-lxar",
 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
+					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
 				PREBINDING = NO;
@@ -1100,6 +1119,8 @@
 		F933D91D09291AC90083EAC8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
@@ -1151,7 +1172,9 @@
 				);
 				OTHER_LDFLAGS = (
 					"-stdlib=libc++",
+					"-lxar",
 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
+					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
 				PREBINDING = NO;
@@ -1168,6 +1191,7 @@
 		F933D92009291AC90083EAC8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
@@ -1186,8 +1210,10 @@
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/src/ld",
 					"$(DEVELOPER_DIR)/usr/local/include",
+					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
+				ONLY_ACTIVE_ARCH = NO;
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1211,6 +1237,7 @@
 		F933D92109291AC90083EAC8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
@@ -1221,6 +1248,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/src/ld",
 					"$(DEVELOPER_DIR)/usr/local/include",
+					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
 				OTHER_CPLUSPLUSFLAGS = (
@@ -1299,6 +1327,8 @@
 		F9849FFA10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
+				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
@@ -1349,7 +1379,9 @@
 				);
 				OTHER_LDFLAGS = (
 					"-stdlib=libc++",
+					"-lxar",
 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
+					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
 				PREBINDING = NO;
@@ -1413,6 +1445,7 @@
 		F9849FFD10B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_64_BIT)";
 				CLANG_CXX_LIBRARY = "libc++";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
@@ -1424,6 +1457,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/src/ld",
 					"$(DEVELOPER_DIR)/usr/local/include",
+					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(HOME)/bin";
 				OTHER_CPLUSPLUSFLAGS = (

@@ -73,4 +73,25 @@ _space4:
     .space 2*1024*1024
 #endif
 
+
+#if __arm64__
+
+    .text
+    .align 4
+_prejunk:
+    nop
+    nop
+
+	// arm64 branches are +/- 128MB
+_space1:
+    .space 120*1024*1024
+_space2:
+    .space 120*1024*1024
+_space3:
+    .space 120*1024*1024
+
+
+#endif
+
+
     .subsections_via_symbols
