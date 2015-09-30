@@ -186,9 +186,10 @@ Options::Options(int argc, const char* argv[])
 	  fMarkAppExtensionSafe(false), fCheckAppExtensionSafe(false), fForceLoadSwiftLibs(false),
 	  fSharedRegionEncodingV2(false), fUseDataConstSegment(false),
 	  fUseDataConstSegmentForceOn(false), fUseDataConstSegmentForceOff(false),
-	  fBundleBitcode(false), fHideSymbols(false), fReverseMapUUIDRename(false), fReverseMapPath(NULL), fLTOCodegenOnly(false),
-	  fIgnoreAutoLink(false), fPlatform(kPlatformUnknown),
-	  fDebugInfoStripping(kDebugInfoMinimal), fTraceOutputFile(NULL),
+	  fBundleBitcode(false), fHideSymbols(false), fVerifyBitcode(false),
+	  fReverseMapUUIDRename(false), fReverseMapPath(NULL), fLTOCodegenOnly(false),
+	  fIgnoreAutoLink(false), fAllowDeadDups(false), fBitcodeKind(kBitcodeProcess),
+	  fPlatform(kPlatformUnknown), fDebugInfoStripping(kDebugInfoMinimal), fTraceOutputFile(NULL),
 	  fMacVersionMin(ld::macVersionUnset), fIOSVersionMin(ld::iOSVersionUnset),
 	  fSaveTempFiles(false), fSnapshotRequested(false), fPipelineFifo(NULL),
 	  fDependencyInfoPath(NULL), fDependencyFileDescriptor(-1)
@@ -3063,6 +3064,11 @@ void Options::parse(int argc, const char* argv[])
 				if ( !fBundleBitcode )
 					warning("-bitcode_hide_symbols is ignored without -bitcode_bundle");
 			}
+			else if ( strcmp(arg, "-bitcode_verify") == 0 ) {
+				fVerifyBitcode = true;
+				if ( !fBundleBitcode )
+					warning("-bitcode_verify is ignored without -bitcode_bundle");
+			}
 			else if ( strcmp(arg, "-bitcode_symbol_map") == 0) {
 				fReverseMapPath = argv[++i];
 				if ( fReverseMapPath == NULL )
@@ -3086,6 +3092,24 @@ void Options::parse(int argc, const char* argv[])
 			}
 			else if ( strcmp(argv[i], "-ignore_auto_link") == 0) {
 				fIgnoreAutoLink = true;
+			}
+			else if ( strcmp(argv[i], "-allow_dead_duplicates") == 0) {
+				fAllowDeadDups = true;
+			}
+			else if ( strcmp(argv[i], "-bitcode_process_mode") == 0 ) {
+				const char* bitcode_type = argv[++i];
+				if ( bitcode_type == NULL )
+					throw "missing argument to -bitcode_process_mode";
+				else if ( strcmp(bitcode_type, "strip") == 0 )
+					fBitcodeKind = kBitcodeStrip;
+				else if ( strcmp(bitcode_type, "marker") == 0 )
+					fBitcodeKind = kBitcodeMarker;
+				else if ( strcmp(bitcode_type, "data") == 0 )
+					fBitcodeKind = kBitcodeAsData;
+				else if ( strcmp(bitcode_type, "bitcode") == 0 )
+					fBitcodeKind = kBitcodeProcess;
+				else
+					throw "unknown argument to -bitcode_process_mode {strip,marker,data,bitcode}";
 			}
 			else if ( strcmp(arg, "-rpath") == 0 ) {
 				const char* path = argv[++i];
@@ -5289,6 +5313,15 @@ void Options::checkIllegalOptionCombinations()
 	// -segment_order can only be used with -preload
 	if ( !fSegmentOrder.empty() && (fOutputKind != Options::kPreload) )
 		throw "-segment_order can only used used with -preload output";
+
+	if ( fBitcodeKind != kBitcodeProcess &&
+		 fOutputKind != Options::kObjectFile ) {
+		throw "-bitcode_process_mode can only be used together with -r";
+	}
+	// auto fix up the process type for strip -S.
+	// when there is only one input and output type is object file, downgrade kBitcodeProcess to kBitcodeAsData.
+	if ( fOutputKind == Options::kObjectFile && fInputFiles.size() == 1 && fBitcodeKind == Options::kBitcodeProcess )
+		fBitcodeKind = Options::kBitcodeAsData;
 
 	// <rdar://problem/17598404> warn if building an embedded iOS dylib for pre-iOS 8
 	// <rdar://problem/18935714> How can we suppress "ld: warning: embedded dylibs/frameworks only run on iOS 8 or later” when building XCTest?

@@ -488,12 +488,19 @@ void ObjectHandler::obfuscateAndWriteToPath(BitcodeObfuscator *obfuscator, const
 
 void BitcodeBundle::doPass()
 {
-    if ( _state.embedMarkerOnly ) {
-        assert( _options.outputKind() != Options::kDynamicExecutable &&
-                _options.outputKind() != Options::kStaticExecutable &&
-                "Don't emit marker for executables");
-        BitcodeAtom* marker = new BitcodeAtom();
-        _state.addAtom(*marker);
+    if ( _options.bitcodeKind() == Options::kBitcodeStrip ||
+         _options.bitcodeKind() == Options::kBitcodeAsData )
+        // if emit no bitcode or emit bitcode segment as data, no need to generate bundle.
+        return;
+    else if ( _state.embedMarkerOnly || _options.bitcodeKind() == Options::kBitcodeMarker ) {
+        // if the bitcode is just a marker,
+        // the executable will be created without bitcode section.
+        // Otherwise, create a marker.
+        if( _options.outputKind() != Options::kDynamicExecutable &&
+            _options.outputKind() != Options::kStaticExecutable ) {
+            BitcodeAtom* marker = new BitcodeAtom();
+            _state.addAtom(*marker);
+        }
         return;
     }
 
@@ -730,22 +737,23 @@ void BitcodeBundle::doPass()
         throwf("could not add SDK version to bitcode bundle");
 
     // Write dylibs
-    const char* sdkRoot = NULL;
-    if ( !_options.sdkPaths().empty() )
-        sdkRoot = _options.sdkPaths().front();
+    char sdkRoot[PATH_MAX];
+    if ( _options.sdkPaths().empty() || (realpath(_options.sdkPaths().front(), sdkRoot) == NULL) )
+        strcpy(sdkRoot, "/");
     if ( !_state.dylibs.empty() ) {
-        std::vector<const char*> SDKPaths = _options.sdkPaths();
         char dylibPath[PATH_MAX];
         for ( auto &dylib : _state.dylibs ) {
-            // For every dylib/framework, figure out if it is coming from a SDK
-            // if it is coming from some SDK, we parse the path to figure out which SDK
-            // If -syslibroot is pointing to a SDK, it should end with PlatformX.Y.sdk/
-            if (sdkRoot && strncmp(dylib->path(), sdkRoot, strlen(sdkRoot)) == 0) {
-                // dylib/framework from one of the -syslibroot
+            // For every dylib/framework, figure out if it is coming from a SDK.
+            // The dylib/framework from SDK must begin with '/' and user framework must begin with '@'.
+            if (dylib->installPath()[0] == '/') {
+                // Verify the path of the framework is within the SDK.
+                char dylibRealPath[PATH_MAX];
+                if ( realpath(dylib->path(), dylibRealPath) != NULL && strncmp(sdkRoot, dylibRealPath, strlen(sdkRoot)) != 0 )
+                    warning("%s has install name beginning with \"/\" but it is not from the specified SDK", dylib->path());
                 // The path start with a string template
-                strcpy(dylibPath, "{SDKPATH}/");
+                strcpy(dylibPath, "{SDKPATH}");
                 // append the path of dylib/frameowrk in the SDK
-                strcat(dylibPath, dylib->path() + strlen(sdkRoot));
+                strcat(dylibPath, dylib->installPath());
             } else {
                 // Not in any SDKs, then assume it is a user dylib/framework
                 // strip off all the path in the front
