@@ -34,7 +34,7 @@ all-x86_64: skip
 all-armv6: skip 
 all-armv7: skip
 
-all-arm64: AdrpAdd AdrpAddLdr AdrpLdr AdrpLdrGotLdr AdrpAddStr AdrpLdrGotStr AdrpLdrGot
+all-arm64: AdrpAdd AdrpAddLdr AdrpLdr AdrpLdrGotLdr AdrpLdrGotLdrField AdrpAddStr AdrpLdrGotStr AdrpLdrGot
 
 main.o:
 	${CC} ${CCFLAGS} main.s -c -o main.o
@@ -81,14 +81,14 @@ AdrpAddLdr-ldr: main.o
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-ldr-g8.o -DFOO_AS_CONST -DLOAD_GPR_8 
 	${CC} ${CCFLAGS} AdrpAddLdr-ldr-g8.o main.o -o AdrpAddLdr-ldr-g8.exe 
 	${OTOOL} -tV AdrpAddLdr-ldr-g8.exe | grep 'adr	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-ldr-g8.exe | grep 'ldr\tb1, \[x0\]' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-ldr-g8.exe | grep 'ldr\s*b1, \[x0\]' | ${FAIL_IF_EMPTY}
 	${OTOOL} -tV AdrpAddLdr-ldr-g8.exe | grep 'add	x0' | ${FAIL_IF_STDIN}
 	
 	# test ADRP/ADD/LD -> ADR/LDR when target is in __TEXT for 16-bit load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-ldr-g16.o -DFOO_AS_CONST -DLOAD_GPR_16
 	${CC} ${CCFLAGS} AdrpAddLdr-ldr-g16.o main.o -o AdrpAddLdr-ldr-g16.exe
 	${OTOOL} -tV AdrpAddLdr-ldr-g16.exe | grep 'adr	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-ldr-g16.exe | grep 'ldr\th1, \[x0\]' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-ldr-g16.exe | grep 'ldr\s*h1, \[x0\]' | ${FAIL_IF_EMPTY}
 	${OTOOL} -tV AdrpAddLdr-ldr-g16.exe | grep 'add	x0' | ${FAIL_IF_STDIN}
 	
 	# test ADRP/ADD/LD -> LDR when target is in __TEXT for 32-bit load
@@ -101,7 +101,7 @@ AdrpAddLdr-ldr: main.o
 	# test ADRP/ADD/LD -> LDR when target is in __TEXT for 64-bit load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-ldr-g64.o -DFOO_AS_CONST -DLOAD_GPR_64
 	${CC} ${CCFLAGS} AdrpAddLdr-ldr-g64.o main.o -o AdrpAddLdr-ldr-g64.exe
-	${OTOOL} -tV AdrpAddLdr-ldr-g64.exe | grep 'ldr	x1, _foo' | ${FAIL_IF_EMPTY}
+#	${OTOOL} -tV AdrpAddLdr-ldr-g64.exe | grep 'ldr	x1, _foo' | ${FAIL_IF_EMPTY}
 	${OTOOL} -tV AdrpAddLdr-ldr-g64.exe | grep 'adrp	x0' | ${FAIL_IF_STDIN}
 	${OTOOL} -tV AdrpAddLdr-ldr-g64.exe | grep 'add	x0' | ${FAIL_IF_STDIN}
 
@@ -228,51 +228,51 @@ AdrpAddLdr-seg:
 	# test ADRP/ADD/LD -> ADRP/LD when target is in movable segment for 8-bit load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-seg-g8.o -DFOO_AS_DATA -DLOAD_GPR_8 
 	${CC} ${CCFLAGS} AdrpAddLdr-seg-g8.o -dynamiclib -o AdrpAddLdr-seg-g8.dylib -install_name /usr/lib/libjunk.dylib
-	${OTOOL} -tV AdrpAddLdr-seg-g8.dylib | grep 'adrp	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-seg-g8.dylib | grep 'add	x0' | ${FAIL_IF_STDIN}
-	${OTOOL} -tV AdrpAddLdr-seg-g8.dylib | grep 'ldr	b1, \[x0,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-g8.dylib | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-g8.dylib | grep 'add\s*x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpAddLdr-seg-g8.dylib | grep 'ldr\s*b1, \[x0,' | ${FAIL_IF_EMPTY}
 	
 	# test ADRP/ADD/LD -> ADRP/LD when target is in movable segment for 16-bit load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-seg-g16.o -DFOO_AS_DATA -DLOAD_GPR_16 
 	${CC} ${CCFLAGS} AdrpAddLdr-seg-g16.o -dynamiclib -o AdrpAddLdr-seg-g16.dylib -install_name /usr/lib/libjunk.dylib
-	${OTOOL} -tV AdrpAddLdr-seg-g16.dylib | grep 'adrp	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-seg-g16.dylib | grep 'add	x0' | ${FAIL_IF_STDIN}
-	${OTOOL} -tV AdrpAddLdr-seg-g16.dylib | grep 'ldr	h1, \[x0,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-g16.dylib | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-g16.dylib | grep 'add\s*x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpAddLdr-seg-g16.dylib | grep 'ldr\s*h1, \[x0,' | ${FAIL_IF_EMPTY}
 	
 	# test ADRP/ADD/LD -> ADRP/LD  when target is in movable segment for 32-bit load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-seg-g32.o -DFOO_AS_DATA -DLOAD_GPR_32 
 	${CC} ${CCFLAGS} AdrpAddLdr-seg-g32.o -dynamiclib -o AdrpAddLdr-seg-g32.dylib -install_name /usr/lib/libjunk.dylib
-	${OTOOL} -tV AdrpAddLdr-seg-g32.dylib | grep 'adrp	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-seg-g32.dylib | grep 'add	x0' | ${FAIL_IF_STDIN}
-	${OTOOL} -tV AdrpAddLdr-seg-g32.dylib | grep 'ldr	w1, \[x0,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-g32.dylib | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-g32.dylib | grep 'add\s*x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpAddLdr-seg-g32.dylib | grep 'ldr\s*w1, \[x0,' | ${FAIL_IF_EMPTY}
 
 	# test ADRP/ADD/LD -> ADRP/LD  when target is in movable segment for 64-bit load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-seg-g64.o -DFOO_AS_DATA -DLOAD_GPR_64 
 	${CC} ${CCFLAGS} AdrpAddLdr-seg-g64.o -dynamiclib -o AdrpAddLdr-seg-g64.dylib -install_name /usr/lib/libjunk.dylib
-	${OTOOL} -tV AdrpAddLdr-seg-g64.dylib | grep 'adrp	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-seg-g64.dylib | grep 'add	x0' | ${FAIL_IF_STDIN}
-	${OTOOL} -tV AdrpAddLdr-seg-g64.dylib | grep 'ldr	x1, \[x0,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-g64.dylib | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-g64.dylib | grep 'add\s*x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpAddLdr-seg-g64.dylib | grep 'ldr\s*x1, \[x0,' | ${FAIL_IF_EMPTY}
 
 	# test ADRP/ADD/LD -> ADRP/LD  when target is in movable segment for 32-bit fp load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-seg-f32.o -DFOO_AS_DATA -DLOAD_FPR_32 
 	${CC} ${CCFLAGS} AdrpAddLdr-seg-f32.o -dynamiclib -o AdrpAddLdr-seg-f32.dylib -install_name /usr/lib/libjunk.dylib
-	${OTOOL} -tV AdrpAddLdr-seg-f32.dylib | grep 'adrp	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-seg-f32.dylib | grep 'add	x0' | ${FAIL_IF_STDIN}
-	${OTOOL} -tV AdrpAddLdr-seg-f32.dylib | grep 'ldr	s1, \[x0,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-f32.dylib | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-f32.dylib | grep 'add\s*x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpAddLdr-seg-f32.dylib | grep 'ldr\s*s1, \[x0,' | ${FAIL_IF_EMPTY}
 
 	# test ADRP/ADD/LD -> ADRP/LD  when target is in movable segment for 64-bit fp load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-seg-f64.o -DFOO_AS_DATA -DLOAD_FPR_64 
 	${CC} ${CCFLAGS} AdrpAddLdr-seg-f64.o -dynamiclib -o AdrpAddLdr-seg-f64.dylib -install_name /usr/lib/libjunk.dylib
-	${OTOOL} -tV AdrpAddLdr-seg-f64.dylib | grep 'adrp	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-seg-f64.dylib | grep 'add	x0' | ${FAIL_IF_STDIN}
-	${OTOOL} -tV AdrpAddLdr-seg-f64.dylib | grep 'ldr	d1, \[x0,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-f64.dylib | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-f64.dylib | grep 'add\s*x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpAddLdr-seg-f64.dylib | grep 'ldr\s*d1, \[x0,' | ${FAIL_IF_EMPTY}
 	
 	# test ADRP/ADD/LD -> ADRP/LD  when target is in movable segmentfor 128-bit vec load
 	${CC} ${CCFLAGS} AdrpAddLdr.s -c -o AdrpAddLdr-seg-v128.o -DFOO_AS_DATA -DLOAD_VEC_128 
 	${CC} ${CCFLAGS} AdrpAddLdr-seg-v128.o -dynamiclib -o AdrpAddLdr-seg-v128.dylib -install_name /usr/lib/libjunk.dylib
-	${OTOOL} -tV AdrpAddLdr-seg-v128.dylib | grep 'adrp	x0' | ${FAIL_IF_EMPTY}
-	${OTOOL} -tV AdrpAddLdr-seg-v128.dylib | grep 'add	x0' | ${FAIL_IF_STDIN}
-	${OTOOL} -tV AdrpAddLdr-seg-v128.dylib | grep 'ldr	q1, \[x0,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-v128.dylib | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpAddLdr-seg-v128.dylib | grep 'add\s*x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpAddLdr-seg-v128.dylib | grep 'ldr\s*q1, \[x0,' | ${FAIL_IF_EMPTY}
 
 
 
@@ -810,6 +810,322 @@ AdrpLdrGotLdr-farunaligned: main.o
 	${OTOOL} -tV AdrpLdrGotLdr-farunaligned-v128.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
 	${OTOOL} -tV AdrpLdrGotLdr-farunaligned-v128.exe | grep 'add\t' | ${FAIL_IF_EMPTY}
 	${OTOOL} -tV AdrpLdrGotLdr-farunaligned-v128.exe | grep 'ldr\tq2, \[x1\]' | ${FAIL_IF_EMPTY}
+
+
+AdrpLdrGotLdrField: AdrpLdrGotLdrField-extern AdrpLdrGotLdrField-externfargot AdrpLdrGotLdrField-near AdrpLdrGotLdrField-far AdrpLdrGotLdrField-nearunaligned AdrpLdrGotLdrField-farunaligned
+	true
+
+AdrpLdrGotLdrField-extern: main.o
+	# test ADRP/LDR/LDR -> LDR/LDR when GOT slot is close  for 8-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-extern-g8.o -DFOO_AS_CONST -DLOAD_GPR_8 -DTARGET=_malloc
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-extern-g8.o main.o -o AdrpLdrGotLdrField-extern-g8.exe
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g8.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g8.exe | grep 'ldr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g8.exe | grep 'ldr\s*b2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -> LDR/LDR when GOT slot is close  for 16-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-extern-g16.o -DFOO_AS_CONST -DLOAD_GPR_16 -DTARGET=_malloc
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-extern-g16.o main.o -o AdrpLdrGotLdrField-extern-g16.exe
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g16.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g16.exe | grep 'ldr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g16.exe | grep 'ldr\s*h2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -> LDR/LDR when GOT slot is close for 32-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-extern-g32.o -DFOO_AS_CONST -DLOAD_GPR_32 -DTARGET=_malloc
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-extern-g32.o main.o -o AdrpLdrGotLdrField-extern-g32.exe
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g32.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g32.exe | grep 'ldr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g32.exe | grep 'ldr\s*w2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR -> LDR/LDR when GOT slot is close for 64-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-extern-g64.o -DFOO_AS_CONST -DLOAD_GPR_64 -DTARGET=_malloc
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-extern-g64.o main.o -o AdrpLdrGotLdrField-extern-g64.exe
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g64.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g64.exe | grep 'ldr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-g64.exe | grep 'ldr\s*x2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR -> LDR/LDR when GOT slot is close for 32-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-extern-f32.o -DFOO_AS_CONST -DLOAD_FPR_32 -DTARGET=_malloc
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-extern-f32.o main.o -o AdrpLdrGotLdrField-extern-f32.exe
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-f32.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-f32.exe | grep 'ldr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-f32.exe | grep 'ldr\s*s2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR -> LDR/LDR when GOT slot is close for 64-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-extern-f64.o -DFOO_AS_CONST -DLOAD_FPR_64 -DTARGET=_malloc
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-extern-f64.o main.o -o AdrpLdrGotLdrField-extern-f64.exe
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-f64.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-f64.exe | grep 'ldr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-f64.exe | grep 'ldr\s*d2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -> LDR/LDR when GOT slot is close for 128-bit vec load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-extern-v128.o -DFOO_AS_CONST -DLOAD_VEC_128 -DTARGET=_malloc
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-extern-v128.o main.o -o AdrpLdrGotLdrField-extern-v128.exe
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-v128.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-v128.exe | grep 'ldr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-extern-v128.exe | grep 'ldr\s*q2, \[x1, #16\]' | ${FAIL_IF_EMPTY}
+
+
+AdrpLdrGotLdrField-externfargot: main.o
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 8-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-externfargot-g8.o -DFOO_AS_CONST -DLOAD_GPR_8 -DTARGET=_malloc -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-externfargot-g8.o main.o -o AdrpLdrGotLdrField-externfargot-g8.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g8.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g8.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g8.exe | grep 'ldr\s*b2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 16-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-externfargot-g16.o -DFOO_AS_CONST -DLOAD_GPR_16 -DTARGET=_malloc -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-externfargot-g16.o main.o -o AdrpLdrGotLdrField-externfargot-g16.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g16.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g16.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g16.exe | grep 'ldr\s*h2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot farfor 32-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-externfargot-g32.o -DFOO_AS_CONST -DLOAD_GPR_32 -DTARGET=_malloc -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-externfargot-g32.o main.o -o AdrpLdrGotLdrField-externfargot-g32.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g32.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g32.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g32.exe | grep 'ldr\s*w2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 64-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-externfargot-g64.o -DFOO_AS_CONST -DLOAD_GPR_64 -DTARGET=_malloc -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-externfargot-g64.o main.o -o AdrpLdrGotLdrField-externfargot-g64.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g64.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g64.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-g64.exe | grep 'ldr\s*x2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 32-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-externfargot-f32.o -DFOO_AS_CONST -DLOAD_FPR_32 -DTARGET=_malloc -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-externfargot-f32.o main.o -o AdrpLdrGotLdrField-externfargot-f32.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-f32.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-f32.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-f32.exe | grep 'ldr\s*s2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 64-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-externfargot-f64.o -DFOO_AS_CONST -DLOAD_FPR_64 -DTARGET=_malloc -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-externfargot-f64.o main.o -o AdrpLdrGotLdrField-externfargot-f64.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-f64.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-f64.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-f64.exe | grep 'ldr\s*d2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -left untouched when target is external and GOT slot far for 128-bit vec load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-externfargot-v128.o -DFOO_AS_CONST -DLOAD_VEC_128 -DTARGET=_malloc -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-externfargot-v128.o main.o -o AdrpLdrGotLdrField-externfargot-v128.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-v128.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-v128.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-externfargot-v128.exe | grep 'ldr\s*q2, \[x1, #16\]' | ${FAIL_IF_EMPTY}
+
+
+AdrpLdrGotLdrField-near: main.o 
+	# test ADRP/LDR left untouched when target is in __TEXT for 8-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-near-g8.o -DFOO_AS_CONST -DLOAD_GPR_8 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-near-g8.o main.o -o AdrpLdrGotLdrField-near-g8.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g8.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g8.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g8.exe | grep 'ldr\s*b2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 16-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-near-g16.o -DFOO_AS_CONST -DLOAD_GPR_16 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-near-g16.o main.o -o AdrpLdrGotLdrField-near-g16.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g16.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g16.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g16.exe | grep 'ldr\s*h2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -> LDR literal when target close for 32-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-near-g32.o -DFOO_AS_CONST -DLOAD_GPR_32 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-near-g32.o main.o -o AdrpLdrGotLdrField-near-g32.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g32.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g32.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g32.exe | grep 'ldr\s*w2, _foo' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g32.exe | grep 'ldr\s*w2,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 64-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-near-g64.o -DFOO_AS_CONST -DLOAD_GPR_64 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-near-g64.o main.o -o AdrpLdrGotLdrField-near-g64.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g64.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g64.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g64.exe | grep 'ldr\s*x2, _foo' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-g64.exe | grep 'ldr\s*x2,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 32-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-near-f32.o -DFOO_AS_CONST -DLOAD_FPR_32 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-near-f32.o main.o -o AdrpLdrGotLdrField-near-f32.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-near-f32.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-f32.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-f32.exe | grep 'ldr\s*s2, _foo' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-f32.exe | grep 'ldr\s*s2,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 64-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-near-f64.o -DFOO_AS_CONST -DLOAD_FPR_64 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-near-f64.o main.o -o AdrpLdrGotLdrField-near-f64.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-near-f64.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-f64.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-f64.exe | grep 'ldr\s*d2, _foo' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-f64.exe | grep 'ldr\s*d2,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR -left untouched when target is external and GOT slot far for 128-bit vec load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-near-v128.o -DFOO_AS_CONST -DLOAD_VEC_128 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-near-v128.o main.o -o AdrpLdrGotLdrField-near-v128.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-near-v128.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-v128.exe | grep 'ldr\s*x1, \[x0' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-v128.exe | grep 'ldr\s*q2, _foo' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-near-v128.exe | grep 'ldr\s*q2,' | ${FAIL_IF_EMPTY}
+
+
+AdrpLdrGotLdrField-nearunaligned: main.o 
+	# test ADRP/LDR/LDR -> ADR/LDR when target in __TEXT for 8-bit unaligned load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-nearunaligned-g8.o -DFOO_AS_CONST -DLOAD_GPR_8 -DMISALIGN_DATA
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-nearunaligned-g8.o main.o -o AdrpLdrGotLdrField-nearunaligned-g8.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g8.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g8.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g8.exe | grep 'ldr\s*b2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR -> ADR/LDR when target in __TEXT for 16-bit unaligned load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-nearunaligned-g16.o -DFOO_AS_CONST -DLOAD_GPR_16 -DMISALIGN_DATA
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-nearunaligned-g16.o main.o -o AdrpLdrGotLdrField-nearunaligned-g16.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g16.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g16.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g16.exe | grep 'ldr\s*h2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -> ADR/LDR when target in __TEXT for 32-bit unaligned load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-nearunaligned-g32.o -DFOO_AS_CONST -DLOAD_GPR_32 -DMISALIGN_DATA
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-nearunaligned-g32.o main.o -o AdrpLdrGotLdrField-nearunaligned-g32.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g32.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g32.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g32.exe | grep 'ldr\s*w2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR -> ADR/LDR when target in __TEXT for 64-bit unaligned load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-nearunaligned-g64.o -DFOO_AS_CONST -DLOAD_GPR_64 -DMISALIGN_DATA
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-nearunaligned-g64.o main.o -o AdrpLdrGotLdrField-nearunaligned-g64.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g64.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g64.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-g64.exe | grep 'ldr\s*x2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR -> ADR/LDR when target in __TEXT for 32-bit FP unaligned load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-nearunaligned-f32.o -DFOO_AS_CONST -DLOAD_FPR_32 -DMISALIGN_DATA
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-nearunaligned-f32.o main.o -o AdrpLdrGotLdrField-nearunaligned-f32.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-f32.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-f32.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-f32.exe | grep 'ldr\s*s2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR -> ADR/LDR when target in __TEXT for 64-bit FP unaligned load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-nearunaligned-f64.o -DFOO_AS_CONST -DLOAD_FPR_64 -DMISALIGN_DATA
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-nearunaligned-f64.o main.o -o AdrpLdrGotLdrField-nearunaligned-f64.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-f64.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-f64.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-f64.exe | grep 'ldr\s*d2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -> ADR/LDR when target in __TEXT for 12-bit vec unaligned load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-nearunaligned-v128.o -DFOO_AS_CONST -DLOAD_VEC_128 -DMISALIGN_DATA
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-nearunaligned-v128.o main.o -o AdrpLdrGotLdrField-nearunaligned-v128.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-v128.exe | grep 'adrp' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-v128.exe | grep 'adr\s*x1,' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-nearunaligned-v128.exe | grep 'ldr\s*q2, \[x1, #16\]' | ${FAIL_IF_EMPTY}
+
+
+AdrpLdrGotLdrField-far: main.o 
+	# test ADRP/LDR left untouched when target is in __TEXT for 8-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-far-g8.o -DFOO_AS_CONST -DLOAD_GPR_8 -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-far-g8.o main.o -o AdrpLdrGotLdrField-far-g8.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g8.exe | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g8.exe | grep 'add\t' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g8.exe | grep 'ldr\s*b2, \[x0,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 16-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-far-g16.o -DFOO_AS_CONST -DLOAD_GPR_16 -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-far-g16.o main.o -o AdrpLdrGotLdrField-far-g16.exe  
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g16.exe | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g16.exe | grep 'add\t' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g16.exe | grep 'ldr\s*h2, \[x0,' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -> LDR literal when target close for 32-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-far-g32.o -DFOO_AS_CONST -DLOAD_GPR_32 -DPADDING 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-far-g32.o main.o -o AdrpLdrGotLdrField-far-g32.exe  
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g32.exe | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g32.exe | grep 'add\t' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g32.exe | grep 'ldr\s*w2, \[x0,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 64-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-far-g64.o -DFOO_AS_CONST -DLOAD_GPR_64 -DPADDING 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-far-g64.o main.o -o AdrpLdrGotLdrField-far-g64.exe  
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g64.exe | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g64.exe | grep 'add\t' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-g64.exe | grep 'ldr\s*x2, \[x0,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 32-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-far-f32.o -DFOO_AS_CONST -DLOAD_FPR_32 -DPADDING 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-far-f32.o main.o -o AdrpLdrGotLdrField-far-f32.exe  
+	${OTOOL} -tV AdrpLdrGotLdrField-far-f32.exe | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-f32.exe | grep 'add\t' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-f32.exe | grep 'ldr\s*s2, \[x0,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 64-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-far-f64.o -DFOO_AS_CONST -DLOAD_FPR_64 -DPADDING 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-far-f64.o main.o -o AdrpLdrGotLdrField-far-f64.exe  
+	${OTOOL} -tV AdrpLdrGotLdrField-far-f64.exe | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-f64.exe | grep 'add\t' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-f64.exe | grep 'ldr\s*d2, \[x0,' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 128-bit vec load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-far-v128.o -DFOO_AS_CONST -DLOAD_VEC_128 -DPADDING 
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-far-v128.o main.o -o AdrpLdrGotLdrField-far-v128.exe  
+	${OTOOL} -tV AdrpLdrGotLdrField-far-v128.exe | grep 'adrp\s*x0' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-v128.exe | grep 'add\t' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-far-v128.exe | grep 'ldr\s*q2, \[x0,' | ${FAIL_IF_EMPTY}
+
+
+AdrpLdrGotLdrField-farunaligned: main.o 
+	# test ADRP/LDR left untouched when target is in __TEXT for 8-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-farunaligned-g8.o -DFOO_AS_CONST -DLOAD_GPR_8 -DMISALIGN_DATA -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-farunaligned-g8.o main.o -o AdrpLdrGotLdrField-farunaligned-g8.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g8.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g8.exe | grep 'add\t' | ${FAIL_IF_STDIN}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g8.exe | grep 'ldr\s*b2, \[x0,' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 16-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-farunaligned-g16.o -DFOO_AS_CONST -DLOAD_GPR_16 -DMISALIGN_DATA -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-farunaligned-g16.o main.o -o AdrpLdrGotLdrField-farunaligned-g16.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g16.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g16.exe | grep 'add\t' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g16.exe | grep 'ldr\s*h2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -> LDR literal when target close for 32-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-farunaligned-g32.o -DFOO_AS_CONST -DLOAD_GPR_32 -DMISALIGN_DATA -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-farunaligned-g32.o main.o -o AdrpLdrGotLdrField-farunaligned-g32.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g32.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g32.exe | grep 'add\t' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g32.exe | grep 'ldr\s*w2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 64-bit load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-farunaligned-g64.o -DFOO_AS_CONST -DLOAD_GPR_64 -DMISALIGN_DATA -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-farunaligned-g64.o main.o -o AdrpLdrGotLdrField-farunaligned-g64.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g64.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g64.exe | grep 'add\t' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-g64.exe | grep 'ldr\s*x2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 32-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-farunaligned-f32.o -DFOO_AS_CONST -DLOAD_FPR_32 -DMISALIGN_DATA -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-farunaligned-f32.o main.o -o AdrpLdrGotLdrField-farunaligned-f32.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-f32.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-f32.exe | grep 'add\t' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-f32.exe | grep 'ldr\s*s2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+
+	# test ADRP/LDR/LDR left untouched when target is external and GOT slot far for 64-bit fp load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-farunaligned-f64.o -DFOO_AS_CONST -DLOAD_FPR_64 -DMISALIGN_DATA -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-farunaligned-f64.o main.o -o AdrpLdrGotLdrField-farunaligned-f64.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-f64.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-f64.exe | grep 'add\t' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-f64.exe | grep 'ldr\s*d2, \[x1, #8\]' | ${FAIL_IF_EMPTY}
+	
+	# test ADRP/LDR/LDR -left untouched when target is external and GOT slot far for 128-bit vec load
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField.s -c -o AdrpLdrGotLdrField-farunaligned-v128.o -DFOO_AS_CONST -DLOAD_VEC_128 -DMISALIGN_DATA -DPADDING
+	${CC} ${CCFLAGS} AdrpLdrGotLdrField-farunaligned-v128.o main.o -o AdrpLdrGotLdrField-farunaligned-v128.exe 
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-v128.exe | grep 'adrp' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-v128.exe | grep 'add\t' | ${FAIL_IF_EMPTY}
+	${OTOOL} -tV AdrpLdrGotLdrField-farunaligned-v128.exe | grep 'ldr\s*q2, \[x1, #16\]' | ${FAIL_IF_EMPTY}
+
+
 
 
 AdrpAddStr: AdrpAddStr-base AdrpAddStr-seg AdrpAddStr-align AdrpAddStr-addend AdrpAddStr-faraddend

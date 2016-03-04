@@ -86,6 +86,7 @@ public:
 	enum CommonsMode { kCommonsIgnoreDylibs, kCommonsOverriddenByDylibs, kCommonsConflictsDylibsError };
 	enum UUIDMode { kUUIDNone, kUUIDRandom, kUUIDContent };
 	enum LocalSymbolHandling { kLocalSymbolsAll, kLocalSymbolsNone, kLocalSymbolsSelectiveInclude, kLocalSymbolsSelectiveExclude };
+	enum BitcodeMode { kBitcodeProcess, kBitcodeAsData, kBitcodeMarker, kBitcodeStrip };
 	enum DebugInfoStripping { kDebugInfoNone, kDebugInfoMinimal, kDebugInfoFull };
 #if SUPPORT_APPLE_TV
 	enum Platform { kPlatformUnknown, kPlatformOSX, kPlatformiOS, kPlatformWatchOS, kPlatform_tvOS };
@@ -145,6 +146,18 @@ public:
         // it to the calling frame by copy. Therefore the copy constructor steals the path string from
         // the source, which dies with the stack frame.
         FileInfo(FileInfo const &other) : path(other.path), fileLen(other.fileLen), modTime(other.modTime), options(other.options), ordinal(other.ordinal), fromFileList(other.fromFileList), inputFileSlot(-1) { ((FileInfo&)other).path = NULL; };
+
+		FileInfo &operator=(FileInfo other) {
+			std::swap(path, other.path);
+			std::swap(fileLen, other.fileLen);
+			std::swap(modTime, other.modTime);
+			std::swap(options, other.options);
+			std::swap(ordinal, other.ordinal);
+			std::swap(fromFileList, other.fromFileList);
+			std::swap(inputFileSlot, other.inputFileSlot);
+			std::swap(readyToParse, other.readyToParse);
+			return *this;
+		}
 
         // Create an empty FileInfo. The path can be set implicitly by checkFileExists().
         FileInfo() : path(NULL), fileLen(0), modTime(0), options(), fromFileList(false) {};
@@ -247,6 +260,7 @@ public:
 	bool						preferSubArchitecture() const { return fHasPreferredSubType; }
 	cpu_subtype_t				subArchitecture() const { return fSubArchitecture; }
 	bool						allowSubArchitectureMismatches() const { return fAllowCpuSubtypeMismatches; }
+	bool						enforceDylibSubtypesMatch() const { return fEnforceDylibSubtypesMatch; }
 	bool						forceCpuSubtypeAll() const { return fForceSubtypeAll; }
 	const char*					architectureName() const { return fArchitectureName; }
 	void						setArchitecture(cpu_type_t, cpu_subtype_t subtype, Options::Platform platform);
@@ -312,6 +326,7 @@ public:
 	bool						warnCommons() const { return fWarnCommons; }
 	bool						keepRelocations();
 	FileInfo					findFile(const std::string &path) const;
+	bool						findFile(const std::string &path, const std::vector<std::string> &tbdExtensions, FileInfo& result) const;
 	UUIDMode					UUIDMode() const { return fUUIDMode; }
 	bool						warnStabs();
 	bool						pauseAtEnd() { return fPause; }
@@ -412,11 +427,16 @@ public:
 	bool						forceLoadSwiftLibs() const { return fForceLoadSwiftLibs; }
 	bool						bundleBitcode() const { return fBundleBitcode; }
 	bool						hideSymbols() const { return fHideSymbols; }
+	bool						verifyBitcode() const { return fVerifyBitcode; }
 	bool						renameReverseSymbolMap() const { return fReverseMapUUIDRename; }
+	bool						deduplicateFunctions() const { return fDeDupe; }
+	bool						verboseDeduplicate() const { return fVerboseDeDupe; }
 	const char*					reverseSymbolMapPath() const { return fReverseMapPath; }
 	std::string					reverseMapTempPath() const { return fReverseMapTempPath; }
 	bool						ltoCodegenOnly() const { return fLTOCodegenOnly; }
 	bool						ignoreAutoLink() const { return fIgnoreAutoLink; }
+	bool						allowDeadDuplicates() const { return fAllowDeadDups; }
+	BitcodeMode					bitcodeKind() const { return fBitcodeKind; }
 	bool						sharedRegionEncodingV2() const { return fSharedRegionEncodingV2; }
 	bool						useDataConstSegment() const { return fUseDataConstSegment; }
 	bool						hasWeakBitTweaks() const;
@@ -454,6 +474,9 @@ public:
 	std::vector<std::string>	writeBitcodeLinkOptions() const;
 	std::string					getSDKVersionStr() const;
 	std::string					getPlatformStr() const;
+	uint8_t						maxDefaultCommonAlign() const { return fMaxDefaultCommonAlign; }
+
+	static uint32_t				parseVersionNumber32(const char*);
 
 private:
 	typedef std::unordered_map<const char*, unsigned int, ld::CStringHash, ld::CStringEquals> NameToOrder;
@@ -461,6 +484,7 @@ private:
 	enum ExportMode { kExportDefault, kExportSome, kDontExportSome };
 	enum LibrarySearchMode { kSearchDylibAndArchiveInEachDir, kSearchAllDirsForDylibsThenAllDirsForArchives };
 	enum InterposeMode { kInterposeNone, kInterposeAllExternal, kInterposeSome };
+	enum FilePreference { kModTime, kTextBasedStub, kMachO };
 
 	class SetWithWildcards {
 	public:
@@ -496,9 +520,9 @@ private:
 	bool						checkForFile(const char* format, const char* dir, const char* rootName,
 											 FileInfo& result) const;
 	uint64_t					parseVersionNumber64(const char*);
-	uint32_t					parseVersionNumber32(const char*);
 	std::string					getVersionString32(uint32_t ver) const;
 	std::string					getVersionString64(uint64_t ver) const;
+	bool						parsePackedVersion32(const std::string& versionStr, uint32_t &result);
 	void						parseSectionOrderFile(const char* segment, const char* section, const char* path);
 	void						parseOrderFile(const char* path, bool cstring);
 	void						addSection(const char* segment, const char* section, const char* path);
@@ -635,6 +659,7 @@ private:
 	bool								fMakeCompressedDyldInfoForceOff;
 	bool								fNoEHLabels;
 	bool								fAllowCpuSubtypeMismatches;
+	bool								fEnforceDylibSubtypesMatch;
 	bool								fUseSimplifiedDylibReExports;
 	bool								fObjCABIVersion2Override;
 	bool								fObjCABIVersion1Override;
@@ -709,11 +734,16 @@ private:
 	bool								fUseDataConstSegmentForceOff;
 	bool								fBundleBitcode;
 	bool								fHideSymbols;
+	bool								fVerifyBitcode;
 	bool								fReverseMapUUIDRename;
+	bool								fDeDupe;
+	bool								fVerboseDeDupe;
 	const char*							fReverseMapPath;
 	std::string							fReverseMapTempPath;
 	bool								fLTOCodegenOnly;
 	bool								fIgnoreAutoLink;
+	bool								fAllowDeadDups;
+	BitcodeMode							fBitcodeKind;
 	Platform							fPlatform;
 	DebugInfoStripping					fDebugInfoStripping;
 	const char*							fTraceOutputFile;
@@ -751,6 +781,9 @@ private:
     const char*							fPipelineFifo;
 	const char*							fDependencyInfoPath;
 	mutable int							fDependencyFileDescriptor;
+	uint8_t								fMaxDefaultCommonAlign;
+	FilePreference						fFilePreference;
+	bool								fForceTextBasedStub;
 };
 
 

@@ -28,7 +28,6 @@
 			isa = PBXAggregateTarget;
 			buildConfigurationList = F9B1A26C0A3A568700DA8FAB /* Build configuration list for PBXAggregateTarget "all" */;
 			buildPhases = (
-				F9871A3413340B4600DB3F24 /* Platform install */,
 			);
 			dependencies = (
 				F9B1A2690A3A568200DA8FAB /* PBXTargetDependency */,
@@ -36,6 +35,7 @@
 				F9C12EEA0ED65765005BC69D /* PBXTargetDependency */,
 				F9B8135D0EC2620E00F94C13 /* PBXTargetDependency */,
 				F9A3DE160ED76D9A00C590B9 /* PBXTargetDependency */,
+				F9FF3BDD1C586D7C0015D843 /* PBXTargetDependency */,
 			);
 			name = all;
 			productName = all;
@@ -83,6 +83,7 @@
 		F9EA7584097882F3008B4F1D /* debugline.c in Sources */ = {isa = PBXBuildFile; fileRef = F9EA7582097882F3008B4F1D /* debugline.c */; };
 		F9EA75BC09788857008B4F1D /* debugline.c in Sources */ = {isa = PBXBuildFile; fileRef = F9EA7582097882F3008B4F1D /* debugline.c */; };
 		F9EC78060A2F8674002A3E39 /* rebase.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9EC78050A2F8674002A3E39 /* rebase.cpp */; };
+		F9FC510A1BC893C400FEC3F8 /* code_dedup.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9FC51081BC8915A00FEC3F8 /* code_dedup.cpp */; };
 		FA95D6141AB25CF400395811 /* textstub_dylib_file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = FA95D6121AB25CF400395811 /* textstub_dylib_file.cpp */; };
 /* End PBXBuildFile section */
 
@@ -183,13 +184,20 @@
 			remoteGlobalIDString = F9BA51600ECE58BE00D1D62E;
 			remoteInfo = dyldinfo;
 		};
+		F9FF3BDC1C586D7C0015D843 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = F9023C3006D5A227001BBF46 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = F9EA72CA097454A6008B4F1D;
+			remoteInfo = machocheck;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXCopyFilesBuildPhase section */
 		F97F5025070D0B6300B9FCD7 /* copy man page */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 8;
-			dstPath = /usr/share/man/man1;
+			dstPath = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/share/man/man1";
 			dstSubfolderSpec = 0;
 			files = (
 				F97F5029070D0BB200B9FCD7 /* ld.1 in copy man page */,
@@ -200,7 +208,7 @@
 		F9A3DE140ED76D7700C590B9 /* CopyFiles */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 8;
-			dstPath = "/usr/local/include/mach-o";
+			dstPath = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/include/mach-o";
 			dstSubfolderSpec = 0;
 			files = (
 				F9A3DE1E0ED7738300C590B9 /* prune_trie.h in CopyFiles */,
@@ -210,7 +218,7 @@
 		F9B1A25E0A3A44CB00DA8FAB /* install man page */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 8;
-			dstPath = /usr/share/man/man1;
+			dstPath = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/share/man/man1";
 			dstSubfolderSpec = 0;
 			files = (
 				F9B1A2640A3A563E00DA8FAB /* rebase.1 in install man page */,
@@ -221,7 +229,7 @@
 		F9B813870EC2659600F94C13 /* install man page */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 8;
-			dstPath = usr/share/man/man1;
+			dstPath = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/share/man/man1";
 			dstSubfolderSpec = 0;
 			files = (
 				F9B813850EC2657800F94C13 /* unwinddump.1 in install man page */,
@@ -232,7 +240,7 @@
 		F9C12EA50ED63E05005BC69D /* install man page */ = {
 			isa = PBXCopyFilesBuildPhase;
 			buildActionMask = 8;
-			dstPath = usr/share/man/man1;
+			dstPath = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/share/man/man1";
 			dstSubfolderSpec = 0;
 			files = (
 				F9C12EA30ED63DE7005BC69D /* dyldinfo.1 in install man page */,
@@ -338,6 +346,9 @@
 		F9EA7583097882F3008B4F1D /* debugline.h */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.c.h; name = debugline.h; path = src/ld/debugline.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9EC77EE0A2F85F6002A3E39 /* rebase */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = rebase; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9EC78050A2F8674002A3E39 /* rebase.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = rebase.cpp; path = src/other/rebase.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F9FC51081BC8915A00FEC3F8 /* code_dedup.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = code_dedup.cpp; sourceTree = "<group>"; };
+		F9FC51091BC8915A00FEC3F8 /* code_dedup.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; path = code_dedup.h; sourceTree = "<group>"; };
+		FA4843BE1B7279ED001C8025 /* generic_dylib_file.hpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.h; path = generic_dylib_file.hpp; sourceTree = "<group>"; };
 		FA95D6121AB25CF400395811 /* textstub_dylib_file.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; path = textstub_dylib_file.cpp; sourceTree = "<group>"; usesTabs = 1; };
 		FA95D6131AB25CF400395811 /* textstub_dylib_file.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = textstub_dylib_file.hpp; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -428,6 +439,8 @@
 		F9AA650B1051BD2B003E3539 /* passes */ = {
 			isa = PBXGroup;
 			children = (
+				F9FC51081BC8915A00FEC3F8 /* code_dedup.cpp */,
+				F9FC51091BC8915A00FEC3F8 /* code_dedup.h */,
 				B028FCF11A9E7C3F00E3584B /* bitcode_bundle.cpp */,
 				B028FCF01A9E7B4A00E3584B /* bitcode_bundle.h */,
 				F984A38010BB4B0D009E9878 /* branch_island.cpp */,
@@ -475,8 +488,6 @@
 		F9AA65861051E750003E3539 /* parsers */ = {
 			isa = PBXGroup;
 			children = (
-				FA95D6121AB25CF400395811 /* textstub_dylib_file.cpp */,
-				FA95D6131AB25CF400395811 /* textstub_dylib_file.hpp */,
 				F91B7B0218987D5F0099486F /* libunwind */,
 				F9AA6784105700C2003E3539 /* opaque_section_file.cpp */,
 				F9AA6785105700C2003E3539 /* opaque_section_file.h */,
@@ -484,8 +495,11 @@
 				F9AA65D81051EC4A003E3539 /* archive_file.h */,
 				F9AA65D91051EC4A003E3539 /* lto_file.cpp */,
 				F9AA65DA1051EC4A003E3539 /* lto_file.h */,
+				FA4843BE1B7279ED001C8025 /* generic_dylib_file.hpp */,
 				F9AA65DB1051EC4A003E3539 /* macho_dylib_file.cpp */,
 				F9AA65DC1051EC4A003E3539 /* macho_dylib_file.h */,
+				FA95D6121AB25CF400395811 /* textstub_dylib_file.cpp */,
+				FA95D6131AB25CF400395811 /* textstub_dylib_file.hpp */,
 				F9AA65871051E750003E3539 /* macho_relocatable_file.cpp */,
 				F9AA65881051E750003E3539 /* macho_relocatable_file.h */,
 			);
@@ -772,21 +786,6 @@
 			shellScript = "# Let tests set MACOSX_DEPLOYMENT_TARGET as they need\nunsetenv MACOSX_DEPLOYMENT_TARGET\n\n# make linker relative libLTO.dylib\nmkdir -p ${BUILD_DIR}/lib\nln -sf /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/libLTO.dylib ${BUILD_DIR}/lib/libLTO.dylib\n\n# always use new linker\nsetenv LD_NO_CLASSIC_LINKER\nsetenv LD_NO_CLASSIC_LINKER_STATIC\n\n# run full test suite\n\"$SRCROOT\"/unit-tests/run-all-unit-tests\n\nexit 0";
 			showEnvVarsInLog = 0;
 		};
-		F9871A3413340B4600DB3F24 /* Platform install */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 8;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Platform install";
-			outputPaths = (
-			);
-			runOnlyForDeploymentPostprocessing = 1;
-			shellPath = /bin/sh;
-			shellScript = "\nif [ -n \"${DT_TOOLCHAIN_DIR}\" ]\nthen\n\tmkdir -p  \"${DSTROOT}/${DT_VARIANT}/${DT_TOOLCHAIN_DIR}\"\n\tmv ${DSTROOT}/usr \"${DSTROOT}/${DT_VARIANT}/${DT_TOOLCHAIN_DIR}\"\nelse\n\tif [ -n \"${RC_PURPLE}\" ]\n\tthen\n\t\tmkdir -p  ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer/\n\t\tmv ${DSTROOT}/usr ${DSTROOT}/Developer/Platforms/iPhoneOS.platform/Developer\n\telse\n\t\tmkdir -p  ${DSTROOT}/Developer/usr/bin\n\t\tcp ${DSTROOT}/usr/bin/ld  ${DSTROOT}/Developer/usr/bin\n\tfi\nfi\n\n";
-			showEnvVarsInLog = 0;
-		};
 		F9CCF765144CE244007CB524 /* make configure.h */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
@@ -906,6 +905,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F9FC510A1BC893C400FEC3F8 /* code_dedup.cpp in Sources */,
 				FA95D6141AB25CF400395811 /* textstub_dylib_file.cpp in Sources */,
 				F9C0D4BD06DD28D2001C7193 /* Options.cpp in Sources */,
 				F9023C4E06D5A272001BBF46 /* ld.cpp in Sources */,
@@ -1045,6 +1045,11 @@
 			target = F9BA51600ECE58BE00D1D62E /* dyldinfo */;
 			targetProxy = F9F9AD67116D58AF0028EFAB /* PBXContainerItemProxy */;
 		};
+		F9FF3BDD1C586D7C0015D843 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = F9EA72CA097454A6008B4F1D /* machocheck */;
+			targetProxy = F9FF3BDC1C586D7C0015D843 /* PBXContainerItemProxy */;
+		};
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
@@ -1060,9 +1065,11 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_DYNAMIC_NO_PIC = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
 				GCC_MODEL_TUNING = G5;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_PREPROCESSOR_DEFINITIONS = DEBUG;
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				GCC_TREAT_WARNINGS_AS_ERRORS = YES;
 				GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO = NO;
 				GCC_WARN_ABOUT_MISSING_NEWLINE = YES;
@@ -1092,7 +1099,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/include",
 				);
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
 				LINKER_DISPLAYS_MANGLED_NAMES = NO;
 				MACOSX_DEPLOYMENT_TARGET = "";
@@ -1110,6 +1117,7 @@
 				);
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;
+				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
 				VERSIONING_SYSTEM = "apple-generic";
 				WARNING_CFLAGS = "-Wall";
@@ -1128,6 +1136,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_DYNAMIC_NO_PIC = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
 				GCC_OPTIMIZATION_LEVEL = s;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(GCC_PREPROCESSOR_DEFINITIONS_QUOTED_FOR_TARGET_1)",
@@ -1135,6 +1144,7 @@
 					"$(GCC_PREPROCESSOR_DEFINITIONS_$(RC_RELEASE))",
 				);
 				GCC_PREPROCESSOR_DEFINITIONS_QUOTED_FOR_TARGET_1 = "LD_VERS='\"ld64-$(RC_ProjectSourceVersion)\"'";
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
 				GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO = NO;
 				GCC_WARN_ABOUT_MISSING_NEWLINE = YES;
@@ -1164,7 +1174,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/include",
 				);
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
@@ -1179,6 +1189,7 @@
 				);
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;
+				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
@@ -1212,7 +1223,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 				);
-				INSTALL_PATH = "$(HOME)/bin";
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/bin";
 				ONLY_ACTIVE_ARCH = NO;
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
@@ -1225,6 +1236,7 @@
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
+				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
 				WARNING_CFLAGS = (
 					"-Wmost",
@@ -1250,7 +1262,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 				);
-				INSTALL_PATH = "$(HOME)/bin";
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1262,6 +1274,7 @@
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
+				SDKROOT = macosx.internal;
 				WARNING_CFLAGS = (
 					"-Wmost",
 					"-Wno-four-char-constants",
@@ -1336,12 +1349,14 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_DYNAMIC_NO_PIC = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
+				GCC_INLINES_ARE_PRIVATE_EXTERN = NO;
 				GCC_OPTIMIZATION_LEVEL = s;
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"$(GCC_PREPROCESSOR_DEFINITIONS_QUOTED_FOR_TARGET_1)",
 					"$(GCC_PREPROCESSOR_DEFINITIONS_$(RC_RELEASE))",
 				);
 				GCC_PREPROCESSOR_DEFINITIONS_QUOTED_FOR_TARGET_1 = "LD_VERS='\"ld64-$(RC_ProjectSourceVersion)\"'";
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
 				GCC_TREAT_WARNINGS_AS_ERRORS = NO;
 				GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO = NO;
 				GCC_WARN_ABOUT_MISSING_NEWLINE = YES;
@@ -1371,7 +1386,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DEVELOPER_DIR)/usr/include",
 				);
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
@@ -1386,6 +1401,7 @@
 				);
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;
+				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
@@ -1405,10 +1421,11 @@
 				GCC_MODEL_TUNING = G5;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(GCC_PREPROCESSOR_DEFINITIONS_$(RC_RELEASE))";
 				HEADER_SEARCH_PATHS = "";
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				OTHER_LDFLAGS = "-Wl,-exported_symbol,__mh_execute_header";
 				PREBINDING = NO;
 				PRODUCT_NAME = rebase;
+				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
 				VALID_ARCHS = "i386 ppc x86_64";
@@ -1426,7 +1443,7 @@
 				GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO = NO;
 				GCC_WARN_TYPECHECK_CALLS_TO_PRINTF = YES;
 				HEADER_SEARCH_PATHS = "";
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1437,6 +1454,7 @@
 				);
 				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
+				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
 			};
@@ -1459,7 +1477,7 @@
 					"$(DEVELOPER_DIR)/usr/local/include",
 					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 				);
-				INSTALL_PATH = "$(HOME)/bin";
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1471,6 +1489,7 @@
 				OTHER_REZFLAGS = "";
 				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
+				SDKROOT = macosx.internal;
 				WARNING_CFLAGS = (
 					"-Wmost",
 					"-Wno-four-char-constants",
@@ -1488,7 +1507,7 @@
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_MODEL_TUNING = G5;
 				HEADER_SEARCH_PATHS = "";
-				INSTALL_PATH = "$(HOME)/bin";
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1496,6 +1515,7 @@
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
+				SDKROOT = macosx.internal;
 			};
 			name = "Release-assert";
 		};
@@ -1508,7 +1528,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1516,6 +1536,7 @@
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
+				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
 				ZERO_LINK = NO;
@@ -1532,7 +1553,7 @@
 				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
-				INSTALL_PATH = /usr/local/lib;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/lib";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1562,7 +1583,7 @@
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				GCC_WARN_ABOUT_MISSING_PROTOTYPES = YES;
-				INSTALL_PATH = /usr/local/lib;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/lib";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1582,7 +1603,7 @@
 				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
-				INSTALL_PATH = /usr/local/lib;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/lib";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1625,7 +1646,7 @@
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO = NO;
 				GCC_WARN_TYPECHECK_CALLS_TO_PRINTF = YES;
-				INSTALL_PATH = "$(HOME)/bin";
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1633,6 +1654,7 @@
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
+				SDKROOT = macosx.internal;
 			};
 			name = Debug;
 		};
@@ -1647,7 +1669,7 @@
 				GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO = NO;
 				GCC_WARN_TYPECHECK_CALLS_TO_PRINTF = YES;
 				HEADER_SEARCH_PATHS = "";
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1655,6 +1677,7 @@
 				OTHER_LDFLAGS = "-Wl,-exported_symbol,__mh_execute_header";
 				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
+				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
 			};
@@ -1680,7 +1703,7 @@
 				GCC_WARN_UNUSED_LABEL = NO;
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				INSTALL_PATH = /usr/local/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1688,6 +1711,7 @@
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
+				SDKROOT = macosx.internal;
 				WARNING_CFLAGS = "-Wall";
 			};
 			name = Debug;
@@ -1701,7 +1725,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1709,6 +1733,7 @@
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
+				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
 				ZERO_LINK = NO;
@@ -1724,7 +1749,7 @@
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_MODEL_TUNING = G5;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				INSTALL_PATH = "$(HOME)/bin";
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1732,6 +1757,7 @@
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
+				SDKROOT = macosx.internal;
 			};
 			name = Debug;
 		};
@@ -1744,7 +1770,7 @@
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_MODEL_TUNING = G5;
 				HEADER_SEARCH_PATHS = "";
-				INSTALL_PATH = "$(HOME)/bin";
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/local/bin";
 				OTHER_CPLUSPLUSFLAGS = (
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
@@ -1752,6 +1778,7 @@
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
+				SDKROOT = macosx.internal;
 			};
 			name = Release;
 		};
@@ -1765,9 +1792,10 @@
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				GCC_MODEL_TUNING = G5;
 				GCC_OPTIMIZATION_LEVEL = 0;
-				INSTALL_PATH = "$(HOME)/bin";
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				PREBINDING = NO;
 				PRODUCT_NAME = rebase;
+				SDKROOT = macosx.internal;
 			};
 			name = Debug;
 		};
@@ -1781,10 +1809,11 @@
 				GCC_MODEL_TUNING = G5;
 				GCC_PREPROCESSOR_DEFINITIONS = "$(GCC_PREPROCESSOR_DEFINITIONS_$(RC_RELEASE))";
 				HEADER_SEARCH_PATHS = "";
-				INSTALL_PATH = /usr/bin;
+				INSTALL_PATH = "$(DT_VARIANT)/$(DT_TOOLCHAIN_DIR)/usr/bin";
 				OTHER_LDFLAGS = "-Wl,-exported_symbol,__mh_execute_header";
 				PREBINDING = NO;
 				PRODUCT_NAME = rebase;
+				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
 				VALID_ARCHS = "i386 ppc x86_64";

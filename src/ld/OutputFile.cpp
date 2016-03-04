@@ -1294,7 +1294,7 @@ static bool isPageOffsetKind(const ld::Fixup* fixup, bool mustBeGOT=false)
 
 #define LOH_ASSERT(cond) \
 	if ( !(cond) ) { \
-		warning("ignoring linker optimzation hint at %s+0x%X because " #cond, atom->name(), fit->offsetInAtom); \
+		warning("ignoring linker optimization hint at %s+0x%X because " #cond, atom->name(), fit->offsetInAtom); \
 		break; \
 	} 
 
@@ -2235,7 +2235,6 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 					LOH_ASSERT(isADRP);
 					isLDR = parseLoadOrStore(infoC.instruction, ldrInfoC);
 					LOH_ASSERT(isLDR);
-					LOH_ASSERT(ldrInfoC.offset == 0);
 					isADD = parseADD(infoB.instruction, addInfoB);
 					isLDR = parseLoadOrStore(infoB.instruction, ldrInfoB);
 					if ( isLDR ) {
@@ -2244,8 +2243,8 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 						LOH_ASSERT(!ldrInfoB.isFloat);
 						LOH_ASSERT(ldrInfoC.baseReg == ldrInfoB.reg);
 						//fprintf(stderr, "infoA.target=%p, %s, infoA.targetAddress=0x%08llX\n", infoA.target, infoA.target->name(), infoA.targetAddress);
-						targetFourByteAligned = ( ((infoA.targetAddress) & 0x3) == 0 );
-						if ( usableSegment && targetFourByteAligned && withinOneMeg(infoB.instructionAddress, infoA.targetAddress) ) {
+						targetFourByteAligned = ( ((infoA.targetAddress + ldrInfoC.offset) & 0x3) == 0 );
+						if ( usableSegment && targetFourByteAligned && withinOneMeg(infoB.instructionAddress, infoA.targetAddress + ldrInfoC.offset) ) {
 							// can do T5 transform
 							set32LE(infoA.instructionContent, makeNOP());
 							set32LE(infoB.instructionContent, makeLDR_literal(ldrInfoB, infoA.targetAddress, infoB.instructionAddress));
@@ -2264,11 +2263,11 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 						LOH_ASSERT(addInfoB.destReg == ldrInfoC.baseReg);
 						targetFourByteAligned = ( ((infoA.targetAddress) & 0x3) == 0 );
 						literalableSize  = ( (ldrInfoC.size != 1) && (ldrInfoC.size != 2) );
-						if ( usableSegment && literalableSize && targetFourByteAligned && withinOneMeg(infoC.instructionAddress, infoA.targetAddress) ) {
+						if ( usableSegment && literalableSize && targetFourByteAligned && withinOneMeg(infoC.instructionAddress, infoA.targetAddress + ldrInfoC.offset) ) {
 							// can do T1 transform
 							set32LE(infoA.instructionContent, makeNOP());	
 							set32LE(infoB.instructionContent, makeNOP());	
-							set32LE(infoC.instructionContent, makeLDR_literal(ldrInfoC, infoA.targetAddress, infoC.instructionAddress));
+							set32LE(infoC.instructionContent, makeLDR_literal(ldrInfoC, infoA.targetAddress + ldrInfoC.offset, infoC.instructionAddress));
 							if ( _options.verboseOptimizationHints() ) 
 								fprintf(stderr, "adrp-ldr-got-ldr at 0x%08llX T1 transformed to LDR literal\n", infoC.instructionAddress);
 						}
@@ -2281,14 +2280,14 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 								fprintf(stderr, "adrp-ldr-got-ldr at 0x%08llX T4 transformed to ADR/LDR\n", infoC.instructionAddress);
 							}
 						}
-						else if ( (infoA.targetAddress % ldrInfoC.size) == 0 ) {
+						else if ( ((infoA.targetAddress % ldrInfoC.size) == 0) && ((addInfoB.addend + ldrInfoC.offset) < 4096) ) {
 							// can do T2 transform
 							set32LE(infoB.instructionContent, makeNOP());
 							ldrInfoC.baseReg = adrpInfoA.destReg;
-							ldrInfoC.offset = addInfoB.addend;
+							ldrInfoC.offset += addInfoB.addend;
 							set32LE(infoC.instructionContent, makeLoadOrStore(ldrInfoC));
 							if ( _options.verboseOptimizationHints() ) {
-								fprintf(stderr, "adrp-ldr-got-ldr at 0x%08llX T4 transformed to ADRP/NOP/LDR\n", infoC.instructionAddress);
+								fprintf(stderr, "adrp-ldr-got-ldr at 0x%08llX T2 transformed to ADRP/NOP/LDR\n", infoC.instructionAddress);
 							}
 						}
 						else {
@@ -2354,7 +2353,6 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 					LOH_ASSERT(isADRP);
 					isSTR = (parseLoadOrStore(infoC.instruction, ldrInfoC) && ldrInfoC.isStore);
 					LOH_ASSERT(isSTR);
-					LOH_ASSERT(ldrInfoC.offset == 0);
 					isADD = parseADD(infoB.instruction, addInfoB);
 					isLDR = parseLoadOrStore(infoB.instruction, ldrInfoB);
 					if ( isLDR ) {
@@ -2362,8 +2360,8 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 						LOH_ASSERT(ldrInfoB.size == 8);
 						LOH_ASSERT(!ldrInfoB.isFloat);
 						LOH_ASSERT(ldrInfoC.baseReg == ldrInfoB.reg);
-						targetFourByteAligned = ( ((infoA.targetAddress) & 0x3) == 0 );
-						if ( usableSegment && targetFourByteAligned && withinOneMeg(infoB.instructionAddress, infoA.targetAddress) ) {
+						targetFourByteAligned = ( ((infoA.targetAddress + ldrInfoC.offset) & 0x3) == 0 );
+						if ( usableSegment && targetFourByteAligned && withinOneMeg(infoB.instructionAddress, infoA.targetAddress + ldrInfoC.offset) ) {
 							// can do T5 transform
 							set32LE(infoA.instructionContent, makeNOP());
 							set32LE(infoB.instructionContent, makeLDR_literal(ldrInfoB, infoA.targetAddress, infoB.instructionAddress));
@@ -2395,7 +2393,7 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 							// can do T2 transform
 							set32LE(infoB.instructionContent, makeNOP());
 							ldrInfoC.baseReg = adrpInfoA.destReg;
-							ldrInfoC.offset = addInfoB.addend;
+							ldrInfoC.offset += addInfoB.addend;
 							set32LE(infoC.instructionContent, makeLoadOrStore(ldrInfoC));
 							if ( _options.verboseOptimizationHints() ) {
 								fprintf(stderr, "adrp-ldr-got-str at 0x%08llX T4 transformed to ADRP/NOP/STR\n", infoC.instructionAddress);
@@ -3600,6 +3598,10 @@ bool OutputFile::isPcRelStore(ld::Fixup::Kind kind)
 		case ld::Fixup::kindStoreARM64GOTLoadPageOff12:
 		case ld::Fixup::kindStoreARM64GOTLeaPage21:
 		case ld::Fixup::kindStoreARM64GOTLeaPageOff12:
+		case ld::Fixup::kindStoreARM64TLVPLoadPage21:
+		case ld::Fixup::kindStoreARM64TLVPLoadPageOff12:
+		case ld::Fixup::kindStoreARM64TLVPLoadNowLeaPage21:
+		case ld::Fixup::kindStoreARM64TLVPLoadNowLeaPageOff12:
 		case ld::Fixup::kindStoreARM64PCRelToGOT:
 		case ld::Fixup::kindStoreTargetAddressARM64Page21:
 		case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
@@ -3607,6 +3609,10 @@ bool OutputFile::isPcRelStore(ld::Fixup::Kind kind)
 		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
 		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
 		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPageOff12:
 #endif
 			return true;
 		case ld::Fixup::kindStoreTargetAddressX86BranchPCRel32:
@@ -3670,6 +3676,10 @@ bool OutputFile::setsTarget(ld::Fixup::Kind kind)
 		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
 		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
 		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPageOff12:
 #endif
 			return true;
 		case ld::Fixup::kindStoreX86DtraceCallSiteNop:
@@ -4529,9 +4539,12 @@ void OutputFile::makeSplitSegInfo(ld::Internal& state)
 					case ld::Fixup::kindStoreARM64GOTLoadPage21:
 					case ld::Fixup::kindStoreARM64GOTLeaPage21:
 					case ld::Fixup::kindStoreARM64TLVPLoadPage21:
+					case ld::Fixup::kindStoreARM64TLVPLoadNowLeaPage21:
 					case ld::Fixup::kindStoreTargetAddressARM64Page21:
 					case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
 					case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
+					case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPage21:
+					case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPage21:
 					case ld::Fixup::kindStoreARM64PCRelToGOT:
 #endif
 						assert(target != NULL);
@@ -4666,9 +4679,12 @@ void OutputFile::makeSplitSegInfoV2(ld::Internal& state)
 					case ld::Fixup::kindStoreARM64GOTLoadPage21:
 					case ld::Fixup::kindStoreARM64GOTLeaPage21:
 					case ld::Fixup::kindStoreARM64TLVPLoadPage21:
+					case ld::Fixup::kindStoreARM64TLVPLoadNowLeaPage21:
 					case ld::Fixup::kindStoreTargetAddressARM64Page21:
 					case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
 					case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
+					case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPage21:
+					case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPage21:
 						if ( fromSectionIndex != toSectionIndex )
 							kind = DYLD_CACHE_ADJ_V2_ARM64_ADRP;
 						break;

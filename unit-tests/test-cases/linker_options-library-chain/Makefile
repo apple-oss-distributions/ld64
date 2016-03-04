@@ -1,5 +1,5 @@
 ##
-# Copyright (c) 2010 Apple Inc. All rights reserved.
+# Copyright (c) 2013 Apple Inc. All rights reserved.
 #
 # @APPLE_LICENSE_HEADER_START@
 # 
@@ -24,30 +24,24 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Verify optimization where categories are merged into classes
+# main2.o has hint to link with libfoo
+# libfoo.a(libfoo2.o) has link to link with libbar.dylib
 #
-OPTIONS = 
 
-ifeq ($(ARCH),i386)
-	OPTIONS = -mios-simulator-version-min=6.0 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator7.0.sdk/
-endif
+run: all
 
-all:	all-${ARCH}
+all:
+	${CC} ${CCFLAGS} subbar.c -dynamiclib -o libsubbar.dylib
+	${CC} ${CCFLAGS} bar.c -dynamiclib -o libbar.dylib -Wl,-reexport_library,libsubbar.dylib
+	${CC} ${CCFLAGS} foo.c -c -o foo.o
+	${LD} -r foo.o -add_linker_option -lbar -o foo2.o
+	libtool -static foo2.o -o libfoo.a
+	${CC} ${CCFLAGS} main.c -c -o main.o
+	${LD} -r main.o -add_linker_option -lfoo -o main2.o
+	${CC} ${CCFLAGS} main2.o -o main -L.
+	${DYLDINFO} -lazy_bind main | grep _bar | grep libbar | ${FAIL_IF_EMPTY}
+	${PASS_IFF_GOOD_MACHO} main
 
-all-ppc:
-	${PASS_IFF} true
-
-all-i386: all-rest
-all-x86_64: all-rest
-all-armv6: all-rest
-all-armv7: all-rest
-
-all-rest:
-	# check optimization of category methods
-	${CC} ${CCFLAGS} ${OPTIONS} -dynamiclib foo.m cat1.m  -framework Foundation -o libfoo.dylib
-	size -l libfoo.dylib | grep "__objc_catlist:" | ${FAIL_IF_EMPTY}
-	${PASS_IFF_GOOD_MACHO} libfoo.dylib
-	
-	
 clean:
-	rm -rf libfoo.dylib
+	rm -f libsubbar.dylib libbar.dylib foo.o foo2.o libfoo.a main.o main2.o main
+	

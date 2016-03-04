@@ -362,8 +362,12 @@ void Resolver::doFile(const ld::File& file)
 			for (relocatable::File::LinkerOptionsList::const_iterator it=lo->begin(); it != lo->end(); ++it) {
 				this->doLinkerOption(*it, file.path());
 			}
+			// <rdar://problem/23053404> process any additional linker-options introduced by this new archive member being loaded
+			if ( _completedInitialObjectFiles ) {
+				_inputFiles.addLinkerOptionLibraries(_internal, *this);
+				_inputFiles.createIndirectDylibs();
+			}
 		}
-
 		// Resolve bitcode section in the object file
 		if ( _options.bundleBitcode() ) {
 			if ( objFile->getBitcode() == NULL ) {
@@ -383,35 +387,25 @@ void Resolver::doFile(const ld::File& file)
 							   "You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
 						break;
 					case Options::kPlatformWatchOS:
+#if SUPPORT_APPLE_TV
+					case Options::kPlatform_tvOS:
+#endif
 						throwf("'%s' does not contain bitcode. "
 								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE) or obtain an updated library from the vendor", file.path());
 						break;
-			#if SUPPORT_APPLE_TV
-					case Options::kPlatform_tvOS:
-						warning("URGENT: all bitcode will be dropped because '%s' was built without bitcode. "
-								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE) or obtain an updated library from the vendor. "
-								"Note: This will be an error in the future.", file.path());
-						_internal.filesWithBitcode.clear();
-						_internal.dropAllBitcode = true;
-						break;
-			#endif
 					}
 				}
 			} else {
 				// contains bitcode, check if it is just a marker
 				if ( objFile->getBitcode()->isMarker() ) {
-					// if the bitcode is just a marker,
-					// the executable will be created without bitcode section.
-					// Otherwise, create a marker.
-					if ( _options.outputKind() != Options::kDynamicExecutable &&
-						 _options.outputKind() != Options::kStaticExecutable )
-						_internal.embedMarkerOnly = true;
-					// Issue a warning if the marker is in the static library and filesWithBitcode is not empty.
-					// That means there are object files actually compiled with full bitcode but the archive only has marker.
-					// Don't warn on normal object files because it can be a debug build using archives with full bitcode.
-					if ( !_internal.filesWithBitcode.empty() && objFile->sourceKind() == ld::relocatable::File::kSourceArchive )
-						warning("full bitcode bundle could not be generated because '%s' was built only with bitcode marker. "
-								"The library must be generated from Xcode archive build with bitcode enabled (Xcode setting ENABLE_BITCODE)", objFile->path());
+					// if -bitcode_verify_bundle is used, check if all the object files participate in the linking have full bitcode embedded.
+					// error on any marker encountered.
+					if ( _options.verifyBitcode() )
+						throwf("bitcode bundle could not be generated because '%s' was built without full bitcode. "
+							   "All object files and libraries for bitcode must be generated from Xcode Archive or Install build",
+							   objFile->path());
+					// update the internal state that marker is encountered.
+					_internal.embedMarkerOnly = true;
 					_internal.filesWithBitcode.clear();
 					_internal.dropAllBitcode = true;
 				} else if ( !_internal.dropAllBitcode )
@@ -542,8 +536,8 @@ void Resolver::doFile(const ld::File& file)
 	if ( dylibFile != NULL ) {
 		// Check dylib for bitcode, if the library install path is relative path or @rpath, it has to contain bitcode
 		if ( _options.bundleBitcode() ) {
-			if ( dylibFile->getBitcode() == NULL &&
-				 dylibFile->installPath()[0] != '/' ) {
+			bool isSystemFramework = ( dylibFile->installPath() != NULL ) && ( dylibFile->installPath()[0] == '/' );
+			if ( dylibFile->getBitcode() == NULL && !isSystemFramework ) {
 				// Check if the dylib is from toolchain by checking the path
 				char tcLibPath[PATH_MAX];
 				char ldPath[PATH_MAX];
@@ -574,21 +568,21 @@ void Resolver::doFile(const ld::File& file)
 							   "You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
 						break;
 					case Options::kPlatformWatchOS:
+#if SUPPORT_APPLE_TV
+					case Options::kPlatform_tvOS:
+#endif
 						throwf("'%s' does not contain bitcode. "
 								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE) or obtain an updated library from the vendor", file.path());
 						break;
-			#if SUPPORT_APPLE_TV
-					case Options::kPlatform_tvOS:
-						warning("URGENT: all bitcode will be dropped because '%s' was built without bitcode. "
-								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE) or obtain an updated library from the vendor. "
-								"Note: This will be an error in the future.", file.path());
-						_internal.filesWithBitcode.clear();
-						_internal.dropAllBitcode = true;
-						break;
-			#endif
 					}
 				}
 			}
+			// Error on bitcode marker in non-system frameworks if -bitcode_verify is used
+			if ( _options.verifyBitcode() && !isSystemFramework &&
+				 dylibFile->getBitcode() != NULL && dylibFile->getBitcode()->isMarker() )
+				throwf("bitcode bundle could not be generated because '%s' was built without full bitcode. "
+					   "All frameworks and dylibs for bitcode must be generated from Xcode Archive or Install build",
+					   dylibFile->path());
 		}
 
 		// update which form of ObjC dylibs are being linked
@@ -629,7 +623,7 @@ void Resolver::doFile(const ld::File& file)
 				break;
 		}
 		if ( _options.checkDylibsAreAppExtensionSafe() && !dylibFile->appExtensionSafe() ) {
-			warning("linking against dylib not safe for use in application extensions: %s", file.path());
+			warning("linking against a dylib which is not safe for use in application extensions: %s", file.path());
 		}
 		const char* depInstallName = dylibFile->installPath();
 		// <rdar://problem/17229513> embedded frameworks are only supported on iOS 8 and later
@@ -729,7 +723,7 @@ void Resolver::doAtom(const ld::Atom& atom)
 
 	// tell symbol table about non-static atoms
 	if ( atom.scope() != ld::Atom::scopeTranslationUnit ) {
-		_symbolTable.add(atom, _options.deadCodeStrip() && _completedInitialObjectFiles);
+		_symbolTable.add(atom, _options.deadCodeStrip() && (_completedInitialObjectFiles || _options.allowDeadDuplicates()));
 		
 		// add symbol aliases defined on the command line
 		if ( _options.haveCmdLineAliases() ) {
@@ -955,6 +949,10 @@ void Resolver::resolveUndefines()
 		}
 	}
 	
+	// After resolving all the undefs within the linkageUnit, record all the remaining undefs and all the proxies.
+	if (_options.bundleBitcode() && _options.hideSymbols())
+		_symbolTable.mustPreserveForBitcode(_internal.allUndefProxies);
+
 }
 
 
@@ -1716,6 +1714,7 @@ void Resolver::linkTimeOptimize()
 	optOpt.simulator					= _options.targetIOSSimulator();
 	optOpt.ignoreMismatchPlatform		= ((_options.outputKind() == Options::kPreload) || (_options.outputKind() == Options::kStaticExecutable));
 	optOpt.bitcodeBundle				= _options.bundleBitcode();
+	optOpt.maxDefaultCommonAlignment	= _options.maxDefaultCommonAlign();
 	optOpt.arch							= _options.architecture();
 	optOpt.mcpu							= _options.mcpuLTO();
 	optOpt.platform						= _options.platform();

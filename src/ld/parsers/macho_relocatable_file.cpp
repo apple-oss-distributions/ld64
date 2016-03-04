@@ -107,7 +107,6 @@ public:
 	virtual uint8_t										swiftVersion() const			{ return _swiftVersion; }
 	virtual ld::Bitcode*								getBitcode() const				{ return _bitcode.get(); }
 	virtual SourceKind									sourceKind() const				{ return _srcKind; }
-	virtual void										setSourceKind(SourceKind src)	{ _srcKind = src; }
 	
 	const uint8_t*										fileContent()					{ return _fileContent; }
 private:
@@ -1090,7 +1089,8 @@ public:
 																						TargetDesc& target);
 	uint32_t										tentativeDefinitionCount() { return _tentativeDefinitionCount; }
 	uint32_t										absoluteSymbolCount() { return _absoluteSymbolCount; }
-	
+
+	uint32_t										fileLength() const { return _fileLength; }
 	bool											hasStubsSection() { return (_stubsSectionNum != 0); }
 	unsigned int									stubsSectionNum() { return _stubsSectionNum; }
 	void											addDtraceExtraInfos(const SourceLocation& src, const char* provider);
@@ -1102,6 +1102,8 @@ public:
 	bool											verboseOptimizationHints() { return _verboseOptimizationHints; }
 	bool											neverConvertDwarf() { return _neverConvertDwarf; }
 	bool											armUsesZeroCostExceptions() { return _armUsesZeroCostExceptions; }
+	uint8_t											maxDefaultCommonAlignment() { return _maxDefaultCommonAlignment; }
+
 
 	macho_data_in_code_entry<P>*					dataInCodeStart() { return _dataInCodeStart; }
 	macho_data_in_code_entry<P>*					dataInCodeEnd()   { return _dataInCodeEnd; }
@@ -1255,6 +1257,9 @@ private:
 	bool										_verboseOptimizationHints;
 	bool										_armUsesZeroCostExceptions;
 	bool										_ignoreMismatchPlatform;
+	bool										_treateBitcodeAsData;
+	bool										_usingBitcode;
+	uint8_t										_maxDefaultCommonAlignment;
 	unsigned int								_stubsSectionNum;
 	const macho_section<P>*						_stubsMachOSection;
 	std::vector<const char*>					_dtraceProviderInfo;
@@ -1473,11 +1478,11 @@ bool Parser<A>::getNonLocalSymbols(const uint8_t* fileContent, std::vector<const
 			uint32_t symbolCount = symtab->nsyms();
 			const macho_nlist<P>* symbols = (const macho_nlist<P>*)(fileContent + symtab->symoff());
 			const char* strings = (char*)fileContent + symtab->stroff();
-			for (uint32_t i = 0; i < symbolCount; ++i) {
+			for (uint32_t j = 0; j < symbolCount; ++j) {
 				// ignore stabs and count only ext symbols
-				if ( (symbols[i].n_type() & N_STAB) == 0 &&
-					 (symbols[i].n_type() & N_EXT) != 0 ) {
-					const char* symName = &strings[symbols[i].n_strx()];
+				if ( (symbols[j].n_type() & N_STAB) == 0 &&
+					 (symbols[j].n_type() & N_EXT) != 0 ) {
+					const char* symName = &strings[symbols[j].n_strx()];
 					syms.push_back(symName);
 				}
 			}
@@ -1714,14 +1719,18 @@ ld::relocatable::File* Parser<A>::parse(const ParserOptions& opts)
 	// create file object
 	_file = new File<A>(_path, _modTime, _fileContent, _ordinal);
 
-	// set input source
-	_file->setSourceKind(opts.srcKind);
+	// set sourceKind
+	_file->_srcKind = opts.srcKind;
+	// set treatBitcodeAsData
+	_treateBitcodeAsData = opts.treateBitcodeAsData;
+	_usingBitcode = opts.usingBitcode;
 
 	// respond to -t option
 	if ( opts.logAllFiles )
 		printf("%s\n", _path);
 		
 	_armUsesZeroCostExceptions = opts.armUsesZeroCostExceptions;
+	_maxDefaultCommonAlignment = opts.maxDefaultCommonAlignment;
 
 	// parse start of mach-o file
 	if ( ! parseLoadCommands(opts.platform, opts.minOSVersion, opts.simulator, opts.ignoreMismatchPlatform) )
@@ -2073,12 +2082,13 @@ bool Parser<A>::parseLoadCommands(Options::Platform platform, uint32_t linkMinOS
 				lcPlatform = Options::platformForLoadCommand(cmd->cmd());
 				_file->_minOSVersion = ((macho_version_min_command<P>*)cmd)->version();
 				break;
+			case macho_segment_command<P>::CMD:
+				if ( segment != NULL )
+					throw "more than one LC_SEGMENT found in object file";
+				segment = (macho_segment_command<P>*)cmd;
+				break;
 			default:
-				if ( cmd->cmd() == macho_segment_command<P>::CMD ) {
-					if ( segment != NULL )
-						throw "more than one LC_SEGMENT found in object file";
-					segment = (macho_segment_command<P>*)cmd;
-				}
+				// ignore unknown load commands
 				break;
 		}
 		cmd = (const macho_load_command<P>*)(((char*)cmd)+cmd->cmdsize());
@@ -2101,15 +2111,25 @@ bool Parser<A>::parseLoadCommands(Options::Platform platform, uint32_t linkMinOS
 						break;
 					// fall through if the Platform is not Unknown
 				case Options::kPlatformWatchOS:
-					// WatchOS errors on cross-linking all the time.
-					throwf("building for %s%s, but linking in object file built for %s,",
+					// Error when using bitcocde, warning otherwise.
+					if (_usingBitcode)
+						throwf("building for %s%s, but linking in object file built for %s,",
 						   Options::platformName(platform), (simulator ? " simulator" : ""),
 						   Options::platformName(lcPlatform));
+					else
+						warning("URGENT: building for %s%s, but linking in object file (%s) built for %s. "
+								"Note: This will be an error in the future.",
+								Options::platformName(platform), (simulator ? " simulator" : ""), path(),
+								Options::platformName(lcPlatform));
 					break;
 	#if SUPPORT_APPLE_TV
 				case Options::kPlatform_tvOS:
-					// tvOS is a warning temporarily. rdar://problem/21746965
-					if (platform == Options::kPlatform_tvOS)
+					// Error when using bitcocde, warning otherwise.
+					if (_usingBitcode)
+						throwf("building for %s%s, but linking in object file built for %s,",
+							   Options::platformName(platform), (simulator ? " simulator" : ""),
+							   Options::platformName(lcPlatform));
+					else
 						warning("URGENT: building for %s%s, but linking in object file (%s) built for %s. "
 								"Note: This will be an error in the future.",
 								Options::platformName(platform), (simulator ? " simulator" : ""), path(),
@@ -2137,7 +2157,8 @@ bool Parser<A>::parseLoadCommands(Options::Platform platform, uint32_t linkMinOS
 		throw "missing LC_SEGMENT";
 	_sectionsStart = (macho_section<P>*)((char*)segment + sizeof(macho_segment_command<P>));
 	_machOSectionsCount = segment->nsects();
-	
+	if ( (sizeof(macho_segment_command<P>) + _machOSectionsCount * sizeof(macho_section<P>)) > segment->cmdsize() )
+		throw "too many sections for size of LC_SEGMENT command";
 	return true;
 }
 
@@ -2445,6 +2466,9 @@ void Parser<A>::makeSections()
 
 	for (uint32_t i=0; i < _machOSectionsCount; ++i) {
 		const macho_section<P>* sect = &_sectionsStart[i];
+		if ( (sect->offset() + sect->size() > _fileLength) && ((sect->flags() & SECTION_TYPE) != S_ZEROFILL) )
+			throwf("section %s/%s extends beyond end of file,", sect->segname(), sect->sectname());
+
 		if ( (sect->flags() & S_ATTR_DEBUG) != 0 ) {
 			if ( strcmp(sect->segname(), "__DWARF") == 0 ) {
 				// note that .o file has dwarf
@@ -2471,6 +2495,7 @@ void Parser<A>::makeSections()
 			}
 		}
 		if ( strcmp(sect->segname(), "__LLVM") == 0 ) {
+			// Process bitcode segement
 			if ( strncmp(sect->sectname(), "__bitcode", 9) == 0 ) {
 				bitcodeSect = sect;
 			} else if ( strncmp(sect->sectname(), "__cmdline", 9) == 0 ) {
@@ -2482,9 +2507,8 @@ void Parser<A>::makeSections()
 			} else if ( strncmp(sect->sectname(), "__asm", 5) == 0 ) {
 				bitcodeAsm = true;
 			}
-			// If it is not single input for ld -r, don't count the section
-			// otherwise, fall through and add it to the sections.
-			if (_file->sourceKind() != ld::relocatable::File::kSourceSingle)
+			// If treat the bitcode as data, continue to parse as a normal section.
+			if ( !_treateBitcodeAsData )
 				continue;
 		}
 		// ignore empty __OBJC sections
@@ -3144,8 +3168,8 @@ uint32_t TentativeDefinitionSection<A>::appendAtoms(class Parser<A>& parser, uin
 					++alignP2;
 			}
 			// limit alignment of extremely large commons to 2^15 bytes (8-page)
-			if ( alignP2 > 15 )
-				alignP2 = 15;
+			if ( alignP2 > parser.maxDefaultCommonAlignment() )
+				alignP2 = parser.maxDefaultCommonAlignment();
 			Atom<A>* allocatedSpace = (Atom<A>*)p;
 			new (allocatedSpace) Atom<A>(*this, parser.nameFromSymbol(sym), (pint_t)ULLONG_MAX, size,
 										ld::Atom::definitionTentative,  ld::Atom::combineByName, 
@@ -3942,6 +3966,7 @@ bool Parser<A>::read_comp_unit(const char ** name, const char ** comp_dir,
 	const uint8_t * debug_info;
 	const uint8_t * debug_abbrev;
 	const uint8_t * di;
+	const uint8_t * next_cu;
 	const uint8_t * da;
 	const uint8_t * end;
 	const uint8_t * enda;
@@ -3959,108 +3984,122 @@ bool Parser<A>::read_comp_unit(const char ** name, const char ** comp_dir,
 	if ( (_file->_dwarfDebugInfoSect == NULL) || (_file->_dwarfDebugAbbrevSect == NULL) )
 		return false;
 
-	debug_info = (uint8_t*)_file->fileContent() + _file->_dwarfDebugInfoSect->offset();
-	debug_abbrev = (uint8_t*)_file->fileContent() + _file->_dwarfDebugAbbrevSect->offset();
-	di = debug_info;
-
 	if (_file->_dwarfDebugInfoSect->size() < 12)
-		/* Too small to be a real debug_info section.  */
-		return false;
-	sz = A::P::E::get32(*(uint32_t*)di);
-	di += 4;
-	dwarf64 = sz == 0xffffffff;
-	if (dwarf64)
-		sz = A::P::E::get64(*(uint64_t*)di), di += 8;
-	else if (sz > 0xffffff00)
-		/* Unknown dwarf format.  */
+	/* Too small to be a real debug_info section.  */
 		return false;
 
-	/* Verify claimed size.  */
-	if (sz + (di - debug_info) > _file->_dwarfDebugInfoSect->size() || sz <= (dwarf64 ? 23 : 11))
-		return false;
+    debug_info = (uint8_t*)_file->fileContent() + _file->_dwarfDebugInfoSect->offset();
+    debug_abbrev = (uint8_t*)_file->fileContent() + _file->_dwarfDebugAbbrevSect->offset();
+    next_cu = debug_info;
 
-	vers = A::P::E::get16(*(uint16_t*)di);
-	if (vers < 2 || vers > 4)
-	/* DWARF version wrong for this code.
-	   Chances are we could continue anyway, but we don't know for sure.  */
-		return false;
-	di += 2;
+    while ((uint64_t)(next_cu - debug_info) < _file->_dwarfDebugInfoSect->size()) {
+		di = next_cu;
+        sz = A::P::E::get32(*(uint32_t*)di);
+        di += 4;
+        dwarf64 = sz == 0xffffffff;
+        if (dwarf64)
+            sz = A::P::E::get64(*(uint64_t*)di), di += 8;
+        else if (sz > 0xffffff00)
+            /* Unknown dwarf format.  */
+            return false;
 
-	/* Find the debug_abbrev section.  */
-	abbrev_base = dwarf64 ? A::P::E::get64(*(uint64_t*)di) : A::P::E::get32(*(uint32_t*)di);
-	di += dwarf64 ? 8 : 4;
+        /* Verify claimed size.  */
+        if (sz + (di - debug_info) > _file->_dwarfDebugInfoSect->size() || sz <= (dwarf64 ? 23 : 11))
+            return false;
 
-	if (abbrev_base > _file->_dwarfDebugAbbrevSect->size())
-		return false;
-	da = debug_abbrev + abbrev_base;
-	enda = debug_abbrev + _file->_dwarfDebugAbbrevSect->size();
+        next_cu = di + sz;
 
-	address_size = *di++;
+        vers = A::P::E::get16(*(uint16_t*)di);
+        if (vers < 2 || vers > 4)
+        /* DWARF version wrong for this code.
+           Chances are we could continue anyway, but we don't know for sure.  */
+            return false;
+        di += 2;
 
-	/* Find the abbrev number we're looking for.  */
-	end = di + sz;
-	abbrev = read_uleb128 (&di, end);
-	if (abbrev == (uint64_t) -1)
-		return false;
+        /* Find the debug_abbrev section.  */
+        abbrev_base = dwarf64 ? A::P::E::get64(*(uint64_t*)di) : A::P::E::get32(*(uint32_t*)di);
+        di += dwarf64 ? 8 : 4;
 
-	/* Skip through the debug_abbrev section looking for that abbrev.  */
-	for (;;)
-	{
-		uint64_t this_abbrev = read_uleb128 (&da, enda);
-		uint64_t attr;
+        if (abbrev_base > _file->_dwarfDebugAbbrevSect->size())
+            return false;
+        da = debug_abbrev + abbrev_base;
+        enda = debug_abbrev + _file->_dwarfDebugAbbrevSect->size();
 
-		if (this_abbrev == abbrev)
-			/* This is almost always taken.  */
-			break;
-		skip_leb128 (&da, enda); /* Skip the tag.  */
-		if (da == enda)
-			return false;
-		da++;  /* Skip the DW_CHILDREN_* value.  */
+        address_size = *di++;
 
-		do {
-			attr = read_uleb128 (&da, enda);
-			skip_leb128 (&da, enda);
-		} while (attr != 0 && attr != (uint64_t) -1);
-		if (attr != 0)
-			return false;
-	}
+        /* Find the abbrev number we're looking for.  */
+        end = di + sz;
+        abbrev = read_uleb128 (&di, end);
+        if (abbrev == (uint64_t) -1)
+            return false;
 
-	/* Check that the abbrev is one for a DW_TAG_compile_unit.  */
-	if (read_uleb128 (&da, enda) != DW_TAG_compile_unit)
-	return false;
-	if (da == enda)
-	return false;
-	da++;  /* Skip the DW_CHILDREN_* value.  */
+        /* Skip through the debug_abbrev section looking for that abbrev.  */
+        for (;;)
+        {
+            uint64_t this_abbrev = read_uleb128 (&da, enda);
+            uint64_t attr;
 
-	/* Now, go through the DIE looking for DW_AT_name,
-	 DW_AT_comp_dir, and DW_AT_stmt_list.  */
-	for (;;)
-	{
-		uint64_t attr = read_uleb128 (&da, enda);
-		uint64_t form = read_uleb128 (&da, enda);
+            if (this_abbrev == abbrev)
+                /* This is almost always taken.  */
+                break;
+            skip_leb128 (&da, enda); /* Skip the tag.  */
+            if (da == enda)
+                return false;
+            da++;  /* Skip the DW_CHILDREN_* value.  */
 
-		if (attr == (uint64_t) -1)
-			return false;
-		else if (attr == 0)
-			return true;
-		if (form == DW_FORM_indirect)
-			form = read_uleb128 (&di, end);
+            do {
+                attr = read_uleb128 (&da, enda);
+                skip_leb128 (&da, enda);
+            } while (attr != 0 && attr != (uint64_t) -1);
+            if (attr != 0)
+                return false;
+        }
 
-		switch (attr) {
-			case DW_AT_name:
-				*name = getDwarfString(form, di);
-				break;
-			case DW_AT_comp_dir:
-				*comp_dir = getDwarfString(form, di);
-				break;
-			case DW_AT_stmt_list:
-				*stmt_list = getDwarfOffset(form, di, dwarf64);
-				break;
-			default:
-				if (! skip_form (&di, end, form, address_size, dwarf64))
-					return false;
-		}
-	}
+        /* Check that the abbrev is one for a DW_TAG_compile_unit.  */
+        if (read_uleb128 (&da, enda) != DW_TAG_compile_unit)
+        return false;
+        if (da == enda)
+        return false;
+        da++;  /* Skip the DW_CHILDREN_* value.  */
+
+        /* Now, go through the DIE looking for DW_AT_name,
+         DW_AT_comp_dir, and DW_AT_stmt_list.  */
+        bool skip_to_next_cu = false;
+        while (!skip_to_next_cu) {
+
+            uint64_t attr = read_uleb128 (&da, enda);
+            uint64_t form = read_uleb128 (&da, enda);
+
+            if (attr == (uint64_t) -1)
+                return false;
+            else if (attr == 0)
+                return true;
+            if (form == DW_FORM_indirect)
+                form = read_uleb128 (&di, end);
+
+            switch (attr) {
+                case DW_AT_name:
+                    *name = getDwarfString(form, di);
+                    /* Swift object files may contain two CUs: One
+                       describes the Swift code, one is created by the
+                       clang importer. Skip over the CU created by the
+                       clang importer as it may be empty. */
+                    if (std::string(*name) == "<swift-imported-modules>")
+                        skip_to_next_cu = true;
+                    break;
+                case DW_AT_comp_dir:
+                    *comp_dir = getDwarfString(form, di);
+                    break;
+                case DW_AT_stmt_list:
+                    *stmt_list = getDwarfOffset(form, di, dwarf64);
+                    break;
+                default:
+                    if (! skip_form (&di, end, form, address_size, dwarf64))
+                        return false;
+            }
+        }
+    }
+    return false;
 }
 
 
@@ -4358,8 +4397,9 @@ void CFISection<x86_64>::cfiParse(class Parser<x86_64>& parser, uint8_t* buffer,
 									libunwind::CFI_Atom_Info<CFISection<x86_64>::OAS>::CFI_Atom_Info cfiArray[], 
 									uint32_t& count, const pint_t cuStarts[], uint32_t cuCount)
 {
+	const uint32_t sectionSize = this->_machOSection->size();
 	// copy __eh_frame data to buffer
-	memcpy(buffer, file().fileContent() + this->_machOSection->offset(), this->_machOSection->size());
+	memcpy(buffer, file().fileContent() + this->_machOSection->offset(), sectionSize);
 
 	// and apply relocations
 	const macho_relocation_info<P>* relocs = (macho_relocation_info<P>*)(file().fileContent() + this->_machOSection->reloff());
@@ -4385,6 +4425,8 @@ void CFISection<x86_64>::cfiParse(class Parser<x86_64>& parser, uint8_t* buffer,
 				fprintf(stderr, "CFISection::cfiParse() unexpected relocation type at r_address=0x%08X\n", reloc->r_address());
 				break;
 		}
+		if ( reloc->r_address() > sectionSize )
+			throwf("malformed __eh_frame relocation, offset (0x%08X) is beyond end of section,", reloc->r_address());
 		uint64_t*	p64;
 		uint32_t*	p32;
 		switch ( reloc->r_length() ) {
@@ -4468,7 +4510,8 @@ void CFISection<arm64>::cfiParse(class Parser<arm64>& parser, uint8_t* buffer,
 									uint32_t& count, const pint_t cuStarts[], uint32_t cuCount)
 {
 	// copy __eh_frame data to buffer
-	memcpy(buffer, file().fileContent() + this->_machOSection->offset(), this->_machOSection->size());
+	const uint32_t sectionSize = this->_machOSection->size();
+	memcpy(buffer, file().fileContent() + this->_machOSection->offset(), sectionSize);
 
 	// and apply relocations
 	const macho_relocation_info<P>* relocs = (macho_relocation_info<P>*)(file().fileContent() + this->_machOSection->reloff());
@@ -4500,6 +4543,8 @@ void CFISection<arm64>::cfiParse(class Parser<arm64>& parser, uint8_t* buffer,
 				fprintf(stderr, "CFISection::cfiParse() unexpected relocation type at r_address=0x%08X\n", reloc->r_address());
 				break;
 		}
+		if ( reloc->r_address() > sectionSize )
+			throwf("malformed __eh_frame relocation, offset (0x%08X) is beyond end of section,", reloc->r_address());
 		switch ( reloc->r_length() ) {
 			case 3:
 				E::set64(*p64, value + addend64);
@@ -5062,9 +5107,14 @@ void CUSection<A>::parse(class Parser<A>& parser, uint32_t cnt, Info array[])
 	}
 	
 	// scan relocs, extern relocs are needed for personality references (possibly for function/lsda refs??)
+	const uint32_t sectionSize = this->_machOSection->size();
 	const macho_relocation_info<P>* relocs = (macho_relocation_info<P>*)(this->file().fileContent() + this->_machOSection->reloff());
 	const macho_relocation_info<P>* relocsEnd = &relocs[this->_machOSection->nreloc()];
 	for (const macho_relocation_info<P>* reloc = relocs; reloc < relocsEnd; ++reloc) {
+		if ( reloc->r_address() & R_SCATTERED )
+			continue;
+		if ( reloc->r_address() > sectionSize )
+			throwf("malformed __compact_unwind relocation, offset (0x%08X) is beyond end of section,", reloc->r_address());
 		if ( reloc->r_extern() ) {
 			// only expect external relocs on some colummns
 			if ( (reloc->r_address() % sizeof(macho_compact_unwind_entry<P>)) == macho_compact_unwind_entry<P>::personalityFieldOffset() ) {
@@ -6301,10 +6351,14 @@ bool Section<x86_64>::addRelocFixup(class Parser<x86_64>& parser, const macho_re
 			}
 			else {
 				parser.findTargetFromAddressAndSectionNum(contentValue, nextReloc->r_symbolnum(), toTarget);
-				useDirectBinding = (toTarget.atom->scope() == ld::Atom::scopeTranslationUnit);
+				useDirectBinding = (toTarget.atom->scope() == ld::Atom::scopeTranslationUnit) || ((toTarget.atom->combine() == ld::Atom::combineByNameAndContent) || (toTarget.atom->combine() == ld::Atom::combineByNameAndReferences));
 			}
-			if ( useDirectBinding )
-				parser.addFixup(src, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, toTarget.atom);
+			if ( useDirectBinding ) {
+				if ( (toTarget.atom->combine() == ld::Atom::combineByNameAndContent) || (toTarget.atom->combine() == ld::Atom::combineByNameAndReferences) )
+					parser.addFixup(src, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, ld::Fixup::bindingByContentBound, toTarget.atom);
+				else
+					parser.addFixup(src, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, toTarget.atom);
+			}
 			else
 				parser.addFixup(src, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, toTarget.weakImport, toTarget.name);
 			parser.addFixup(src, ld::Fixup::k2of4, ld::Fixup::kindAddAddend, toTarget.addend);
@@ -7511,6 +7565,8 @@ template <typename A>
 void Section<A>::makeFixups(class Parser<A>& parser, const struct Parser<A>::CFI_CU_InfoArrays&)
 {
 	const macho_section<P>* sect = this->machoSection();
+	if ( sect->reloff() + (sect->nreloc() * sizeof(macho_relocation_info<P>)) > parser.fileLength() )
+		throwf("relocations for section %s/%s extends beyond end of file,", sect->segname(), Section<A>::makeSectionName(sect) );
 	const macho_relocation_info<P>* relocs = (macho_relocation_info<P>*)(file().fileContent() + sect->reloff());
 	const uint32_t relocCount = sect->nreloc();
 	for (uint32_t r = 0; r < relocCount; ++r) {
@@ -7550,7 +7606,8 @@ void Section<A>::makeFixups(class Parser<A>& parser, const struct Parser<A>::CFI
 		Atom<A>* end = &_endAtoms[-1];
 		for(Atom<A>* p = _beginAtoms; p < end; ++p) {
 			Atom<A>* nextAtom = &p[1];
-			if ( _altEntries.count(nextAtom) != 0 ) {
+			// <rdar://problem/22960070> support alt_entry aliases (alias process already added followOn, don't repeat)
+			if ( (_altEntries.count(nextAtom) != 0) && (p->_objAddress != nextAtom->_objAddress) ) {
 				typename Parser<A>::SourceLocation src(p, 0);
 				parser.addFixup(src, ld::Fixup::k1of1, ld::Fixup::kindNoneFollowOn, nextAtom);
 				typename Parser<A>::SourceLocation src2(nextAtom, 0);
