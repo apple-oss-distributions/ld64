@@ -2466,7 +2466,8 @@ void Parser<A>::makeSections()
 
 	for (uint32_t i=0; i < _machOSectionsCount; ++i) {
 		const macho_section<P>* sect = &_sectionsStart[i];
-		if ( (sect->offset() + sect->size() > _fileLength) && ((sect->flags() & SECTION_TYPE) != S_ZEROFILL) )
+		uint8_t sectionType = (sect->flags() & SECTION_TYPE);
+		if ( (sect->offset() + sect->size() > _fileLength) && (sectionType != S_ZEROFILL) && (sectionType != S_THREAD_LOCAL_ZEROFILL) )
 			throwf("section %s/%s extends beyond end of file,", sect->segname(), sect->sectname());
 
 		if ( (sect->flags() & S_ATTR_DEBUG) != 0 ) {

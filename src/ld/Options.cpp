@@ -937,7 +937,7 @@ Options::FileInfo Options::findFileUsingPaths(const std::string &path) const
 		if ( !embeddedDylib ) {
 			for (const auto* dir : fLibrarySearchPaths) {
 				//fprintf(stderr,"Finding Library: %s/%s\n", dir, leafName);
-				auto possiblePath = dir + leafName;
+				std::string possiblePath = dir + std::string("/") + leafName;
 				if ( findFile(possiblePath, {".tbd"}, result) )
 					return result;
 			}
