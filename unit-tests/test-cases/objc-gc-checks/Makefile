@@ -25,42 +25,53 @@ include ${TESTROOT}/include/common.makefile
 
 SHELL = bash # use bash shell so we can redirect just stderr
 
-
-IMAGE_INFO = "__image_info"
-
-ifeq ($(ARCH),x86_64)
-	IMAGE_INFO = "__objc_imageinfo"
-endif
-
-test: test-${FILEARCH}
-
-test-i386: test-macosx
-test-x86_64: test-macosx
-test-arm:   test-good
-
 #
 # Validate that the linker catches illegal combinations of .o files 
 # compiled with different GC settings. 
 #
 
-test-macosx:
+IMAGE_INFO = "__objc_imageinfo"
+ifeq ($(ARCH),i386)
+	IMAGE_INFO = "__image_info"
+endif
+
+ifeq ($(ARCH),i386)
+	ALL = all-gc
+else
+ifeq ($(ARCH),x86_64)
+	ALL = all-gc
+else
+	ALL = all-nogc
+endif
+endif
+
+all: ${ALL}
+
+# For platforms that do not support GC.
+all-nogc:
+	${PASS_IFF} true
+
+# For platforms that support GC.
+all-gc:
 	${CC} ${CCFLAGS} foo.m -c -o foo.o
 	${FAIL_IF_BAD_OBJ} foo.o
-
-	${CC} ${CCFLAGS} foo.m -c -o foo-gc.o -fobjc-gc
-	${FAIL_IF_BAD_OBJ} foo-gc.o
-
-	${CC} ${CCFLAGS} foo.m -c -o foo-gc-only.o -fobjc-gc-only
-	${FAIL_IF_BAD_OBJ} foo-gc-only.o
 
 	${CC} ${CCFLAGS} bar.m -c -o bar.o
 	${FAIL_IF_BAD_OBJ} bar.o
 
-	${CC} ${CCFLAGS} bar.m -c -o bar-gc.o -fobjc-gc
-	${FAIL_IF_BAD_OBJ} bar-gc.o
+	# clang no longer builds GC so we create fake GC object files instead.
 
-	${CC} ${CCFLAGS} bar.m -c -o bar-gc-only.o -fobjc-gc-only
-	${FAIL_IF_BAD_OBJ} bar-gc-only.o
+	cp -f foo.o foo-gc.o
+	${OBJCIMAGEINFO} +supports-gc foo-gc.o
+
+	cp -f foo.o foo-gc-only.o
+	${OBJCIMAGEINFO} +supports-gc +requires-gc foo-gc-only.o
+
+	cp -f bar.o bar-gc.o
+	${OBJCIMAGEINFO} +supports-gc bar-gc.o
+
+	cp -f bar.o bar-gc-only.o
+	${OBJCIMAGEINFO} +supports-gc +requires-gc bar-gc-only.o
 
 	# check RR + RR -> RR
 	${CC} ${CCFLAGS} foo.o bar.o runtime.c -dynamiclib -o libfoobar.dylib -framework Foundation
@@ -69,56 +80,56 @@ test-macosx:
 	# check GC/RR + GC/RR -> GC/RR
 	${CC} ${CCFLAGS} foo-gc.o bar-gc.o runtime.c -dynamiclib -o libfoobar.dylib  -framework Foundation
 	${FAIL_IF_BAD_MACHO} libfoobar.dylib
-	otool -o libfoobar.dylib | grep -A4 _image | grep flags | grep 0x2  | ${FAIL_IF_EMPTY}
+	${OBJCIMAGEINFO} libfoobar.dylib | grep supports-gc | ${FAIL_IF_EMPTY}
 
 	# check GC + GC -> GC
 	${CC} ${CCFLAGS} foo-gc-only.o bar-gc-only.o runtime.c -dynamiclib -o libfoobar.dylib  -framework Foundation
 	${FAIL_IF_BAD_MACHO} libfoobar.dylib
-	otool -o libfoobar.dylib | grep -A4 _image | grep flags | grep 0x6  | ${FAIL_IF_EMPTY}
+	${OBJCIMAGEINFO} libfoobar.dylib | grep 'supports-gc requires-gc' | ${FAIL_IF_EMPTY}
 
 	# check RR + GC/RR -> RR
 	${CC} ${CCFLAGS} foo.o bar-gc.o runtime.c -dynamiclib -o libfoobar.dylib  -framework Foundation
 	${FAIL_IF_BAD_MACHO} libfoobar.dylib
-	otool -o libfoobar.dylib | grep -A4 _image | grep flags | grep 0x[26]  | ${FAIL_IF_STDIN}
+	${OBJCIMAGEINFO} libfoobar.dylib | grep gc | ${FAIL_IF_STDIN}
 
 	# check GC/RR + RR -> RR
 	${CC} ${CCFLAGS} bar-gc.o foo.o runtime.c -dynamiclib -o libfoobar.dylib  -framework Foundation
 	${FAIL_IF_BAD_MACHO} libfoobar.dylib
-	otool -o libfoobar.dylib | grep -A4 _image | grep flags | grep 0x[26]  | ${FAIL_IF_STDIN}
+	${OBJCIMAGEINFO} libfoobar.dylib | grep gc | ${FAIL_IF_STDIN}
 
 	# check GC + GC/RR -> GC
 	${CC} ${CCFLAGS} foo-gc-only.o bar-gc.o runtime.c -dynamiclib -o libfoobar.dylib   -framework Foundation
 	${FAIL_IF_BAD_MACHO} libfoobar.dylib
-	otool -o libfoobar.dylib | grep -A4 _image | grep flags | grep 0x6  | ${FAIL_IF_EMPTY}
+	${OBJCIMAGEINFO} libfoobar.dylib | grep 'supports-gc requires-gc' | ${FAIL_IF_EMPTY}
 
 	# check RR + GC -> error
 	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} foo.o bar-gc-only.o runtime.c -dynamiclib -o libfoobar.dylib  -framework Foundation 2> fail.log
 
 	# check cmd line GC/RR, GC/RR + RR -> error
 	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} foo-gc.o foo.o runtime.c -dynamiclib -o libfoobar.dylib -Wl,-objc_gc  -framework Foundation 2> fail.log
-	
+
 	# check GC/RR + compaction
 	${CC} ${CCFLAGS} foo-gc.o bar-gc.o runtime.c -dynamiclib -Wl,-objc_gc_compaction -o libfoobar.dylib  -framework Foundation
-	otool -o libfoobar.dylib | grep -A4 _image | grep flags | grep 0x12  | ${FAIL_IF_EMPTY}
+	${OBJCIMAGEINFO} libfoobar.dylib | grep 0x12 | ${FAIL_IF_EMPTY}
 
 	# check GC + compaction
 	${CC} ${CCFLAGS} foo-gc-only.o bar-gc-only.o runtime.c -dynamiclib -Wl,-objc_gc_compaction -o libfoobar.dylib  -framework Foundation
-	otool -o libfoobar.dylib | grep -A4 _image | grep flags | grep 0x16  | ${FAIL_IF_EMPTY}
+	${OBJCIMAGEINFO} libfoobar.dylib | grep 0x16 | ${FAIL_IF_EMPTY}
 
 	# none + GC/RR-dylib -> none
 	${CC} ${CCFLAGS} foo-gc.o runtime.c -dynamiclib -o libfoo.dylib  -framework Foundation
 	${CC} ${CCFLAGS} none.c libfoo.dylib -dynamiclib -o libnone.dylib -framework Foundation
-	size -l libnone.dylib | grep ${IMAGE_INFO} | ${FAIL_IF_STDIN}
+	size -m -l libnone.dylib | grep ${IMAGE_INFO} | ${FAIL_IF_STDIN}
 
 	# none + GC-dylib -> none
 	${CC} ${CCFLAGS} foo-gc-only.o runtime.c -dynamiclib -o libfoo.dylib  -framework Foundation
 	${CC} ${CCFLAGS} none.c libfoo.dylib -dynamiclib -o libnone.dylib -framework Foundation
-	size -l libnone.dylib | grep ${IMAGE_INFO} | ${FAIL_IF_STDIN}
+	size -m -l libnone.dylib | grep ${IMAGE_INFO} | ${FAIL_IF_STDIN}
 
 	# none + RR-dylib -> none
 	${CC} ${CCFLAGS} foo.o runtime.c -dynamiclib -o libfoo.dylib  -framework Foundation
 	${CC} ${CCFLAGS} none.c libfoo.dylib -dynamiclib -o libnone.dylib -framework Foundation
-	size -l libnone.dylib | grep ${IMAGE_INFO} | ${FAIL_IF_STDIN}
+	size -m -l libnone.dylib | grep ${IMAGE_INFO} | ${FAIL_IF_STDIN}
 
 	# check RR + GC-dylib -> error
 	${CC} ${CCFLAGS} foo-gc-only.o runtime.c -dynamiclib -o libfoo.dylib  -framework Foundation
@@ -128,9 +139,6 @@ test-macosx:
 	${CC} ${CCFLAGS} foo.o runtime.c -dynamiclib -o libfoo.dylib  -framework Foundation
 	${FAIL_IF_SUCCESS} ${CC} ${CCFLAGS} bar-gc-only.o runtime.c -dynamiclib libfoo.dylib -o libbar.dylib  -framework Foundation 2> fail.log
 
-	${PASS_IFF} true
-
-test-good:
 	${PASS_IFF} true
 
 clean:

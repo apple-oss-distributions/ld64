@@ -31,12 +31,14 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	mkdir -p hide
+	mkdir -p hide rhide
 	${CC} ${CCFLAGS} -dynamiclib foo.c -install_name '@loader_path/libfoo.dylib' -o hide/libfoo.dylib 
 	${FAIL_IF_BAD_MACHO} hide/libfoo.dylib
 	${CC} ${CCFLAGS} -dynamiclib bar.c -o hide/libbar.dylib -install_name '@executable_path/hide/libbar.dylib'
 	${FAIL_IF_BAD_MACHO} hide/libbar.dylib
-	${CC} ${CCFLAGS} -dynamiclib wrap.c -o hide/libwrap.dylib -Wl,-reexport-lfoo -Wl,-reexport-lbar -Lhide
+	${CC} ${CCFLAGS} -dynamiclib baz.c -o rhide/libbaz.dylib -install_name '@rpath/libbaz.dylib'
+	${FAIL_IF_BAD_MACHO} hide/libbar.dylib
+	${CC} ${CCFLAGS} -dynamiclib wrap.c -o hide/libwrap.dylib -Wl,-reexport-lfoo -Wl,-reexport-lbar -Lhide -Wl,-rpath,@loader_path/../rhide -Wl,-reexport-lbaz -Lrhide
 	${FAIL_IF_BAD_MACHO} hide/libwrap.dylib
 	${CC} ${CCFLAGS} main.c -o main hide/libwrap.dylib
 	${CC} ${CCFLAGS} main.c -dynamiclib -o libmain.dylib hide/libwrap.dylib -Wl,-executable_path,`pwd`/main
@@ -46,4 +48,4 @@ all:
 
 clean:
 
-	rm -rf hide libbar.dylib libfoo.dylib libwrap.dylib main libmain.dylib
+	rm -rf hide rhide main libmain.dylib

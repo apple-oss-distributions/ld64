@@ -31,8 +31,8 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} main.c -o main -Wl,-no_zero_fill_sections 
-	size -l main | grep __bss | grep "offset 0" | ${FAIL_IF_STDIN}
-	size -l main | grep __common | grep "offset 0" | ${FAIL_IF_STDIN}
+	size -m -l main | grep __bss | grep "offset 0" | ${FAIL_IF_STDIN}
+	size -m -l main | grep __common | grep "offset 0" | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:

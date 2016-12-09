@@ -21,7 +21,7 @@ run: all
 all:
 	${CC} ${CCFLAGS} -gdwarf-2 hello.m -c -o hello.o
 	${LD} -r -S hello.o -o hello-r.o
-	size -l hello-r.o | grep ${IMAGE_INFO} | ${PASS_IFF_STDIN}
+	size -m -l hello-r.o | grep ${IMAGE_INFO} | ${PASS_IFF_STDIN}
 	
 	
 

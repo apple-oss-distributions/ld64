@@ -23,11 +23,11 @@
  */
 
 #if USE_FOO_WRONG
-	extern int foo;
+	extern int foo[];
 #elif USE_BAR_WRONG
 	extern __thread int bar;
 #else
-  extern __thread int foo;
+  extern __thread int foo[];
 #endif
 
 
@@ -38,7 +38,7 @@ int main()
 #elif USE_BAR_WRONG
 	bar = 1;
 #else
-	foo = 1;
+	foo[0] = 1;
 #endif
 	return 0;
 }

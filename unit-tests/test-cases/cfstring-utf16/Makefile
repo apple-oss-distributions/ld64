@@ -42,8 +42,8 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} foo.m bar.m -o foo -framework CoreFoundation -dead_strip
-	size -l foo | grep "__cfstring: ${CFSTRING_SIZE}" | ${FAIL_IF_EMPTY}
-	size -l foo | grep "__ustring: ${USTRING_SIZE}" | ${FAIL_IF_EMPTY}
+	size -m -l foo | grep "__cfstring: ${CFSTRING_SIZE}" | ${FAIL_IF_EMPTY}
+	size -m -l foo | grep "__ustring: ${USTRING_SIZE}" | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} foo
 
 clean:

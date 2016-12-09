@@ -26,12 +26,9 @@ include ${TESTROOT}/include/common.makefile
 #
 # Verify -alias works with ObjC classes
 #
-CLASS_NAME_FOO = .objc_class_name_Foo
-ifeq (${ARCH},x86_64)
-	CLASS_NAME_FOO = '_OBJC_CLASS_$$_Foo'
-endif
-ifeq (${FILEARCH},arm)
-	CLASS_NAME_FOO = '_OBJC_CLASS_$$_Foo'
+CLASS_NAME_FOO = '_OBJC_CLASS_$$_Foo'
+ifeq (${ARCH},i386)
+	CLASS_NAME_FOO = .objc_class_name_Foo
 endif
 
 
@@ -42,6 +39,6 @@ all:
 	${DYLDINFO} -export test | grep ${CLASS_NAME_FOO} | awk '{ print $$1}' > foo.addr
 	${DYLDINFO} -export test | grep _MagicName | awk '{ print $$1}' > magic.addr
 	${PASS_IFF} diff foo.addr magic.addr 
-	
+
 clean:
 	rm -rf test foo.addr  magic.addr

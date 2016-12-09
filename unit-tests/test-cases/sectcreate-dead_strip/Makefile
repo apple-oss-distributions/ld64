@@ -32,8 +32,8 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} main.c -o main -sectcreate __MYSEG __mysect sect_content -dead_strip
-	size -l main | grep __MYSEG | ${FAIL_IF_EMPTY}
-	size -l main | grep __mysect | ${FAIL_IF_EMPTY}
+	size -m -l main | grep __MYSEG | ${FAIL_IF_EMPTY}
+	size -m -l main | grep __mysect | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:

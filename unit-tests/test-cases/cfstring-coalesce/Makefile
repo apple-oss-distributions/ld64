@@ -43,10 +43,10 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} foo.c bar.c -o foo -framework CoreFoundation -dead_strip
-	size -l foo | grep "__cfstring: ${CFSTRING_SIZE}" | ${FAIL_IF_EMPTY}
+	size -m -l foo | grep "__cfstring: ${CFSTRING_SIZE}" | ${FAIL_IF_EMPTY}
 	# now try with -fwritable-strings
 	${CC} ${CCFLAGS} foo.c bar.c -o foo_writable -framework CoreFoundation -dead_strip -fwritable-strings 2>/dev/null
-	size -l foo_writable | grep "__cfstring: ${CFSTRING_SIZE}" | ${PASS_IFF_STDIN}
+	size -m -l foo_writable | grep "__cfstring: ${CFSTRING_SIZE}" | ${PASS_IFF_STDIN}
 
 clean:
 	rm -rf foo foo_writable

@@ -39,13 +39,13 @@ all:
 		-Wl,-rename_segment,__DATA,__RAM \
 		-Wl,-rename_section,__DATA,__data_extra,__RAM2,__data \
 		-Wl,-exported_symbol,_get
-	size -l main.preload | grep __TEXT  | ${FAIL_IF_STDIN}
-	size -l main.preload | grep __DATA  | ${FAIL_IF_STDIN}
+	size -m -l main.preload | grep __TEXT  | ${FAIL_IF_STDIN}
+	size -m -l main.preload | grep __DATA  | ${FAIL_IF_STDIN}
 	nm -m main.preload  | grep __ROM | grep __text | grep _entry | ${FAIL_IF_EMPTY}
 	nm -m main.preload  | grep __ROM | grep __text | grep _get | ${FAIL_IF_EMPTY}
 	nm -m main.preload  | grep __RAM | grep __data | grep _mystring | ${FAIL_IF_EMPTY}
 	nm -m main.preload  | grep __RAM2 | grep __data | grep _param | ${FAIL_IF_EMPTY}
-	size -l main.preload | grep __ROM  | ${PASS_IFF_STDIN}
+	size -m -l main.preload | grep __ROM  | ${PASS_IFF_STDIN}
 
 
 clean:

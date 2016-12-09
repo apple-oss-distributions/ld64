@@ -33,9 +33,9 @@ run: all
 
 all:
 	${CC} ${CCFLAGS} hello.c -o hello
-	size -l hello | grep __IMPORT | ${FAIL_IF_STDIN} 
+	size -m -l hello | grep __IMPORT | ${FAIL_IF_STDIN} 
 	${CC} ${CCFLAGS} hello.c -dynamiclib -o libhello.dylib 
-	size -l libhello.dylib | grep __IMPORT | ${FAIL_IF_STDIN}
+	size -m -l libhello.dylib | grep __IMPORT | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} hello
 
 clean:

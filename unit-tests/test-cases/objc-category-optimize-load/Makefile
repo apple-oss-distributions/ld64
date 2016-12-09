@@ -26,28 +26,24 @@ include ${TESTROOT}/include/common.makefile
 #
 # Verify optimization where categories are merged into classes
 #
-OPTIONS = 
-
 ifeq ($(ARCH),i386)
-	OPTIONS = -mios-simulator-version-min=6.0 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator7.0.sdk/
+	ALL = all-noopt
+else
+	ALL = all-opt
 endif
 
-all:	all-${ARCH}
+all: ${ALL}
 
-all-ppc:
+# For platforms that do not perform category optimization
+all-noopt:
 	${PASS_IFF} true
 
-all-i386: all-rest
-all-x86_64: all-rest
-all-armv6: all-rest
-all-armv7: all-rest
-
-all-rest:
+# For platforms that optimize categories
+all-opt:
 	# check optimization of category methods
 	${CC} ${CCFLAGS} ${OPTIONS} -dynamiclib foo.m cat1.m  -framework Foundation -o libfoo.dylib
-	size -l libfoo.dylib | grep "__objc_catlist:" | ${FAIL_IF_EMPTY}
+	size -m -l libfoo.dylib | grep "__objc_catlist:" | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} libfoo.dylib
-	
-	
+
 clean:
 	rm -rf libfoo.dylib

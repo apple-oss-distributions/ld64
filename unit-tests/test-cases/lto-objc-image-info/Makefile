@@ -43,7 +43,7 @@ run: all
 all:
 	${CC} ${CCFLAGS} -flto main.m -c -o main.o
 	${CC} ${CCFLAGS} main.o -o main -framework Foundation
-	size -l main | grep ${IMAGE_INFO} | ${FAIL_IF_EMPTY}
+	size -m -l main | grep ${IMAGE_INFO} | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 	
 clean:

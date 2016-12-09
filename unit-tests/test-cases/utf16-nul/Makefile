@@ -34,7 +34,7 @@ all:
 	${CC} ${CCFLAGS} withnul.s -c -o withnul.o
 	${CC} ${CCFLAGS} other.s -c -o other.o
 	${LD} -r -arch ${ARCH} withnul.o other.o -o all.o
-	size -l all.o | grep "__ustring): 44" | ${PASS_IFF_STDIN}
+	size -m -l all.o | grep "__ustring): 44" | ${PASS_IFF_STDIN}
 	
 
 clean:

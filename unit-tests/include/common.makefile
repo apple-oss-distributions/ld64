@@ -10,24 +10,26 @@ VALID_ARCHS ?= "i386 x86_64 armv6"
 
 
 MYDIR=$(shell cd ../../bin;pwd)
-LD			= ld
-OBJECTDUMP	= ObjectDump
-MACHOCHECK	= machocheck
-OTOOL =   xcrun otool
-REBASE		= rebase
-DYLDINFO	= dyldinfo
+LD				= ld
+OBJECTDUMP		= ObjectDump
+OBJCIMAGEINFO	= objcimageinfo
+MACHOCHECK		= machocheck
+OTOOL 			= xcrun otool
+REBASE			= rebase
+DYLDINFO		= dyldinfo
 
 ifdef BUILT_PRODUCTS_DIR
 	# if run within Xcode, add the just built tools to the command path
 	PATH := ${BUILT_PRODUCTS_DIR}:${MYDIR}:${PATH}
 	COMPILER_PATH := ${BUILT_PRODUCTS_DIR}:${COMPILER_PATH}
-	LD_PATH     = ${BUILT_PRODUCTS_DIR}
-	LD			= ${BUILT_PRODUCTS_DIR}/ld
-	OBJECTDUMP	= ${BUILT_PRODUCTS_DIR}/ObjectDump
-	MACHOCHECK	= ${BUILT_PRODUCTS_DIR}/machocheck
-	REBASE		= ${BUILT_PRODUCTS_DIR}/rebase
-	UNWINDDUMP  = ${BUILT_PRODUCTS_DIR}/unwinddump
-	DYLDINFO	= ${BUILT_PRODUCTS_DIR}/dyldinfo
+	LD_PATH     	= ${BUILT_PRODUCTS_DIR}
+	LD				= ${BUILT_PRODUCTS_DIR}/ld
+	OBJECTDUMP		= ${BUILT_PRODUCTS_DIR}/ObjectDump
+	OBJCIMAGEINFO	= ${BUILT_PRODUCTS_DIR}/objcimageinfo
+	MACHOCHECK		= ${BUILT_PRODUCTS_DIR}/machocheck
+	REBASE			= ${BUILT_PRODUCTS_DIR}/rebase
+	UNWINDDUMP  	= ${BUILT_PRODUCTS_DIR}/unwinddump
+	DYLDINFO		= ${BUILT_PRODUCTS_DIR}/dyldinfo
 else
 	ifneq "$(findstring /unit-tests/test-cases/, $(shell pwd))" ""
 		# if run from Terminal inside unit-test directory
@@ -35,13 +37,14 @@ else
 		DEBUGDIR=$(shell cd ../../../build/Debug;pwd)
 		PATH := ${RELEASEADIR}:${RELEASEDIR}:${DEBUGDIR}:${MYDIR}:${PATH}
 		COMPILER_PATH := ${RELEASEADIR}:${RELEASEDIR}:${DEBUGDIR}:${COMPILER_PATH}
-		LD_PATH     = ${DEBUGDIR}
-		LD			= ${DEBUGDIR}/ld
-		OBJECTDUMP	= ${DEBUGDIR}/ObjectDump
-		MACHOCHECK	= ${DEBUGDIR}/machocheck
-		REBASE		= ${DEBUGDIR}/rebase
-		UNWINDDUMP  = ${DEBUGDIR}/unwinddump
-		DYLDINFO	= ${DEBUGDIR}/dyldinfo
+		LD_PATH     	= ${DEBUGDIR}
+		LD				= ${DEBUGDIR}/ld
+		OBJECTDUMP		= ${DEBUGDIR}/ObjectDump
+		OBJCIMAGEINFO	= ${DEBUGDIR}/objcimageinfo
+		MACHOCHECK		= ${DEBUGDIR}/machocheck
+		REBASE			= ${DEBUGDIR}/rebase
+		UNWINDDUMP  	= ${DEBUGDIR}/unwinddump
+		DYLDINFO		= ${DEBUGDIR}/dyldinfo
 	else
 		PATH := ${MYDIR}:${PATH}:
 		COMPILER_PATH := ${MYDIR}:${COMPILER_PATH}:
@@ -51,21 +54,22 @@ export PATH
 export COMPILER_PATH
 export GCC_EXEC_PREFIX=garbage
 
+IOS_SDK = $(shell xcodebuild -sdk iphoneos.internal -version Path  2>/dev/null)
+OSX_SDK = $(shell xcodebuild -sdk macosx.internal -version Path  2>/dev/null)
 ifeq ($(ARCH),ppc)
-	SDKExtra = -isysroot /Developer/SDKs/MacOSX10.6.sdk
+	OSX_SDK = /Developer/SDKs/MacOSX10.6.sdk
 endif
 
-CC		 = $(shell xcrun -find clang) -arch ${ARCH} ${SDKExtra} -mmacosx-version-min=10.8
+CC		 = $(shell xcrun -find clang) -arch ${ARCH} -mmacosx-version-min=10.8 -isysroot $(OSX_SDK)
 CCFLAGS = -Wall 
+LDFLAGS = -syslibroot $(OSX_SDK)
 ASMFLAGS =
 VERSION_NEW_LINKEDIT = -mmacosx-version-min=10.6
 VERSION_OLD_LINKEDIT = -mmacosx-version-min=10.4
 LD_NEW_LINKEDIT = -macosx_version_min 10.6
 
-CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} ${SDKExtra}
+CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} -isysroot $(OSX_SDK)
 CXXFLAGS = -Wall -stdlib=libc++ 
-
-IOS_SDK = $(shell xcodebuild -sdk iphoneos.internal -version Path  2>/dev/null)
 
 ifeq ($(ARCH),armv6)
   LDFLAGS := -syslibroot $(IOS_SDK)

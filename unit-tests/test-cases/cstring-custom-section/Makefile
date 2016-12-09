@@ -34,12 +34,12 @@ all:
 	${CC} ${CCFLAGS} -c foo.s -o foo.o
 	${CC} ${CCFLAGS} -c bar.s -o bar.o
 	${LD} -arch ${ARCH} -r foo.o bar.o -o foobar.o
-	size -l foobar.o | grep "(__TEXT, __cstring): 13" | ${FAIL_IF_EMPTY}
-	size -l foobar.o | grep "(__TEXT, __mystring): 15" | ${FAIL_IF_EMPTY}
+	size -m -l foobar.o | grep "(__TEXT, __cstring): 13" | ${FAIL_IF_EMPTY}
+	size -m -l foobar.o | grep "(__TEXT, __mystring): 15" | ${FAIL_IF_EMPTY}
 	otool -lv foobar.o | grep -A10 __mystring | grep S_CSTRING_LITERALS | ${FAIL_IF_EMPTY}
 	${CC} ${CCFLAGS} foo.o bar.o -dynamiclib -o libfoobar.dylib
-	size -l libfoobar.dylib | grep "__cstring: 13" | ${FAIL_IF_EMPTY}
-	size -l libfoobar.dylib | grep "__mystring: 15" | ${FAIL_IF_EMPTY}
+	size -m -l libfoobar.dylib | grep "__cstring: 13" | ${FAIL_IF_EMPTY}
+	size -m -l libfoobar.dylib | grep "__mystring: 15" | ${FAIL_IF_EMPTY}
 	otool -lv libfoobar.dylib | grep -A10 __mystring | grep S_CSTRING_LITERALS | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} libfoobar.dylib
 

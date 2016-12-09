@@ -45,4 +45,4 @@ test-arm:
 	${PASS_IFF_ERROR} ${CC} ${CCFLAGS} -DSHRINK=4 test.c --save-temps -o test-${ARCH} 2>/dev/null
 
 clean:
-	rm -rf test-* *.o *.s *.i
+	rm -rf test-* *.o *.s *.i *.bc

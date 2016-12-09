@@ -27,22 +27,20 @@ SHELL = bash # use bash shell so we can redirect just stderr
 #
 # Verify optimization in which categories are merged into classes
 #
-OPTIONS = 
-
 ifeq ($(ARCH),i386)
-	OPTIONS = -mios-simulator-version-min=6.0 -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator7.0.sdk/
+	ALL = all-noopt
+else
+	ALL = all-opt
 endif
 
-all:	all-${FILEARCH}
+all: ${ALL}
 
-all-ppc:
+# For platforms that do not perform category optimization
+all-noopt:
 	${PASS_IFF} true
 
-all-i386: all-rest
-all-x86_64: all-rest
-all-arm: all-rest
-
-all-rest:
+# For platforms that optimize categories
+all-opt:
 	${CC} ${CCFLAGS} ${OPTIONS} -dynamiclib foo.m cat.m -DOVERRIDE_CLASS=1 -framework Foundation -o libfoo.dylib 2> warnings1.txt
 	grep warning warnings1.txt | grep instance_method | ${FAIL_IF_EMPTY}
 	grep warning warnings1.txt | grep class_method | ${FAIL_IF_EMPTY}
@@ -50,6 +48,6 @@ all-rest:
 	grep warning warnings2.txt | grep instance_method_fromcat | ${FAIL_IF_EMPTY}
 	grep warning warnings2.txt | grep class_method_fromcat | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} libfoo2.dylib
-	
+
 clean:
 	rm -rf  lib*.dylib warnings*.txt

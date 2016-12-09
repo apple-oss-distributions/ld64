@@ -39,11 +39,11 @@ all:
 		-Wl,-rename_section,__TEXT,__text,__ROM,__code \
 		-Wl,-rename_section,__TEXT,__eh_frame,__ROM,__eh_frame \
 		-Wl,-rename_section,__TEXT,__cstring,__ROM,__const 
-	size -l main.preload | grep __TEXT  | ${FAIL_IF_STDIN}
-	size -l main.preload | grep __DATA  | ${FAIL_IF_STDIN}
+	size -m -l main.preload | grep __TEXT  | ${FAIL_IF_STDIN}
+	size -m -l main.preload | grep __DATA  | ${FAIL_IF_STDIN}
 	nm -m main.preload  | grep __ROM | grep __code | grep _entry | ${FAIL_IF_EMPTY}
 	nm -m main.preload  | grep __RAM | grep __vars | grep _mystring | ${FAIL_IF_EMPTY}
-	size -l main.preload | grep __ROM  | ${PASS_IFF_STDIN}
+	size -m -l main.preload | grep __ROM  | ${PASS_IFF_STDIN}
 
 
 

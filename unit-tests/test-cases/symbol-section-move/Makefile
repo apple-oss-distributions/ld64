@@ -44,14 +44,14 @@ all:
 	nm -m main.preload | grep _foo | grep __ROM1 | grep __text | ${FAIL_IF_EMPTY}
 	nm -m main.preload | grep _s1  | grep __ROM1 | grep __text | ${FAIL_IF_EMPTY}
 	nm -m main.preload | grep _mylocal | grep __ROM1 | grep __text | ${FAIL_IF_EMPTY}
-	size -l main.preload | grep __cstring |  ${FAIL_IF_STDIN}
-	size -l main.preload | grep mycstrings |  ${FAIL_IF_EMPTY}
-	size -l main.preload | grep __TEXT |  ${FAIL_IF_STDIN}
+	size -m -l main.preload | grep __cstring |  ${FAIL_IF_STDIN}
+	size -m -l main.preload | grep mycstrings |  ${FAIL_IF_EMPTY}
+	size -m -l main.preload | grep __TEXT |  ${FAIL_IF_STDIN}
 	nm -m main.preload | grep _mm | grep __ROM3 | grep __text | ${FAIL_IF_EMPTY}
 	nm -m main.preload | grep _main | grep __ROM3 | grep __text | ${FAIL_IF_EMPTY}
 	nm -m main.preload | grep _abc | grep __RAM1  | ${FAIL_IF_EMPTY}
 	nm -m main.preload | grep _com | grep __RAM1  | ${FAIL_IF_EMPTY}
-	size -l main.preload | grep __DATA |  ${FAIL_IF_STDIN}
+	size -m -l main.preload | grep __DATA |  ${FAIL_IF_STDIN}
 	nm -m main.preload | grep _def | grep __RAM2 | grep mydata | ${FAIL_IF_EMPTY}
 	nm -m main.preload | grep _ghi | grep __RAM2 | grep mydata | ${FAIL_IF_EMPTY}
 	${PASS_IFF} true

@@ -39,11 +39,10 @@ all:
 
 all-i386:
 	${CC} ${CCFLAGS} test.m -framework Foundation -o test1 -Wno-objc-root-class
-	size -l test1 | grep __image_info | ${FAIL_IF_EMPTY}
+	size -m -l test1 | grep __image_info | ${FAIL_IF_EMPTY}
 	${CC} ${CCFLAGS} test.m -Wno-objc-root-class -fobjc-abi-version=2 -Wl,-objc_abi_version,2 -framework Foundation -o test2
-	size -l test2 | grep __objc_imageinfo | ${FAIL_IF_EMPTY}
+	size -m -l test2 | grep __objc_imageinfo | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} test2
-	
-	
+
 clean:
 	rm -rf test1 test2

@@ -31,7 +31,6 @@ include ${TESTROOT}/include/common.makefile
 # No differences means this test passes
 #
 
-CC=/Volumes/my/src/puzzlebox/build/Debug+Asserts/bin/clang
 
 run: all
 

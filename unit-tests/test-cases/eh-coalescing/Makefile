@@ -44,7 +44,7 @@ all:
 	# verify .eh symbol is missing or is from bar.o (file 3)
 	grep '\[  2\] __Z4funcv.eh' libfoobar.map | ${FAIL_IF_STDIN}
 	# verify no LSDA
-	size -l libfoobar.dylib | grep __gcc_except_tab | ${PASS_IFF_EMPTY}
+	size -m -l libfoobar.dylib | grep __gcc_except_tab | ${PASS_IFF_EMPTY}
 
 clean:
 	rm  foo.o foo2.o bar.o  libfoobar.map  libfoobar.dylib

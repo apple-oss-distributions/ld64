@@ -31,13 +31,10 @@ include ${TESTROOT}/include/common.makefile
 #
 #
 
-SELECTOR_REFS = "__OBJC,__message_refs"
+SELECTOR_REFS = "__DATA,__objc_selrefs"
 
-ifeq ($(ARCH),x86_64)
-	SELECTOR_REFS = "__DATA,__objc_selrefs"
-endif
-ifeq ($(ARCH),armv6)
-	SELECTOR_REFS = "__DATA,__objc_selrefs"
+ifeq ($(ARCH),i386)
+	SELECTOR_REFS = "__OBJC,__message_refs"
 endif
 
 
@@ -52,6 +49,6 @@ all:
 	${OBJECTDUMP}  -no_content test-r.o | grep -B3 -A6 ${SELECTOR_REFS}  > test-r.dump
 
 	diff test.dump test-r.dump | ${PASS_IFF_EMPTY}
-	
+
 clean:
 	rm -rf test.o test.dump test-r.o test-r.dump
