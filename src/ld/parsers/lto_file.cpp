@@ -1307,10 +1307,6 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 		// mach-o parsing is done in-memory, but need path for debug notes
 		std::string tmp_path = macho_dirpath + "/" + std::to_string(bufID) + ".o";
 
-		// parse generated mach-o file into a MachOReader
-		ld::relocatable::File* machoFile = parseMachOFile((const uint8_t *)machOFile.Buffer, machOFile.Size, tmp_path, options, ordinal);
-		ordinal = ordinal.nextFileListOrdinal();
-
 		// if needed, save temp mach-o file to specific location
 		if ( options.tmpObjectFilePath != NULL ) {
 			int fd = ::open(tmp_path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
@@ -1322,6 +1318,10 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 				warning("could not write ThinLTO temp file '%s', errno=%d", tmp_path.c_str(), errno);
 			}
 		}
+
+		// parse generated mach-o file into a MachOReader
+		ld::relocatable::File* machoFile = parseMachOFile((const uint8_t *)machOFile.Buffer, machOFile.Size, tmp_path, options, ordinal);
+		ordinal = ordinal.nextFileListOrdinal();
 
 		// Load the generated MachO file
 		loadMachO(machoFile, options, handler, newAtoms, additionalUndefines, llvmAtoms, deadllvmAtoms);
