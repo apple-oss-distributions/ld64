@@ -108,14 +108,39 @@ template <typename A>
 	: Base(strdup(path), mTime, ord, platform, linkMinOSVersion, allowWeakImports, linkingFlatNamespace,
 		   hoistImplicitPublicDylibs, allowSimToMacOSX, addVers)
 {
-	auto matchingType = enforceDylibSubtypesMatch ?
-			tapi::CpuSubTypeMatching::Exact : tapi::CpuSubTypeMatching::ABI_Compatible;
-
+	std::unique_ptr<tapi::LinkerInterfaceFile> file;
 	std::string errorMessage;
-	auto file = std::unique_ptr<tapi::LinkerInterfaceFile>(
-		tapi::LinkerInterfaceFile::create(path, fileContent, fileLength, cpuType,
-										  cpuSubType, matchingType,
-										  tapi::PackedVersion32(linkMinOSVersion), errorMessage));
+
+// <rdar://problem/29038544> Support $ld$weak symbols in .tbd files
+#if ((TAPI_API_VERSION_MAJOR == 1 &&  TAPI_API_VERSION_MINOR >= 1) || (TAPI_API_VERSION_MAJOR > 1))
+	// Check if the library supports the new create API.
+	if (tapi::APIVersion::isAtLeast(1, 1)) {
+		tapi::ParsingFlags flags = tapi::ParsingFlags::None;
+		if (enforceDylibSubtypesMatch)
+			flags |= tapi::ParsingFlags::ExactCpuSubType;
+
+		if (!allowWeakImports)
+			flags |= tapi::ParsingFlags::DisallowWeakImports;
+
+		file.reset(tapi::LinkerInterfaceFile::create(
+			path, fileContent, fileLength, cpuType, cpuSubType, flags,
+			tapi::PackedVersion32(linkMinOSVersion), errorMessage));
+	} else {
+		auto matchingType = enforceDylibSubtypesMatch ?
+				tapi::CpuSubTypeMatching::Exact : tapi::CpuSubTypeMatching::ABI_Compatible;
+
+		file.reset(tapi::LinkerInterfaceFile::create(
+			path, fileContent, fileLength, cpuType, cpuSubType, matchingType,
+			tapi::PackedVersion32(linkMinOSVersion), errorMessage));
+	}
+#else
+	auto matchingType = enforceDylibSubtypesMatch ?
+		tapi::CpuSubTypeMatching::Exact : tapi::CpuSubTypeMatching::ABI_Compatible;
+
+	file.reset(tapi::LinkerInterfaceFile::create(
+		path, fileContent, fileLength, cpuType, cpuSubType, matchingType,
+		tapi::PackedVersion32(linkMinOSVersion), errorMessage));
+#endif
 
 	if (file == nullptr)
 		throw strdup(errorMessage.c_str());

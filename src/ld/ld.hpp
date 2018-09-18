@@ -225,6 +225,7 @@ namespace relocatable {
 		virtual bool						hasLongBranchStubs()		{ return false; }
 		virtual LinkerOptionsList*			linkerOptions() const = 0;
 		virtual SourceKind					sourceKind() const { return kSourceUnknown; }
+		virtual const uint8_t*				fileContent() const { return nullptr; }
 	};
 } // namespace relocatable
 
@@ -786,6 +787,7 @@ public:
 													_definition = a._definition;
 													_combine = a._combine;
 													_dontDeadStrip = a._dontDeadStrip;
+													_dontDeadStripIfRefLive = a._dontDeadStripIfRefLive;
 													_thumb = a._thumb;
 													_autoHide = a._autoHide;
 													_contentType = a._contentType;
@@ -796,6 +798,14 @@ public:
 													_coalescedAway = a._coalescedAway;
 													_weakImportState = a._weakImportState;
 												}
+
+	const char*								safeFilePath() const {
+												const File* f = this->file();
+												if ( f != NULL )
+													return f->path();
+												else
+													return "<internal>";
+											}
 
 protected:
 	enum AddressMode { modeSectionOffset, modeFinalAddress };
@@ -831,7 +841,7 @@ public:
 };
 
 
-	
+
 // utility classes for using std::unordered_map with c-strings
 struct CStringHash {
 	size_t operator()(const char* __s) const {
@@ -892,7 +902,8 @@ public:
 											hasThreadLocalVariableDefinitions(false),
 											hasWeakExternalSymbols(false),
 											someObjectHasOptimizationHints(false),
-											dropAllBitcode(false), embedMarkerOnly(false)	{ }
+											dropAllBitcode(false), embedMarkerOnly(false),
+											forceLoadCompilerRT(false)	{ }
 
 	std::vector<FinalSection*>					sections;
 	std::vector<ld::dylib::File*>				dylibs;
@@ -905,6 +916,7 @@ public:
 	CStringSet									linkerOptionFrameworks;
 	std::vector<const ld::Atom*>				indirectBindingTable;
 	std::vector<const ld::relocatable::File*>	filesWithBitcode;
+	std::vector<const ld::relocatable::File*>	filesFromCompilerRT;
 	std::vector<const ld::Atom*>				deadAtoms;
 	std::unordered_set<const char*>				allUndefProxies;
 	const ld::dylib::File*						bundleLoader;
@@ -927,6 +939,7 @@ public:
 	bool										someObjectHasOptimizationHints;
 	bool										dropAllBitcode;
 	bool										embedMarkerOnly;
+	bool										forceLoadCompilerRT;
 	std::vector<std::string>					ltoBitcodePath;
 };
 

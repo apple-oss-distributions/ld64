@@ -276,10 +276,13 @@ bool DyldInfoPrinter<arm64>::validFile(const uint8_t* fileContent)
 	switch (header->filetype()) {
 		case MH_EXECUTE:
 		case MH_DYLIB:
+		case MH_DYLIB_STUB:
 		case MH_BUNDLE:
 		case MH_DYLINKER:
 		case MH_KEXT_BUNDLE:
 			return true;
+		default:
+			return false;
 	}
 	return false;
 }

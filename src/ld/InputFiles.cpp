@@ -177,6 +177,11 @@ private:
 ld::Section CustomStackAtom::_s_section("__UNIXSTACK", "__stack", ld::Section::typeStack, true);
 
 
+static bool isCompilerSupportLib(const char* path) {
+	const char* libName = strrchr(path, '/');
+	return ( (libName != NULL) && (strncmp(libName, "/libclang_rt", 12) == 0) );
+}
+
 
 const char* InputFiles::fileArch(const uint8_t* p, unsigned len)
 {
@@ -210,14 +215,16 @@ const char* InputFiles::fileArch(const uint8_t* p, unsigned len)
 ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib)
 {
 	// map in whole file
-	uint64_t len = info.fileLen;
+	struct stat stat_buf;
 	int fd = ::open(info.path, O_RDONLY, 0);
 	if ( fd == -1 )
 		throwf("can't open file, errno=%d", errno);
-	if ( info.fileLen < 20 )
-		throwf("file too small (length=%llu)", info.fileLen);
-
-	uint8_t* p = (uint8_t*)::mmap(NULL, info.fileLen, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, 0);
+	if ( ::fstat(fd, &stat_buf) != 0 )
+		throwf("fstat(%s) failed, errno=%d\n", info.path, errno);
+	if ( stat_buf.st_size < 20 )
+		throwf("file too small (length=%llu)", stat_buf.st_size);
+	int64_t len = stat_buf.st_size;
+	uint8_t* p = (uint8_t*)::mmap(NULL, stat_buf.st_size, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, 0);
 	if ( p == (uint8_t*)(-1) )
 		throwf("can't map file, errno=%d", errno);
 
@@ -255,23 +262,23 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 		if ( sliceFound ) {
 			uint32_t fileOffset = OSSwapBigToHostInt32(archs[sliceToUse].offset);
 			len = OSSwapBigToHostInt32(archs[sliceToUse].size);
-			if ( fileOffset+len > info.fileLen ) {
+			if ( fileOffset+len > stat_buf.st_size ) {
 				// <rdar://problem/17593430> file size was read awhile ago.  If file is being written, wait a second to see if big enough now
 				sleep(1);
-				uint64_t newFileLen = info.fileLen;
+				int64_t newFileLen = stat_buf.st_size;
 				struct stat statBuffer;
 				if ( stat(info.path, &statBuffer) == 0 ) {
 					newFileLen = statBuffer.st_size;
 				}
 				if ( fileOffset+len > newFileLen ) {
 					throwf("truncated fat file. Slice from %u to %llu is past end of file with length %llu", 
-						fileOffset, fileOffset+len, info.fileLen);
+						fileOffset, fileOffset+len, stat_buf.st_size);
 				}
 			}
 			// if requested architecture is page aligned within fat file, then remap just that portion of file
 			if ( (fileOffset & 0x00000FFF) == 0 ) {
 				// unmap whole file
-				munmap((caddr_t)p, info.fileLen);
+				munmap((caddr_t)p, stat_buf.st_size);
 				// re-map just part we need
 				p = (uint8_t*)::mmap(NULL, len, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, fileOffset);
 				if ( p == (uint8_t*)(-1) )
@@ -355,8 +362,7 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	archOpts.verboseLoad			= _options.whyLoad();
 	archOpts.logAllFiles			= _options.logAllFiles();
 	// Set ObjSource Kind, libclang_rt is compiler static library
-	const char* libName = strrchr(info.path, '/');
-	if ( (libName != NULL) && (strncmp(libName, "/libclang_rt", 12) == 0) )
+	if ( isCompilerSupportLib(info.path) )
 		archOpts.objOpts.srcKind = ld::relocatable::File::kSourceCompilerArchive;
 	else
 		archOpts.objOpts.srcKind = ld::relocatable::File::kSourceArchive;
@@ -485,35 +491,12 @@ void InputFiles::logArchive(ld::File* file) const
 
 void InputFiles::logTraceInfo(const char* format, ...) const
 {
-	// one time open() of custom LD_TRACE_FILE
-	static int trace_file = -1;
-	if ( trace_file == -1 ) {
-		const char *trace_file_path = _options.traceOutputFile();
-		if ( trace_file_path != NULL ) {
-			trace_file = open(trace_file_path, O_WRONLY | O_APPEND | O_CREAT, 0666);
-			if ( trace_file == -1 )
-				throwf("Could not open or create trace file (errno=%d): %s", errno, trace_file_path);
-		}
-		else {
-			trace_file = fileno(stderr);
-		}
-	}
-
 	char trace_buffer[MAXPATHLEN * 2];
     va_list ap;
 	va_start(ap, format);
 	int length = vsnprintf(trace_buffer, sizeof(trace_buffer), format, ap);
 	va_end(ap);
-	char* buffer_ptr = trace_buffer;
-
-	while (length > 0) {
-		ssize_t amount_written = write(trace_file, buffer_ptr, length);
-		if(amount_written == -1)
-			/* Failure to write shouldn't fail the build. */
-			return;
-		buffer_ptr += amount_written;
-		length -= amount_written;
-	}
+	_options.writeToTraceFile(trace_buffer, length);
 }
 
 
@@ -1232,6 +1215,10 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 				// <rdar://problem/9740166> force loaded archives should be in LD_TRACE
 				if ( (info.options.fForceLoad || _options.fullyLoadArchives()) && (_options.traceArchives() || _options.traceEmitJSON()) )
 					logArchive(archive);
+
+				if ( isCompilerSupportLib(info.path) && (info.options.fForceLoad || _options.fullyLoadArchives()) )
+					state.forceLoadCompilerRT = true;
+
 				_searchLibraries.push_back(LibraryInfo(archive));
 				if ( _options.dumpDependencyInfo() )
 					_options.dumpDependency(Options::depArchive, archive->path());

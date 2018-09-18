@@ -120,7 +120,6 @@ bool Options::FileInfo::checkFileExists(const Options& options, const char *p)
 	  p = path;
 	if ( stat(p, &statBuffer) == 0 ) {
 		if (p != path) path = strdup(p);
-		fileLen = statBuffer.st_size;
 		modTime = statBuffer.st_mtime;
 		return true;
 	}
@@ -145,7 +144,7 @@ Options::Options(int argc, const char* argv[])
 	  fClientName(NULL),
 	  fUmbrellaName(NULL), fInitFunctionName(NULL), fDotOutputFile(NULL), fExecutablePath(NULL),
 	  fBundleLoader(NULL), fDtraceScriptName(NULL), fSegAddrTablePath(NULL), fMapPath(NULL), 
-	  fDyldInstallPath("/usr/lib/dyld"), fTempLtoObjectPath(NULL), fOverridePathlibLTO(NULL), fLtoCpu(NULL),
+	  fDyldInstallPath("/usr/lib/dyld"), fLtoCachePath(NULL), fTempLtoObjectPath(NULL), fOverridePathlibLTO(NULL), fLtoCpu(NULL),
 	  fZeroPageSize(ULLONG_MAX), fStackSize(0), fStackAddr(0), fSourceVersion(0), fSDKVersion(0), fExecutableStack(false), 
 	  fNonExecutableHeap(false), fDisableNonExecutableHeap(false),
 	  fMinimumHeaderPad(32), fSegmentAlignment(4096), 
@@ -195,7 +194,7 @@ Options::Options(int argc, const char* argv[])
 	  fPlatform(kPlatformUnknown), fDebugInfoStripping(kDebugInfoMinimal), fTraceOutputFile(NULL),
 	  fMacVersionMin(ld::macVersionUnset), fIOSVersionMin(ld::iOSVersionUnset), fWatchOSVersionMin(ld::wOSVersionUnset),
 	  fSaveTempFiles(false), fSnapshotRequested(false), fPipelineFifo(NULL),
-	  fDependencyInfoPath(NULL), fDependencyFileDescriptor(-1), fMaxDefaultCommonAlign(0)
+	  fDependencyInfoPath(NULL), fDependencyFileDescriptor(-1), fTraceFileDescriptor(-1), fMaxDefaultCommonAlign(0)
 {
 	this->checkForClassic(argc, argv);
 	this->parsePreCommandLineEnvironmentSettings();
@@ -213,8 +212,11 @@ Options::Options(int argc, const char* argv[])
 
 Options::~Options()
 {
-  if ( fDependencyFileDescriptor != -1 )
-	::close(fDependencyFileDescriptor);
+	if ( fDependencyFileDescriptor != -1 )
+		::close(fDependencyFileDescriptor);
+
+	if ( fTraceFileDescriptor != -1 )
+		::close(fTraceFileDescriptor);
 }
 
 bool Options::errorBecauseOfWarnings() const
@@ -831,13 +833,6 @@ bool Options::findFile(const std::string &path, const std::vector<std::string> &
 			break;
 	}
 
-	// If we found a text-based stub file, check if it should be used.
-	if ( !tbdInfo.missing() ) {
-		if (tapi::LinkerInterfaceFile::shouldPreferTextBasedStubFile(tbdInfo.path)) {
-			result = tbdInfo;
-			return true;
-		}
-	}
 	FileInfo dylibInfo;
 	{
 		bool found = dylibInfo.checkFileExists(*this, path.c_str());
@@ -845,32 +840,30 @@ bool Options::findFile(const std::string &path, const std::vector<std::string> &
 			printf("[Logging for XBS]%sfound library: '%s'\n", (found ? " " : " not "), path.c_str());
 	}
 
-	// There is only a text-based stub file.
-	if ( !tbdInfo.missing() && dylibInfo.missing() ) {
-		result = tbdInfo;
-		return true;
-	}
-	// There is only a dynamic library file.
-	else if ( tbdInfo.missing() && !dylibInfo.missing() ) {
-		result = dylibInfo;
-		return true;
+	// There is only a text-based stub file or a dynamic library file.
+	if ( tbdInfo.missing() != dylibInfo.missing() ) {
+		result = tbdInfo.missing() ? dylibInfo : tbdInfo;
 	}
 	// There are both - a text-based stub file and a dynamic library file.
 	else if ( !tbdInfo.missing() && !dylibInfo.missing() ) {
-		// If the files are still in synv we can use and should use the text-based stub file.
-		if (tapi::LinkerInterfaceFile::areEquivalent(tbdInfo.path, dylibInfo.path)) {
+		// Check if we should prefer the text-based stub file (installapi).
+		if (tapi::LinkerInterfaceFile::shouldPreferTextBasedStubFile(tbdInfo.path)) {
+			result = tbdInfo;
+		}
+		// If the files are still in sync we can use and should use the text-based stub file.
+		else if (tapi::LinkerInterfaceFile::areEquivalent(tbdInfo.path, dylibInfo.path)) {
 			result = tbdInfo;
 		}
 		// Otherwise issue a warning and fall-back to the dynamic library file.
 		else {
 			warning("text-based stub file %s and library file %s are out of sync. Falling back to library file for linking.", tbdInfo.path, dylibInfo.path);
 			result = dylibInfo;
-
 		}
-		return true;
+	} else {
+		return false;
 	}
 
-	return false;
+	return true;
 }
 
 static bool startsWith(const std::string& str, const std::string& prefix)
@@ -5661,10 +5654,6 @@ void Options::checkIllegalOptionCombinations()
 	if ( fReverseMapPath != NULL && !fHideSymbols ) {
 		throw "-bitcode_symbol_map can only be used with -bitcode_hide_symbols";
 	}
-	if ( fBitcodeKind != kBitcodeProcess &&
-		 fOutputKind != Options::kObjectFile ) {
-		throw "-bitcode_process_mode can only be used together with -r";
-	}
 	// auto fix up the process type for strip -S.
 	// when there is only one input and output type is object file, downgrade kBitcodeProcess to kBitcodeAsData.
 	if ( fOutputKind == Options::kObjectFile && fInputFiles.size() == 1 && fBitcodeKind == Options::kBitcodeProcess )
@@ -5884,5 +5873,29 @@ void Options::dumpDependency(uint8_t opcode, const char* path) const
 	//fprintf(stderr, "0x%02X %s\n", opcode, path);
 }
 
+
+void Options::writeToTraceFile(const char* buffer, size_t len) const
+{
+	// one time open() of custom LD_TRACE_FILE
+	if ( fTraceFileDescriptor == -1 ) {
+		if ( fTraceOutputFile != NULL ) {
+			fTraceFileDescriptor = open(fTraceOutputFile, O_WRONLY | O_APPEND | O_CREAT, 0666);
+			if ( fTraceFileDescriptor == -1 )
+				throwf("Could not open or create trace file (errno=%d): %s", errno, fTraceOutputFile);
+		}
+		else {
+			fTraceFileDescriptor = fileno(stderr);
+		}
+	}
+
+	while (len > 0) {
+		ssize_t amountWritten = write(fTraceFileDescriptor, buffer, len);
+		if ( amountWritten == -1 )
+			/* Failure to write shouldn't fail the build. */
+			return;
+		buffer += amountWritten;
+		len -= amountWritten;
+	}
+}
 
 

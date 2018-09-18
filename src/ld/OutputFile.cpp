@@ -2223,6 +2223,7 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 						// Leave ADRP as-is
 						set32LE(infoB.instructionContent, makeNOP());	
 						ldrInfoC.offset += addInfoB.addend;
+						ldrInfoC.baseReg = adrpInfoA.destReg;
 						set32LE(infoC.instructionContent, makeLoadOrStore(ldrInfoC));
 						if ( _options.verboseOptimizationHints() )
 							fprintf(stderr, "adrp-add-ldr at 0x%08llX T2 transformed to ADRP/LDR \n", infoC.instructionAddress);
@@ -2627,7 +2628,7 @@ void OutputFile::writeAtoms(ld::Internal& state, uint8_t* wholeBuffer)
 			}
 			catch (const char* msg) {
 				if ( atom->file() != NULL )
-					throwf("%s in '%s' from %s", msg, atom->name(), atom->file()->path());
+					throwf("%s in '%s' from %s", msg, atom->name(), atom->safeFilePath());
 				else
 					throwf("%s in '%s'", msg, atom->name());
 			}
@@ -2778,7 +2779,7 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 			// <rdar://problem/12264302> Don't use mmap on non-hfs volumes
 			struct statfs fsInfo;
 			if ( statfs(_options.outputFilePath(), &fsInfo) != -1 ) {
-				if ( strcmp(fsInfo.f_fstypename, "hfs") == 0) {
+				if ( (strcmp(fsInfo.f_fstypename, "hfs") == 0) || (strcmp(fsInfo.f_fstypename, "apfs") == 0) ) {
 					(void)unlink(_options.outputFilePath());
 					outputIsMappableFile = true;
 				}
@@ -2802,7 +2803,7 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 			end[1] = '\0';
 			struct statfs fsInfo;
 			if ( statfs(dirPath, &fsInfo) != -1 ) {
-				if ( strcmp(fsInfo.f_fstypename, "hfs") == 0) {
+				if ( (strcmp(fsInfo.f_fstypename, "hfs") == 0) || (strcmp(fsInfo.f_fstypename, "apfs") == 0) ) {
 					outputIsMappableFile = true;
 				}
 			}
@@ -4037,17 +4038,17 @@ void OutputFile::noteTextReloc(const ld::Atom* atom, const ld::Atom* target)
 				warning("PIE disabled. Absolute addressing (perhaps -mdynamic-no-pic) not allowed in code signed PIE, "
 				"but used in %s from %s. " 
 				"To fix this warning, don't compile with -mdynamic-no-pic or link with -Wl,-no_pie", 
-				atom->name(), atom->file()->path());
+				atom->name(), atom->safeFilePath());
 			}
 		}
 		this->pieDisabled = true;
 	}
 	else if ( (target->scope() == ld::Atom::scopeGlobal) && (target->combine() == ld::Atom::combineByName) ) {
-		throwf("illegal text-relocoation (direct reference) to (global,weak) %s in %s from %s in %s", target->name(), target->file()->path(), atom->name(), atom->file()->path());
+		throwf("illegal text-relocoation (direct reference) to (global,weak) %s in %s from %s in %s", target->name(), target->safeFilePath(), atom->name(), atom->safeFilePath());
 	}
 	else {
 		if ( (target->file() != NULL) && (atom->file() != NULL) )
-			throwf("illegal text-relocation to '%s' in %s from '%s' in %s", target->name(), target->file()->path(), atom->name(), atom->file()->path());
+			throwf("illegal text-relocation to '%s' in %s from '%s' in %s", target->name(), target->safeFilePath(), atom->name(), atom->safeFilePath());
         else
             throwf("illegal text reloc in '%s' to '%s'", atom->name(), target->name());
 	}
@@ -4082,7 +4083,7 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 				const char* demangledName = strdup(_options.demangleSymbol(atom->name()));
 				warning("direct access in function '%s' from file '%s' to global weak symbol '%s' from file '%s' means the weak symbol cannot be overridden at runtime. "
 						"This was likely caused by different translation units being compiled with different visibility settings.",
-						  demangledName, atom->file()->path(), _options.demangleSymbol(target->name()), target->file()->path());
+						  demangledName, atom->safeFilePath(), _options.demangleSymbol(target->name()), target->safeFilePath());
 			}
 			return;
 		}
@@ -4111,7 +4112,7 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			const char* demangledName = strdup(_options.demangleSymbol(atom->name()));
 			warning("direct access in function '%s' from file '%s' to global weak symbol '%s' from file '%s' means the weak symbol cannot be overridden at runtime. "
 					"This was likely caused by different translation units being compiled with different visibility settings.",
-					  demangledName, atom->file()->path(), _options.demangleSymbol(target->name()), target->file()->path());
+					  demangledName, atom->safeFilePath(), _options.demangleSymbol(target->name()), target->safeFilePath());
 		}
 		return;
 	}
@@ -4124,6 +4125,7 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 	if ( target == NULL )
 		return; 
 
+	const uint64_t pointerSize = (_options.architecture() & CPU_ARCH_ABI64) ? 8 : 4;
 	bool inReadOnlySeg = ((_options.initialSegProtection(sect->segmentName()) & VM_PROT_WRITE) == 0);
 	bool needsRebase = false;
 	bool needsBinding = false;
@@ -4266,10 +4268,19 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 						if ( (targetAddress+checkAddend) > sctEnd ) {
 							warning("data symbol %s from %s has pointer to %s + 0x%08llX. "  
 									"That large of an addend may disable %s from being put in the dyld shared cache.", 
-									atom->name(), atom->file()->path(), target->name(), addend, _options.installPath() );
+									atom->name(), atom->safeFilePath(), target->name(), addend, _options.installPath() );
 						}
 					}
 				}
+			}
+		}
+		if ( ((address & (pointerSize-1)) != 0) && (rebaseType == REBASE_TYPE_POINTER) ) {
+			if ( (pointerSize == 8) && ((address & 7) == 4) ) {
+				// for now, don't warning about 8-byte pointers only 4-byte aligned
+			}
+			else {
+				warning("pointer not aligned at address 0x%llX (%s + %lld from %s)",
+						address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
 			}
 		}
 		_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
@@ -4278,6 +4289,15 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 		if ( inReadOnlySeg ) {
 			noteTextReloc(atom, target);
 			sect->hasExternalRelocs = true; // so dyld knows to change permissions on __TEXT segment
+		}
+		if ( ((address & (pointerSize-1)) != 0) && (type == BIND_TYPE_POINTER) ) {
+			if ( (pointerSize == 8) && ((address & 7) == 4) ) {
+				// for now, don't warning about 8-byte pointers only 4-byte aligned
+			}
+			else {
+				warning("pointer not aligned at address 0x%llX (%s + %lld from %s)",
+						address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
+			}
 		}
 		_bindingInfo.push_back(BindingInfo(type, this->compressedOrdinalForAtom(target), target->name(), weak_import, address, addend));
 	}
@@ -4330,14 +4350,19 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 		assert(minusTarget->definition() != ld::Atom::definitionProxy);
 		assert(target != NULL);
 		assert(target->definition() != ld::Atom::definitionProxy);
-		// make sure target is not global and weak
-		if ( (target->scope() == ld::Atom::scopeGlobal) && (target->combine() == ld::Atom::combineByName)
-				&& (atom->section().type() != ld::Section::typeCFI)
-				&& (atom->section().type() != ld::Section::typeDtraceDOF)
-				&& (atom->section().type() != ld::Section::typeUnwindInfo) 
-				&& (minusTarget != target) ) {
-			// ok for __eh_frame and __uwind_info to use pointer diffs to global weak symbols
-			throwf("bad codegen, pointer diff in %s to global weak symbol %s", atom->name(), target->name());
+		// check if target of pointer-diff is global and weak
+		if ( (target->scope() == ld::Atom::scopeGlobal) && (target->combine() == ld::Atom::combineByName) && (target->definition() == ld::Atom::definitionRegular) ) {
+			if ( (atom->section().type() == ld::Section::typeCFI)
+				|| (atom->section().type() == ld::Section::typeDtraceDOF)
+				|| (atom->section().type() == ld::Section::typeUnwindInfo) ) {
+				// ok for __eh_frame and __uwind_info to use pointer diffs to global weak symbols
+				return;
+			}
+			// Have direct reference to weak-global.  This should be an indrect reference
+			const char* demangledName = strdup(_options.demangleSymbol(atom->name()));
+			warning("direct access in function '%s' from file '%s' to global weak symbol '%s' from file '%s' means the weak symbol cannot be overridden at runtime. "
+					"This was likely caused by different translation units being compiled with different visibility settings.",
+					  demangledName, atom->safeFilePath(), _options.demangleSymbol(target->name()), target->safeFilePath());
 		}
 		return;
 	}
@@ -4443,14 +4468,14 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 		case ld::Fixup::kindStoreThumbLow16:
 			// no way to encode rebasing of binding for these instructions
 			if ( _options.outputSlidable() || (target->definition() == ld::Atom::definitionProxy) )
-				throwf("no supported runtime lo16 relocation in %s from %s to %s", atom->name(), atom->file()->path(), target->name());
+				throwf("no supported runtime lo16 relocation in %s from %s to %s", atom->name(), atom->safeFilePath(), target->name());
 			break;
 				
 		case ld::Fixup::kindStoreARMHigh16:
 		case ld::Fixup::kindStoreThumbHigh16:
 			// no way to encode rebasing of binding for these instructions
 			if ( _options.outputSlidable() || (target->definition() == ld::Atom::definitionProxy) )
-				throwf("no supported runtime hi16 relocation in %s from %s to %s", atom->name(), atom->file()->path(), target->name());
+				throwf("no supported runtime hi16 relocation in %s from %s to %s", atom->name(), atom->safeFilePath(), target->name());
 			break;
 
 		default:
@@ -5052,6 +5077,14 @@ void OutputFile::writeMapFile(ld::Internal& state)
 	}
 }
 
+static std::string realPathString(const char* path)
+{
+	char realName[MAXPATHLEN];
+	if ( realpath(path, realName) != NULL )
+		return realName;
+	return path;
+}
+
 void OutputFile::writeJSONEntry(ld::Internal& state)
 {
 	if ( _options.traceEmitJSON() && (_options.UUIDMode() != Options::kUUIDNone) && (_options.traceOutputFile() != NULL) ) {
@@ -5099,7 +5132,7 @@ void OutputFile::writeJSONEntry(ld::Internal& state)
 		if (dynamicList.size() > 0) {
 			jsonEntry += ",\"dynamic\":[";
 			for (const ld::dylib::File* dylib :  dynamicList) {
-				jsonEntry += "\"" + std::string(dylib->path()) + "\"";
+				jsonEntry += "\"" + realPathString(dylib->path()) + "\"";
 				if ((dylib != dynamicList.back())) {
 					jsonEntry += ",";
 				}
@@ -5110,7 +5143,7 @@ void OutputFile::writeJSONEntry(ld::Internal& state)
 		if (upwardList.size() > 0) {
 			jsonEntry += ",\"upward-dynamic\":[";
 			for (const ld::dylib::File* dylib :  upwardList) {
-				jsonEntry += "\"" + std::string(dylib->path()) + "\"";
+				jsonEntry += "\"" + realPathString(dylib->path()) + "\"";
 				if ((dylib != upwardList.back())) {
 					jsonEntry += ",";
 				}
@@ -5121,7 +5154,7 @@ void OutputFile::writeJSONEntry(ld::Internal& state)
 		if (reexportList.size() > 0) {
 			jsonEntry += ",\"re-exports\":[";
 			for (const ld::dylib::File* dylib :  reexportList) {
-				jsonEntry += "\"" + std::string(dylib->path()) + "\"";
+				jsonEntry += "\"" + realPathString(dylib->path()) + "\"";
 				if ((dylib != reexportList.back())) {
 					jsonEntry += ",";
 				}
@@ -5132,18 +5165,23 @@ void OutputFile::writeJSONEntry(ld::Internal& state)
 		if (state.archivePaths.size() > 0) {
 			jsonEntry += ",\"archives\":[";
 			for (const std::string& archivePath : state.archivePaths) {
-				jsonEntry += "\"" + std::string(archivePath) + "\"";
+				jsonEntry += "\"" + realPathString(archivePath.c_str()) + "\"";
 				if ((archivePath != state.archivePaths.back())) {
 					jsonEntry += ",";
 				}
 			}
 			jsonEntry += "]";
 		}
+
+		if (state.bundleLoader != NULL) {
+			jsonEntry += ",\"bundle-loader\":";
+			jsonEntry += "\"" + realPathString(state.bundleLoader->path()) + "\"";
+		}
+
 		jsonEntry += "}\n";
 		
 		// Write the JSON entry to the trace file.
-		std::ofstream out(_options.traceOutputFile(), ios::app);
-		out << jsonEntry;
+		_options.writeToTraceFile(jsonEntry.c_str(), jsonEntry.size());
 	}
 }
 	

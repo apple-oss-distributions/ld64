@@ -337,25 +337,6 @@ void Resolver::doLinkerOption(const std::vector<const char*>& linkerOption, cons
 	}
 }
 
-static void userReadableSwiftVersion(uint8_t value, char versionString[64])
-{
-	switch (value) {
-		case 1:
-			strcpy(versionString, "1.0");
-			break;
-		case 2:
-			strcpy(versionString, "1.1");
-			break;
-		case 3:
-			strcpy(versionString, "2.0");
-			break;
-		case 4:
-			strcpy(versionString, "3.0");
-			break;
-		default:
-			sprintf(versionString, "unknown ABI version 0x%02X", value);
-	}
-}
 
 void Resolver::doFile(const ld::File& file)
 {
@@ -378,9 +359,11 @@ void Resolver::doFile(const ld::File& file)
 		// Resolve bitcode section in the object file
 		if ( _options.bundleBitcode() ) {
 			if ( objFile->getBitcode() == NULL ) {
-				// No bitcode section, figure out if the object file comes from LTO/compiler static library
-				if (objFile->sourceKind() != ld::relocatable::File::kSourceLTO &&
-					objFile->sourceKind() != ld::relocatable::File::kSourceCompilerArchive ) {
+				// Handle the special case for compiler_rt objects. Add the file to the list to be process.
+				if ( objFile->sourceKind() == ld::relocatable::File::kSourceCompilerArchive ) {
+					_internal.filesFromCompilerRT.push_back(objFile);
+				} else if (objFile->sourceKind() != ld::relocatable::File::kSourceLTO  ) {
+					// No bitcode section, figure out if the object file comes from LTO/compiler static library
 					switch ( _options.platform() ) {
 					case Options::kPlatformOSX:
 					case Options::kPlatformUnknown:
@@ -467,8 +450,8 @@ void Resolver::doFile(const ld::File& file)
 			else if ( file.swiftVersion() != _internal.swiftVersion ) {
 				char fileVersion[64];
 				char otherVersion[64];
-				userReadableSwiftVersion(file.swiftVersion(), fileVersion);
-				userReadableSwiftVersion(_internal.swiftVersion, otherVersion);
+				Options::userReadableSwiftVersion(file.swiftVersion(), fileVersion);
+				Options::userReadableSwiftVersion(_internal.swiftVersion, otherVersion);
 				if ( file.swiftVersion() > _internal.swiftVersion ) {
 					throwf("%s compiled with newer version of Swift language (%s) than previous files (%s)", 
 						   file.path(), fileVersion, otherVersion);
@@ -638,8 +621,8 @@ void Resolver::doFile(const ld::File& file)
 			else if ( file.swiftVersion() != _internal.swiftVersion ) {
 				char fileVersion[64];
 				char otherVersion[64];
-				userReadableSwiftVersion(file.swiftVersion(), fileVersion);
-				userReadableSwiftVersion(_internal.swiftVersion, otherVersion);
+				Options::userReadableSwiftVersion(file.swiftVersion(), fileVersion);
+				Options::userReadableSwiftVersion(_internal.swiftVersion, otherVersion);
 				if ( file.swiftVersion() > _internal.swiftVersion ) {
 					throwf("%s compiled with newer version of Swift language (%s) than previous files (%s)", 
 						   file.path(), fileVersion, otherVersion);
@@ -707,14 +690,14 @@ void Resolver::doAtom(const ld::Atom& atom)
 							}
 							else if ( _options.outputKind() == Options::kDynamicLibrary ) {
 								if ( atom.file() != NULL )
-									warning("target OS does not support re-exporting symbol %s from %s\n", _options.demangleSymbol(name), atom.file()->path());
+									warning("target OS does not support re-exporting symbol %s from %s\n", _options.demangleSymbol(name), atom.safeFilePath());
 								else
 									warning("target OS does not support re-exporting symbol %s\n", _options.demangleSymbol(name));
 							}
 						}
 						else {
 							if ( atom.file() != NULL )
-								warning("cannot export hidden symbol %s from %s", _options.demangleSymbol(name), atom.file()->path());
+								warning("cannot export hidden symbol %s from %s", _options.demangleSymbol(name), atom.safeFilePath());
 							else
 								warning("cannot export hidden symbol %s", _options.demangleSymbol(name));
 						}
@@ -726,7 +709,7 @@ void Resolver::doAtom(const ld::Atom& atom)
 						(const_cast<ld::Atom*>(&atom))->setScope(ld::Atom::scopeGlobal);
 					}
 					else {
-						throwf("requested re-export symbol %s is not from a dylib, but from %s\n", _options.demangleSymbol(name), atom.file()->path());
+						throwf("requested re-export symbol %s is not from a dylib, but from %s\n", _options.demangleSymbol(name), atom.safeFilePath());
 					}
 				}
 				break;
@@ -737,7 +720,7 @@ void Resolver::doAtom(const ld::Atom& atom)
 					//fprintf(stderr, "demote %s to hidden\n", name);
 				}
 				if ( _options.canReExportSymbols() && _options.shouldReExport(name) ) {
-					throwf("requested re-export symbol %s is not from a dylib, but from %s\n", _options.demangleSymbol(name), atom.file()->path());
+					throwf("requested re-export symbol %s is not from a dylib, but from %s\n", _options.demangleSymbol(name), atom.safeFilePath());
 				}
 				break;
 		}
@@ -995,12 +978,12 @@ void Resolver::markLive(const ld::Atom& atom, WhyLiveBackChain* previous)
 	//fprintf(stderr, "markLive(%p) %s\n", &atom, atom.name());
 	// if -why_live cares about this symbol, then dump chain
 	if ( (previous->referer != NULL) && _options.printWhyLive(atom.name()) ) {
-		fprintf(stderr, "%s from %s\n", atom.name(), atom.file()->path());
+		fprintf(stderr, "%s from %s\n", atom.name(), atom.safeFilePath());
 		int depth = 1;
 		for(WhyLiveBackChain* p = previous; p != NULL; p = p->previous, ++depth) {
 			for(int i=depth; i > 0; --i)
 				fprintf(stderr, "  ");
-			fprintf(stderr, "%s from %s\n", p->referer->name(), p->referer->file()->path());
+			fprintf(stderr, "%s from %s\n", p->referer->name(), p->referer->safeFilePath());
 		}
 	}
 	
@@ -1395,11 +1378,11 @@ bool Resolver::printReferencedBy(const char* name, SymbolTable::IndirectBindingS
 							++foundReferenceCount;
 					}
 					else if ( atom->contentType() == ld::Atom::typeCFI ) {
-						fprintf(stderr, "      Dwarf Exception Unwind Info (__eh_frame) in %s\n", pathLeafName(atom->file()->path()));
+						fprintf(stderr, "      Dwarf Exception Unwind Info (__eh_frame) in %s\n", pathLeafName(atom->safeFilePath()));
 						++foundReferenceCount;
 					}
 					else {
-						fprintf(stderr, "      %s in %s\n", _options.demangleSymbol(atom->name()), pathLeafName(atom->file()->path()));
+						fprintf(stderr, "      %s in %s\n", _options.demangleSymbol(atom->name()), pathLeafName(atom->safeFilePath()));
 						++foundReferenceCount;
 						break; // if undefined used twice in a function, only show first
 					}
@@ -1744,6 +1727,7 @@ void Resolver::linkTimeOptimize()
 	optOpt.pie							= _options.positionIndependentExecutable();
 	optOpt.mainExecutable				= _options.linkingMainExecutable();;
 	optOpt.staticExecutable 			= (_options.outputKind() == Options::kStaticExecutable);
+	optOpt.preload						= (_options.outputKind() == Options::kPreload);
 	optOpt.relocatable					= (_options.outputKind() == Options::kObjectFile);
 	optOpt.allowTextRelocs				= _options.allowTextRelocs();
 	optOpt.linkerDeadStripping			= _options.deadCodeStrip();
@@ -1753,7 +1737,7 @@ void Resolver::linkTimeOptimize()
 	optOpt.armUsesZeroCostExceptions    = _options.armUsesZeroCostExceptions();
 	optOpt.simulator					= _options.targetIOSSimulator();
 	optOpt.ignoreMismatchPlatform		= ((_options.outputKind() == Options::kPreload) || (_options.outputKind() == Options::kStaticExecutable));
-	optOpt.bitcodeBundle				= _options.bundleBitcode();
+	optOpt.bitcodeBundle				= (_options.bundleBitcode() && (_options.bitcodeKind() != Options::kBitcodeMarker));
 	optOpt.maxDefaultCommonAlignment	= _options.maxDefaultCommonAlign();
 	optOpt.arch							= _options.architecture();
 	optOpt.mcpu							= _options.mcpuLTO();
@@ -1801,8 +1785,15 @@ void Resolver::linkTimeOptimize()
 
 	// if -dead_strip on command line
 	if ( _options.deadCodeStrip() ) {
-		// clear liveness bit
+		// run through all atoms again and make live_section LTO atoms are preserved from dead_stripping if needed
+		_dontDeadStripIfReferencesLive.clear();
 		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+			const ld::Atom* atom = *it;
+			if ( atom->dontDeadStripIfReferencesLive() ) {
+				_dontDeadStripIfReferencesLive.push_back(atom);
+			}
+
+			// clear liveness bit
 			(const_cast<ld::Atom*>(*it))->setLive((*it)->dontDeadStrip());
 		}
 		// and re-compute dead code

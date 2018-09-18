@@ -455,6 +455,8 @@ void MachOChecker<A>::checkLoadCommands()
 			case LC_LOAD_UPWARD_DYLIB:
 			case LC_VERSION_MIN_MACOSX:
 			case LC_VERSION_MIN_IPHONEOS:
+			case LC_VERSION_MIN_TVOS:
+			case LC_VERSION_MIN_WATCHOS:
 			case LC_FUNCTION_STARTS:
 			case LC_DYLD_ENVIRONMENT:
 			case LC_DATA_IN_CODE:

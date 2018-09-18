@@ -998,7 +998,7 @@ void ExportInfoAtom<A>::encode() const
 				entry.flags |= EXPORT_SYMBOL_FLAGS_WEAK_DEFINITION;
 			entry.other = this->_writer.compressedOrdinalForAtom(atom);
 			if ( entry.other == BIND_SPECIAL_DYLIB_SELF ) {
-				warning("not adding explict export for symbol %s because it is already re-exported from dylib %s", entry.name, atom->file()->path());
+				warning("not adding explict export for symbol %s because it is already re-exported from dylib %s", entry.name, atom->safeFilePath());
 				continue;
 			}
 			if ( atom->isAlias() ) {

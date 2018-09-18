@@ -111,7 +111,7 @@ public:
 	virtual ld::Bitcode*								getBitcode() const				{ return _bitcode.get(); }
 	virtual SourceKind									sourceKind() const				{ return _srcKind; }
 	
-	const uint8_t*										fileContent()					{ return _fileContent; }
+	virtual const uint8_t*								fileContent() const				{ return _fileContent; }
 private:
 	friend class Atom<A>;
 	friend class Section<A>;
@@ -1715,11 +1715,14 @@ typename A::P::uint_t Parser<A>::realAddr(typename A::P::uint_t addr)
 #define STACK_ALLOC_IF_SMALL(_type, _name, _actual_count, _maxCount) \
 	_type*  _name = NULL;   \
 	uint32_t _name##_count = 1; \
-	if ( _actual_count > _maxCount ) \
+	uint32_t _name##_stack_count = _actual_count; \
+	if ( _actual_count > _maxCount ) { \
 		_name = (_type*)malloc(sizeof(_type) * _actual_count); \
+		_name##_stack_count = 1; \
+	} \
 	else \
 		_name##_count = _actual_count; \
-	_type  _name##_buffer[_name##_count]; \
+	_type _name##_buffer[_name##_stack_count]; \
 	if ( _name == NULL ) \
 		_name = _name##_buffer;
 
@@ -1770,7 +1773,7 @@ ld::relocatable::File* Parser<A>::parse(const ParserOptions& opts)
 
 	// create lists of address that already have compact unwind and thus don't need the dwarf parsed
 	unsigned cuLsdaCount = 0;
-	pint_t cuStarts[countOfCUs];
+	STACK_ALLOC_IF_SMALL(pint_t, cuStarts, countOfCUs, 1024);
 	for (uint32_t i=0; i < countOfCUs; ++i) {
 		if ( CUSection<A>::encodingMeansUseDwarf(cuInfoArray[i].compactUnwindInfo) )
 			cuStarts[i] = -1;
@@ -6241,6 +6244,10 @@ template <>
 bool Section<x86_64>::addRelocFixup(class Parser<x86_64>& parser, const macho_relocation_info<P>* reloc)
 {
 	const macho_section<P>* sect = this->machoSection();
+	if ( sect == NULL ) {
+		warning("malformed mach-o, relocations not supported on section %s", this->sectionName());
+		return false;
+	}
 	uint64_t srcAddr = sect->addr() + reloc->r_address();
 	Parser<x86_64>::SourceLocation	src;
 	Parser<x86_64>::TargetDesc		target;

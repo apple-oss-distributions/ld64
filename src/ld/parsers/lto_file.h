@@ -58,6 +58,7 @@ struct OptimizeOptions {
 	bool								pie; 
 	bool								mainExecutable; 
 	bool								staticExecutable; 
+	bool								preload;
 	bool								relocatable;
 	bool								allowTextRelocs; 
 	bool								linkerDeadStripping; 

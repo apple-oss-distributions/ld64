@@ -176,7 +176,7 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 				ld::Atom::definitionRegular, ld::Atom::combineNever, 
 				ld::Atom::scopeTranslationUnit, ld::Atom::typeUnclassified, 
 				ld::Atom::symbolTableNotIn, false, false, false, 
-				(opts.outputKind() == Options::kPreload) ? ld::Atom::Alignment(0) : ld::Atom::Alignment(12) ), 
+				(opts.outputKind() == Options::kPreload) ? ld::Atom::Alignment(0) : ld::Atom::Alignment(log2(opts.segmentAlignment())) ),
 		_options(opts), _state(state), _writer(writer), _address(0), _uuidCmdInOutputBuffer(NULL), _linkeditCmdOffset(0), _symboltableCmdOffset(0)
 {
 	bzero(_uuid, 16);
@@ -724,7 +724,7 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copySingleSegmentLoadCommand(uint8_t* p) 
 		if ( cmd->fileoff() == 0 )
 			cmd->set_fileoff(fsect->fileOffset);
 		cmd->set_vmsize(fsect->address + fsect->size - cmd->vmaddr());
-		if ( (fsect->type() != ld::Section::typeZeroFill) && (fsect->type() != ld::Section::typeTentativeDefs) )
+		if ( !sectionTakesNoDiskSpace(fsect) )
 			cmd->set_filesize(fsect->fileOffset + fsect->size - cmd->fileoff());
 		++msect;
 	}
@@ -1348,14 +1348,21 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyDylibLoadCommand(uint8_t* p, const ld
 {
 	uint32_t sz = alignedSize(sizeof(macho_dylib_command<P>) + strlen(dylib->installPath()) + 1);
 	macho_dylib_command<P>* cmd = (macho_dylib_command<P>*)p;
+	bool weakLink = dylib->forcedWeakLinked() || dylib->allSymbolsAreWeakImported();
+	bool upward = dylib->willBeUpwardDylib() && _options.useUpwardDylibs();
+	bool reExport = dylib->willBeReExported() && _options.useSimplifiedDylibReExports();
+	if ( weakLink && upward )
+		warning("cannot weak upward link.  Dropping weak for %s", dylib->installPath());
+	if ( weakLink && reExport )
+		warning("cannot weak re-export a dylib.  Dropping weak for %s", dylib->installPath());
 	if ( dylib->willBeLazyLoadedDylib() )
 		cmd->set_cmd(LC_LAZY_LOAD_DYLIB);
-	else if ( dylib->forcedWeakLinked() || dylib->allSymbolsAreWeakImported() )
-		cmd->set_cmd(LC_LOAD_WEAK_DYLIB);
-	else if ( dylib->willBeReExported() && _options.useSimplifiedDylibReExports() )
+	else if ( reExport )
 		cmd->set_cmd(LC_REEXPORT_DYLIB);
-	else if ( dylib->willBeUpwardDylib() && _options.useUpwardDylibs() )
+	else if ( upward )
 		cmd->set_cmd(LC_LOAD_UPWARD_DYLIB);
+	else if ( weakLink )
+		cmd->set_cmd(LC_LOAD_WEAK_DYLIB);
 	else
 		cmd->set_cmd(LC_LOAD_DYLIB);
 	cmd->set_cmdsize(sz);

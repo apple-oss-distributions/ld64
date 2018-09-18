@@ -1824,6 +1824,27 @@ void SectionRelocationsAtom<arm64>::encodeSectionReloc(ld::Internal::FinalSectio
 			relocs.push_back(reloc1);
 			break;
 
+		case ld::Fixup::kindStoreARM64TLVPLoadPageOff12:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPageOff12:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolNum);
+			reloc1.set_r_pcrel(false);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(ARM64_RELOC_TLVP_LOAD_PAGEOFF12);
+			relocs.push_back(reloc1);
+			break;
+
+		case ld::Fixup::kindStoreARM64TLVPLoadPage21:
+		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPage21:
+			reloc1.set_r_address(address);
+			reloc1.set_r_symbolnum(symbolNum);
+			reloc1.set_r_pcrel(true);
+			reloc1.set_r_length(2);
+			reloc1.set_r_extern(external);
+			reloc1.set_r_type(ARM64_RELOC_TLVP_LOAD_PAGE21);
+			relocs.push_back(reloc1);
+			break;
 
 		case ld::Fixup::kindStoreLittleEndian64:
 		case ld::Fixup::kindStoreTargetAddressLittleEndian64:

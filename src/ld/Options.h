@@ -129,10 +129,30 @@ public:
 		}
 	}
 
+	static void userReadableSwiftVersion(uint8_t value, char versionString[64])
+	{
+		switch (value) {
+			case 1:
+				strcpy(versionString, "1.0");
+				break;
+			case 2:
+				strcpy(versionString, "1.1");
+				break;
+			case 3:
+				strcpy(versionString, "2.0");
+				break;
+			case 4:
+				strcpy(versionString, "3.0");
+				break;
+			default:
+				sprintf(versionString, "unknown ABI version 0x%02X", value);
+		}
+	}
+
+
 	class FileInfo {
     public:
 		const char*				path;
-		uint64_t				fileLen;
 		time_t					modTime;
 		LibraryOptions			options;
 		ld::File::Ordinal		ordinal;
@@ -145,11 +165,10 @@ public:
         // The use pattern for FileInfo is to create one on the stack in a leaf function and return
         // it to the calling frame by copy. Therefore the copy constructor steals the path string from
         // the source, which dies with the stack frame.
-        FileInfo(FileInfo const &other) : path(other.path), fileLen(other.fileLen), modTime(other.modTime), options(other.options), ordinal(other.ordinal), fromFileList(other.fromFileList), inputFileSlot(-1) { ((FileInfo&)other).path = NULL; };
+        FileInfo(FileInfo const &other) : path(other.path), modTime(other.modTime), options(other.options), ordinal(other.ordinal), fromFileList(other.fromFileList), inputFileSlot(-1) { ((FileInfo&)other).path = NULL; };
 
 		FileInfo &operator=(FileInfo other) {
 			std::swap(path, other.path);
-			std::swap(fileLen, other.fileLen);
 			std::swap(modTime, other.modTime);
 			std::swap(options, other.options);
 			std::swap(ordinal, other.ordinal);
@@ -160,10 +179,10 @@ public:
 		}
 
         // Create an empty FileInfo. The path can be set implicitly by checkFileExists().
-        FileInfo() : path(NULL), fileLen(0), modTime(-1), options(), fromFileList(false) {};
+        FileInfo() : path(NULL), modTime(-1), options(), fromFileList(false) {};
         
         // Create a FileInfo for a specific path, but does not stat the file.
-        FileInfo(const char *_path) : path(strdup(_path)), fileLen(0), modTime(-1), options(), fromFileList(false) {};
+        FileInfo(const char *_path) : path(strdup(_path)), modTime(-1), options(), fromFileList(false) {};
 
         ~FileInfo() { if (path) ::free((void*)path); }
         
@@ -484,6 +503,7 @@ public:
 	uint8_t						maxDefaultCommonAlign() const { return fMaxDefaultCommonAlign; }
 	bool						hasDataSymbolMoves() const { return !fSymbolsMovesData.empty(); }
 	bool						hasCodeSymbolMoves() const { return !fSymbolsMovesCode.empty(); }
+	void						writeToTraceFile(const char* buffer, size_t len) const;
 
 	static uint32_t				parseVersionNumber32(const char*);
 
@@ -795,6 +815,7 @@ private:
     const char*							fPipelineFifo;
 	const char*							fDependencyInfoPath;
 	mutable int							fDependencyFileDescriptor;
+	mutable int							fTraceFileDescriptor;
 	uint8_t								fMaxDefaultCommonAlign;
 };
 

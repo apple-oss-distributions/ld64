@@ -1110,12 +1110,12 @@ MethodListAtom<A>::MethodListAtom(ld::Internal& state, const ld::Atom* baseMetho
 					if ( baseMethodListMethodNameAtoms.count(target) != 0 ) {
 						warning("%s method '%s' in category from %s overrides method from class in %s", 
 							(meta ? "meta" : "instance"), target->rawContentPointer(),
-							categoryMethodListAtom->file()->path(), baseMethodList->file()->path() );
+							categoryMethodListAtom->safeFilePath(), baseMethodList->safeFilePath() );
 					}
 					if ( categoryMethodNameAtoms.count(target) != 0 ) {
 						warning("%s method '%s' in category from %s conflicts with same method from another category", 
 							(meta ? "meta" : "instance"), target->rawContentPointer(),
-							categoryMethodListAtom->file()->path());
+							categoryMethodListAtom->safeFilePath());
 					}
 					categoryMethodNameAtoms.insert(target);
 				}
@@ -1270,12 +1270,12 @@ void scanCategories(ld::Internal& state,
 				
 				if (Category<A>::getClassProperties(state, categoryAtom)) {
 					haveCategoriesWithNonNullClassProperties = true;
-					// fprintf(stderr, "category in file %s has non-null class properties\n", categoryAtom->file()->path());
+					// fprintf(stderr, "category in file %s has non-null class properties\n", categoryAtom->safeFilePath());
 				}
 				
 				if (!categoryAtom->file()->objcHasCategoryClassPropertiesField()) {
 					haveCategoriesWithoutClassPropertyStorage = true;
-					// fprintf(stderr, "category in file %s has no storage for class properties\n", categoryAtom->file()->path());
+					// fprintf(stderr, "category in file %s has no storage for class properties\n", categoryAtom->safeFilePath());
 				}
 			}
 		}
