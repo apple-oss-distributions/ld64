@@ -46,9 +46,10 @@ all:
 	${CXX} ${CCXXFLAGS} -flto=thin  -gdwarf-2 hello.o other.o -o hello.thin -Wl,-object_path_lto,thinlto.o
 	${FAIL_IF_BAD_MACHO} hello.thin
 	# Check that we have a non zero timestamp in the debug note
-	nm -ap hello.thin | grep '^[0-9a-z]*[1-9a-z][0-9a-z]* .*OSO.*thinlto.o/0.o$$' | ${FAIL_IF_EMPTY}
-	nm -ap hello.thin | grep '^[0-9a-z]*[1-9a-z][0-9a-z]* .*OSO.*thinlto.o/1.o$$' | ${FAIL_IF_EMPTY}
+	nm -ap hello.thin | grep '^[0-9a-z]*[1-9a-z][0-9a-z]* .*OSO.*thinlto.o/0.thinlto.o$$' | ${FAIL_IF_EMPTY}
+	nm -ap hello.thin | grep '^[0-9a-z]*[1-9a-z][0-9a-z]* .*OSO.*thinlto.o/1.thinlto.o$$' | ${FAIL_IF_EMPTY}
 
+	${PASS_IFF} true
 
 clean:
 	rm -rf hello hello.thin hello.o other.o lto.o thinlto.o

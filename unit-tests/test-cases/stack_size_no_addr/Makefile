@@ -41,15 +41,15 @@ else
 endif
 endif
 
+STACK_SIZE_DEC = $(shell printf "%d" $(STACK_SIZE))
 
 run: all
 
 all:
 	${CC} ${CCFLAGS} main.c -o main -Wl,-stack_size,${STACK_SIZE}
 	# Check for __UNIXSTACK section in object, check that it has the correct value
-	otool -l main | grep -A6 __UNIXSTACK > main.otool
-	grep " vmsize[ ]*${STACK_SIZE}" main.otool | ${FAIL_IF_EMPTY}
-	grep " vmaddr[ ]*${STACK_TOP}" main.otool | ${FAIL_IF_EMPTY}
+	${OTOOL} -l main | grep -A3 LC_MAIN > main.otool
+	grep " stacksize ${STACK_SIZE_DEC}" main.otool | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:

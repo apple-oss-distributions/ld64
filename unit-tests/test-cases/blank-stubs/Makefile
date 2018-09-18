@@ -23,7 +23,25 @@
 TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
-ALL_ARCH_OPTIONS = $(patsubst %,-arch %,$(subst ppc,,$(VALID_ARCHS)) )
+#ALL_ARCH_OPTIONS = $(patsubst %,-arch %,$(subst ppc,,$(VALID_ARCHS)) )
+
+# build the list of all valid archs for this platform...
+ifeq ($(ARCH),i386)
+	ALL_ARCH_OPTIONS = $(patsubst %,-arch %,$(filter-out arm%,$(VALID_ARCHS)) )
+	SYSROOT = -isysroot $(OSX_SDK)
+endif
+ifeq ($(ARCH),x86_64)
+	ALL_ARCH_OPTIONS = $(patsubst %,-arch %,$(filter-out arm%,$(VALID_ARCHS)) )
+	SYSROOT = -isysroot $(OSX_SDK)
+endif
+ifeq ($(ARCH),armv7)
+	ALL_ARCH_OPTIONS = $(patsubst %,-arch %,$(filter arm%,$(VALID_ARCHS)) )
+	SYSROOT = -isysroot $(IOS_SDK)
+endif
+ifeq ($(ARCH),arm64)
+	ALL_ARCH_OPTIONS = $(patsubst %,-arch %,$(filter arm%,$(VALID_ARCHS)) )
+	SYSROOT = -isysroot $(IOS_SDK)
+endif
 
 #
 # Test that blank stubs are handled properly
@@ -33,11 +51,10 @@ run: all
 
 all:
 # build example fully fat dylib
-
-	gcc `echo ${ALL_ARCH_OPTIONS}` -dynamiclib foo.c -o libfoo.dylib -install_name libfoo.dylib 
+	gcc $(SYSROOT) ${CCFLAGS} `echo ${ALL_ARCH_OPTIONS}` -dynamiclib foo.c -o libfoo.dylib -install_name libfoo.dylib 
 	${FAIL_IF_BAD_MACHO} libfoo.dylib
 
-	# handle the case of a native ppc compile--this sets the subtype, which must be passed to lipo
+# handle the case of a native ppc compile--this sets the subtype, which must be passed to lipo
 	if [ x${ARCH} != xppc ]; \
 	then \
 		SUB_ARCH=${ARCH}; \
@@ -55,7 +72,6 @@ all:
 	${CC} ${CCFLAGS} main.c libfoo.dylib -o main
 	${OTOOL} -L main | grep libfoo | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} main
-	
 
 clean:
 	rm -rf libfoo.dylib main

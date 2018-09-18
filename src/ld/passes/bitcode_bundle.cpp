@@ -986,7 +986,7 @@ void BitcodeBundle::doPass()
     // Write SDK version
     if ( _options.sdkPaths().size() > 1 )
         throwf("only one -syslibroot is accepted for bitcode bundle");
-    if ( xar_prop_create((xar_file_t)linkXML, "platform", _options.getPlatformStr().c_str()) != 0 )
+    if ( xar_prop_create((xar_file_t)linkXML, "platform", _options.platforms().to_str().c_str()) != 0 )
         throwf("could not add platform name to bitcode bundle");
     if ( xar_prop_create((xar_file_t)linkXML, "sdkversion", _options.getSDKVersionStr().c_str()) != 0 )
         throwf("could not add SDK version to bitcode bundle");

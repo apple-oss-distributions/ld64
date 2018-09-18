@@ -88,17 +88,19 @@ OutputFile::OutputFile(const Options& opts)
 		symbolTableSection(NULL), stringPoolSection(NULL), 
 		localRelocationsSection(NULL), externalRelocationsSection(NULL), 
 		sectionRelocationsSection(NULL), 
-		indirectSymbolTableSection(NULL), 
+		indirectSymbolTableSection(NULL),
+		threadedPageStartsSection(NULL),
 		_options(opts),
 		_hasDyldInfo(opts.makeCompressedDyldInfo()),
+		_hasThreadedPageStarts(opts.makeThreadedStartsSection()),
 		_hasSymbolTable(true),
 		_hasSectionRelocations(opts.outputKind() == Options::kObjectFile),
 		_hasSplitSegInfo(opts.sharedRegionEligible()),
 		_hasFunctionStartsInfo(opts.addFunctionStarts()),
 		_hasDataInCodeInfo(opts.addDataInCodeInfo()),
 		_hasDynamicSymbolTable(true),
-		_hasLocalRelocations(!opts.makeCompressedDyldInfo()),
-		_hasExternalRelocations(!opts.makeCompressedDyldInfo()),
+		_hasLocalRelocations(!opts.makeCompressedDyldInfo() && !opts.makeThreadedStartsSection()),
+		_hasExternalRelocations(!opts.makeCompressedDyldInfo() && !opts.makeThreadedStartsSection()),
 		_hasOptimizationHints(opts.outputKind() == Options::kObjectFile),
 		_encryptedTEXTstartOffset(0),
 		_encryptedTEXTendOffset(0),
@@ -283,7 +285,7 @@ void OutputFile::updateLINKEDITAddresses(ld::Internal& state)
 		_sectionsRelocationsAtom->encode();
 	}
 
-	if ( ! _options.makeCompressedDyldInfo() ) {
+	if ( !_options.makeCompressedDyldInfo() && !_options.makeThreadedStartsSection() ) {
 		// build external relocations 
 		assert(_externalRelocsAtom != NULL);
 		_externalRelocsAtom->encode();
@@ -367,7 +369,7 @@ void OutputFile::setLoadCommandsPadding(ld::Internal& state)
 			// work backwards from end of segment and lay out sections so that extra room goes to padding atom
 			uint64_t addr = 0;
 			uint64_t textSegPageSize = _options.segPageSize("__TEXT");
-			if ( _options.sharedRegionEligible() && (_options.iOSVersionMin() >= ld::iOS_8_0) && (textSegPageSize == 0x4000) )
+			if ( _options.sharedRegionEligible() && _options.platforms().minOS(ld::iOS_8_0) && (textSegPageSize == 0x4000) )
 				textSegPageSize = 0x1000;
 			for (std::vector<ld::Internal::FinalSection*>::reverse_iterator it = state.sections.rbegin(); it != state.sections.rend(); ++it) {
 				ld::Internal::FinalSection* sect = *it;
@@ -476,7 +478,8 @@ bool OutputFile::targetIsThumb(ld::Internal& state, const ld::Fixup* fixup)
 
 uint64_t OutputFile::addressOf(const ld::Internal& state, const ld::Fixup* fixup, const ld::Atom** target)
 {
-	if ( !_options.makeCompressedDyldInfo() ) {
+	// FIXME: Is this right for makeThreadedStartsSection?
+	if ( !_options.makeCompressedDyldInfo() && !_options.makeThreadedStartsSection() ) {
 		// For external relocations the classic mach-o format
 		// has addend only stored in the content.  That means
 		// that the address of the target is not used.
@@ -1345,6 +1348,9 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 	bool is_b;
 	bool thumbTarget = false;
 	std::map<uint32_t, const Fixup*> usedByHints;
+#if SUPPORT_ARCH_arm64e
+	Fixup::AuthData authData;
+#endif
 	for (ld::Fixup::iterator fit = atom->fixupsBegin(), end=atom->fixupsEnd(); fit != end; ++fit) {
 		uint8_t* fixUpLocation = &buffer[fit->offsetInAtom];
 		ld::Fixup::LOH_arm64 lohExtra;
@@ -1634,6 +1640,68 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 					accumulator = 0;
 				set64LE(fixUpLocation, accumulator);
 				break;
+#if SUPPORT_ARCH_arm64e
+			case ld::Fixup::kindStoreTargetAddressLittleEndianAuth64: {
+				accumulator = addressOf(state, fit, &toTarget);
+				if ( fit->contentAddendOnly ) {
+					// ld -r mode.  We want to write out the original relocation again
+
+					// FIXME: Should we zero out the accumulator here as done in kindStoreTargetAddressLittleEndian64?
+					// Make sure the high bits aren't set.  The low-32-bits should be the addend.
+					assert((accumulator & 0xFFFFFFFF00000000ULL) == 0);
+					accumulator |= ((uint64_t)authData.discriminator) << 32;
+					accumulator |= ((uint64_t)authData.hasAddressDiversity) << 48;
+					accumulator |= ((uint64_t)authData.key) << 49;
+					// Set the high bit as we are authenticated
+					accumulator |= 1ULL << 63;
+					set64LE(fixUpLocation, accumulator);
+				}
+				else if  (_options.outputKind() == Options::kKextBundle ) {
+					// kexts dont' handle auth pointers, write unauth pointer
+					set64LE(fixUpLocation, accumulator);
+				}
+				else {
+					auto fixupOffset = (uintptr_t)(fixUpLocation - mhAddress);
+					assert(_authenticatedFixupData.find(fixupOffset) == _authenticatedFixupData.end());
+					auto authneticatedData = std::make_pair(authData, accumulator);
+					_authenticatedFixupData[fixupOffset] = authneticatedData;
+					// Zero out this entry which we will expect later.
+					set64LE(fixUpLocation, 0);
+				}
+				break;
+		   }
+			case ld::Fixup::kindStoreLittleEndianAuth64: {
+				if ( fit->contentAddendOnly ) {
+					// ld -r mode.  We want to write out the original relocation again
+
+					// FIXME: Should we zero out the accumulator here as done in kindStoreTargetAddressLittleEndian64?
+					// Make sure the high bits aren't set.  The low-32-bits should be the addend.
+					assert((accumulator & 0xFFFFFFFF00000000ULL) == 0);
+					accumulator |= ((uint64_t)authData.discriminator) << 32;
+					accumulator |= ((uint64_t)authData.hasAddressDiversity) << 48;
+					accumulator |= ((uint64_t)authData.key) << 49;
+					// Set the high bit as we are authenticated
+					accumulator |= 1ULL << 63;
+					set64LE(fixUpLocation, accumulator);
+				}
+				else if  (_options.outputKind() == Options::kKextBundle ) {
+					// kexts dont' handle auth pointers, write unauth pointer
+					set64LE(fixUpLocation, accumulator);
+				}
+				else {
+					auto fixupOffset = (uintptr_t)(fixUpLocation - mhAddress);
+					assert(_authenticatedFixupData.find(fixupOffset) == _authenticatedFixupData.end());
+					auto authneticatedData = std::make_pair(authData, accumulator);
+					_authenticatedFixupData[fixupOffset] = authneticatedData;
+					// Zero out this entry which we will expect later.
+					set64LE(fixUpLocation, 0);
+				}
+				break;
+			}
+			case ld::Fixup::kindSetAuthData:
+				authData = fit->u.authData;
+				break;
+#endif
 			case ld::Fixup::kindStoreTargetAddressBigEndian32:
 				accumulator = addressOf(state, fit, &toTarget);
 				if ( fit->contentAddendOnly )
@@ -1981,6 +2049,10 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 				}
 				break;
 			case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
+				// In -r mode, the GOT doesn't exist but the relocations track it
+				// so the address doesn't need to be aligned.
+				if ( _options.outputKind() == Options::kObjectFile )
+					break;
 			case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
 			case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPageOff12:
 				accumulator = addressOf(state, fit, &toTarget);
@@ -2640,6 +2712,262 @@ void OutputFile::writeAtoms(ld::Internal& state, uint8_t* wholeBuffer)
 		//fprintf(stderr, "ADRPs changed to NOPs: %d\n", sAdrpNoped);
 		//fprintf(stderr, "ADRPs unchanged:       %d\n", sAdrpNotNoped);
 	}
+
+	if ( _options.makeThreadedStartsSection() ) {
+		assert(_threadedRebaseBindIndices.empty());
+
+		std::vector<OutputFile::BindingInfo>& bindInfo = _bindingInfo;
+		std::vector<OutputFile::RebaseInfo>& rebaseInfo = _rebaseInfo;
+
+		std::vector<int64_t>& threadedRebaseBindIndices = _threadedRebaseBindIndices;
+		threadedRebaseBindIndices.reserve(bindInfo.size() + rebaseInfo.size());
+
+		for (int64_t i = 0, e = rebaseInfo.size(); i != e; ++i)
+			threadedRebaseBindIndices.push_back(-i);
+
+		for (int64_t i = 0, e = bindInfo.size(); i != e; ++i)
+			threadedRebaseBindIndices.push_back(i + 1);
+
+		// Now sort the entries by address.
+		std::sort(threadedRebaseBindIndices.begin(), threadedRebaseBindIndices.end(),
+				  [&rebaseInfo, &bindInfo](int64_t indexA, int64_t indexB) {
+					  if (indexA == indexB)
+						  return false;
+					  uint64_t addressA = indexA <= 0 ? rebaseInfo[-indexA]._address : bindInfo[indexA - 1]._address;
+					  uint64_t addressB = indexB <= 0 ? rebaseInfo[-indexB]._address : bindInfo[indexB - 1]._address;
+					  assert(addressA != addressB);
+					  return addressA < addressB;
+				  });
+	}
+
+	// new rebasing/binding scheme requires making another pass at DATA
+	// segment and building linked list of rebase locations
+	if ( _options.useLinkedListBinding() && !_threadedRebaseBindIndices.empty() ) {
+		uint64_t curSegStart = 0;
+		uint64_t curSegEnd = 0;
+		uint32_t curSegIndex = 0;
+		ld::Internal::FinalSection* curSection = NULL;
+
+		const uint64_t deltaBits = 11;
+		const uint32_t fixupAlignment = _options.makeThreadedStartsSection() ? 4 : 8;
+		const bool allowThreadsToCrossPages = _options.makeThreadedStartsSection();
+		std::vector<uint64_t> threadStarts;
+
+		// Find the thread starts section
+		ld::Internal::FinalSection* threadStartsSection = nullptr;
+		uint64_t threadStartsReservedSpace = 0;
+		if ( _options.makeThreadedStartsSection() ) {
+			for (ld::Internal::FinalSection* sect : state.sections) {
+				if ( sect->type() == ld::Section::typeThreadStarts ) {
+					threadStartsSection = sect;
+					break;
+				}
+			}
+			assert(threadStartsSection);
+			threadStartsReservedSpace = (threadStartsSection->size - 4) / 4;
+			threadStarts.reserve(threadStartsReservedSpace);
+		}
+		
+		auto getAddress = [this](int64_t index) {
+			if (index <= 0)
+				return _rebaseInfo[-index]._address;
+			else
+				return _bindingInfo[index - 1]._address;
+		};
+
+		if ( (_bindingInfo.size() > 1)
+			&& ! findSegment(state, getAddress(_threadedRebaseBindIndices.front()),
+							 &curSegStart, &curSegEnd, &curSegIndex) )
+			throw "binding address outside range of any segment";
+		
+		auto applyBind = [&](int64_t currentIndex, int64_t nextIndex) {
+			uint64_t currentAddress = getAddress(currentIndex);
+			uint64_t nextAddress = getAddress(nextIndex);
+
+			// The very first pointer we see must be a new chain
+			if ( _options.makeThreadedStartsSection() && curSection == NULL )
+				threadStarts.push_back(currentAddress);
+
+			if ( (curSection == NULL)
+				|| (currentAddress < curSection->address)
+				|| (currentAddress >= curSection->address+curSection->size) ) {
+				for (ld::Internal::FinalSection* sect : state.sections) {
+					if ( (sect->address <= currentAddress)
+						&& (currentAddress < sect->address+sect->size) ) {
+						curSection = sect;
+						break;
+					}
+				}
+			}
+
+			bool makeChainToNextAddress = true;
+			if ( allowThreadsToCrossPages ) {
+				// Even if we allow threads to cross pages, we still need to have the same section.
+				if ( (nextAddress < curSection->address) || (nextAddress >= curSection->address+curSection->size) )
+					makeChainToNextAddress = false;
+			} else {
+				// If threads can't cross pages then make sure they are on the same page.
+				uint64_t currentPageIndex = ( currentAddress - curSegStart) / 4096;
+				uint64_t nextPageIndex = ( nextAddress - curSegStart) / 4096;
+				if ( currentPageIndex != nextPageIndex )
+					makeChainToNextAddress = false;
+			}
+
+			uint64_t delta = 0;
+			if (makeChainToNextAddress) {
+				delta = nextAddress - currentAddress;
+
+				// The value should already be aligned to 4 or 8, so make sure the low bits are zeroes
+				assert( (delta & (fixupAlignment - 1)) == 0 );
+				delta /= fixupAlignment;
+				if ( delta >= (1 << deltaBits) ) {
+					// Current and next are both in the same segment, so see if they are
+					// on the same page.  If so, patch current to point to next.
+					makeChainToNextAddress = false;
+				}
+			}
+
+			if (!makeChainToNextAddress) {
+				delta = 0;
+				if (_options.makeThreadedStartsSection())
+					threadStarts.push_back(nextAddress);
+			}
+
+			uint8_t* lastBindLocation = wholeBuffer + curSection->fileOffset + currentAddress - curSection->address;
+			switch ( _options.architecture() ) {
+				case CPU_TYPE_X86_64:
+				case CPU_TYPE_ARM64:
+					uint64_t value = 0;
+					if (currentIndex <= 0) {
+						// For rebases, bits [0..50] is the mh offset which is already set
+						// Bit 62 is a 0 to say this is a rebase
+						value = get64LE(lastBindLocation);
+#if SUPPORT_ARCH_arm64e
+						auto fixupOffset = (uintptr_t)(lastBindLocation - mhAddress);
+						auto it = _authenticatedFixupData.find(fixupOffset);
+						if (it != _authenticatedFixupData.end()) {
+							// For authenticated data, we zeroed out the location
+							assert(value == 0);
+							const auto &authData = it->second.first;
+							uint64_t accumulator = it->second.second;
+							assert(accumulator >= mhAddress);
+							accumulator -= mhAddress;
+
+							// Make sure the high bits aren't set.  The low 32-bits may
+							// be the target value.
+							assert((accumulator & 0xFFFFFFFF00000000ULL) == 0);
+							accumulator |= ((uint64_t)authData.discriminator) << 32;
+							accumulator |= ((uint64_t)authData.hasAddressDiversity) << 48;
+							accumulator |= ((uint64_t)authData.key) << 49;
+							// Set the high bit as we are authenticated
+							accumulator |= 1ULL << 63;
+
+							value = accumulator;
+						} else
+#endif
+						{
+							// Regular pointer which needs to fit in 51-bits of value.
+							// C++ RTTI uses the top bit, so we'll allow the whole top-byte
+							// and the bottom 43-bits with sign-extension to be fit in to 51-bits.
+							uint64_t top8Bits = value & 0xFF00000000000000ULL;
+							uint64_t bottom43Bits = value & 0x000007FFFFFFFFFFULL;
+							// Ensure that the sign-extended bottom 43-bits is equivalent in sign to the gap bits
+							assert( ((value & ~0xFF0003FFFFFFFFFF) == 0) || ((value & ~0xFF0003FFFFFFFFFF) == ~0xFF0003FFFFFFFFFF) );
+							value = ( top8Bits >> 13 ) | bottom43Bits;
+						}
+					} else {
+						// The ordinal in [0..15]
+						// Bit 62 is a 1 to say this is a bind
+						value = get64LE(lastBindLocation);
+#if SUPPORT_ARCH_arm64e
+						auto fixupOffset = (uintptr_t)(lastBindLocation - mhAddress);
+						auto it = _authenticatedFixupData.find(fixupOffset);
+						if (it != _authenticatedFixupData.end()) {
+							// For authenticated data, we zeroed out the location
+							assert(value == 0);
+							const auto &authData = it->second.first;
+							uint64_t accumulator = it->second.second;
+
+							// Make sure the high bits aren't set.  The low 32-bits may
+							// be the target value.
+							// Note, this doesn't work for binds to a weak def as we actually
+							// manage to resolve their address to an address in this binary so
+							// its not 0.
+							if (_bindingInfo[currentIndex - 1]._libraryOrdinal == BIND_SPECIAL_DYLIB_WEAK_LOOKUP)
+								accumulator = 0;
+							assert((accumulator & 0xFFFFFFFF00000000ULL) == 0);
+							accumulator |= ((uint64_t)authData.discriminator) << 32;
+							accumulator |= ((uint64_t)authData.hasAddressDiversity) << 48;
+							accumulator |= ((uint64_t)authData.key) << 49;
+							// Set the high bit as we are authenticated
+							accumulator |= 1ULL << 63;
+
+							value = accumulator;
+						} else
+#endif
+						{
+							// Regular pointer
+							// The current data is unused as we get a new address from the bind table.
+							// So zero it out to avoid the bits interfering with the authentication bits.
+							value = 0;
+						}
+						value &= 0xFFFFFFFFFFFF0000;
+						value |= _bindingInfo[currentIndex - 1]._threadedBindOrdinal;
+						value |= 1ULL << 62;
+					}
+
+					// The delta is bits [51..61]
+					value |= ( delta << 51 );
+					set64LE(lastBindLocation, value);
+					break;
+			}
+		};
+
+		// Loop over every value and see if it needs to point to its successor.
+		// Note that on every iteration, info[i] is already known to be in the current
+		// segment.
+		for (int64_t i = 0, e = _threadedRebaseBindIndices.size() - 1; i != e; ++i) {
+			int64_t currentIndex = _threadedRebaseBindIndices[i];
+			int64_t nextIndex = _threadedRebaseBindIndices[i + 1];
+			uint64_t nextAddress = getAddress(nextIndex);
+			if ( (nextAddress < curSegStart) || ( nextAddress >= curSegEnd) ) {
+				// The next pointer is in a new segment.
+				// This means current is the end of a chain, and we need to move
+				// the segment addresses on to be the next ones.
+				if ( ! findSegment(state, nextAddress, &curSegStart, &curSegEnd, &curSegIndex) )
+					throw "binding address outside range of any segment";
+			}
+			
+			applyBind(currentIndex, nextIndex);
+		}
+		
+		applyBind(_threadedRebaseBindIndices.back(), _threadedRebaseBindIndices.back());
+
+		if ( _options.makeThreadedStartsSection() ) {
+			if ( threadStarts.size() > threadStartsReservedSpace )
+				throw "overflow in thread starts section";
+
+			// Now write over this section content with the new array.
+			const ld::Atom *threadStartsAtom = nullptr;
+			for (const ld::Atom *atom : threadStartsSection->atoms) {
+				if ( (atom->contentType() == ld::Atom::typeSectionStart) || (atom->contentType() == ld::Atom::typeSectionEnd) ) {
+					assert(atom->size() == 0);
+					continue;
+				}
+				assert(threadStartsAtom == nullptr);
+				threadStartsAtom = atom;
+			}
+			uint64_t threadStartsFileOffset = threadStartsAtom->finalAddress() - threadStartsSection->address + threadStartsSection->fileOffset;
+			// Skip the header
+			threadStartsFileOffset += sizeof(uint32_t);
+			for (uint64_t threadStart : threadStarts) {
+				uint64_t offset = threadStart - mhAddress;
+				assert(offset < 0x100000000);
+				set32LE(&wholeBuffer[threadStartsFileOffset], offset);
+				threadStartsFileOffset += sizeof(uint32_t);
+			}
+		}
+	}
 }
 
 void OutputFile::computeContentUUID(ld::Internal& state, uint8_t* wholeBuffer)
@@ -2713,6 +3041,11 @@ void OutputFile::computeContentUUID(ld::Internal& state, uint8_t* wholeBuffer)
 			const char* lastSlash = strrchr(_options.outputFilePath(), '/');
 			if ( lastSlash !=  NULL ) {
 				CC_MD5_Update(&md5state, lastSlash, strlen(lastSlash));
+			}
+			// <rdar://problem/38679559> use train name when calculating a binary's UUID
+			const char* buildName = _options.buildContextName();
+			if ( buildName != NULL ) {
+				CC_MD5_Update(&md5state, buildName, strlen(buildName));
 			}
 			std::sort(excludeRegions.begin(), excludeRegions.end());
 			uint64_t checksumStart = 0;
@@ -3058,7 +3391,14 @@ void OutputFile::buildSymbolTable(ld::Internal& state)
 				case ld::Atom::scopeLinkageUnit:
 					if ( _options.outputKind() == Options::kObjectFile ) {
 						if ( _options.keepPrivateExterns() ) {
-							_exportedAtoms.push_back(atom);
+							if ( atom->symbolTableInclusion() == ld::Atom::symbolTableInWithRandomAutoStripLabel ) {
+								// <rdar://problem/42150005> ld -r should not promote static 'l' labels to hidden
+								(const_cast<ld::Atom*>(atom))->setScope(ld::Atom::scopeTranslationUnit);
+								_localAtoms.push_back(atom);
+							}
+							else {
+								_exportedAtoms.push_back(atom);
+							}
 						}
 						else if ( _options.keepLocalSymbol(atom->name()) ) {
 							_localAtoms.push_back(atom);
@@ -3073,7 +3413,7 @@ void OutputFile::buildSymbolTable(ld::Internal& state)
 							_localAtoms.push_back(atom);
 						// <rdar://problem/5804214> ld should never have a symbol in the non-lazy indirect symbol table with index 0
 						// this works by making __mh_execute_header be a local symbol which takes symbol index 0
-						else if ( (atom->symbolTableInclusion() == ld::Atom::symbolTableInAndNeverStrip) && !_options.makeCompressedDyldInfo() )
+						else if ( (atom->symbolTableInclusion() == ld::Atom::symbolTableInAndNeverStrip) && !_options.makeCompressedDyldInfo() && !_options.makeThreadedStartsSection() )
 							_localAtoms.push_back(atom);
 						else
 							(const_cast<ld::Atom*>(atom))->setSymbolTableInclusion(ld::Atom::symbolTableNotIn);
@@ -3180,6 +3520,10 @@ void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 				_externalRelocsAtom = new ExternalRelocationsAtom<x86>(_options, state, *this);
 				externalRelocationsSection = state.addAtom(*_externalRelocsAtom);
 			}
+			if ( _hasDataInCodeInfo ) {
+				_dataInCodeAtom = new DataInCodeAtom<x86_64>(_options, state, *this);
+				dataInCodeSection = state.addAtom(*_dataInCodeAtom);
+			}
 			if ( _hasSymbolTable ) {
 				_indirectSymbolTableAtom = new IndirectSymbolTableAtom<x86>(_options, state, *this);
 				indirectSymbolTableSection = state.addAtom(*_indirectSymbolTableAtom);
@@ -3199,6 +3543,10 @@ void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 			if ( _hasExternalRelocations ) {
 				_externalRelocsAtom = new ExternalRelocationsAtom<x86_64>(_options, state, *this);
 				externalRelocationsSection = state.addAtom(*_externalRelocsAtom);
+			}
+			if ( _hasDataInCodeInfo ) {
+				_dataInCodeAtom = new DataInCodeAtom<x86_64>(_options, state, *this);
+				dataInCodeSection = state.addAtom(*_dataInCodeAtom);
 			}
 			if ( _hasSymbolTable ) {
 				_indirectSymbolTableAtom = new IndirectSymbolTableAtom<x86_64>(_options, state, *this);
@@ -3220,6 +3568,10 @@ void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 				_externalRelocsAtom = new ExternalRelocationsAtom<arm>(_options, state, *this);
 				externalRelocationsSection = state.addAtom(*_externalRelocsAtom);
 			}
+			if ( _hasDataInCodeInfo ) {
+				_dataInCodeAtom = new DataInCodeAtom<x86_64>(_options, state, *this);
+				dataInCodeSection = state.addAtom(*_dataInCodeAtom);
+			}
 			if ( _hasSymbolTable ) {
 				_indirectSymbolTableAtom = new IndirectSymbolTableAtom<arm>(_options, state, *this);
 				indirectSymbolTableSection = state.addAtom(*_indirectSymbolTableAtom);
@@ -3239,6 +3591,10 @@ void OutputFile::addPreloadLinkEdit(ld::Internal& state)
 			if ( _hasExternalRelocations ) {
 				_externalRelocsAtom = new ExternalRelocationsAtom<arm64>(_options, state, *this);
 				externalRelocationsSection = state.addAtom(*_externalRelocsAtom);
+			}
+			if ( _hasDataInCodeInfo ) {
+				_dataInCodeAtom = new DataInCodeAtom<x86_64>(_options, state, *this);
+				dataInCodeSection = state.addAtom(*_dataInCodeAtom);
 			}
 			if ( _hasSymbolTable ) {
 				_indirectSymbolTableAtom = new IndirectSymbolTableAtom<arm64>(_options, state, *this);
@@ -3680,66 +4036,9 @@ int OutputFile::compressedOrdinalForAtom(const ld::Atom* target)
 }
 
 
-bool OutputFile::isPcRelStore(ld::Fixup::Kind kind)
+bool OutputFile::isPcRelStore(const ld::Fixup* fixup)
 {
-	switch ( kind ) { 
-		case ld::Fixup::kindStoreX86BranchPCRel8:
-		case ld::Fixup::kindStoreX86BranchPCRel32:
-		case ld::Fixup::kindStoreX86PCRel8:
-		case ld::Fixup::kindStoreX86PCRel16:
-		case ld::Fixup::kindStoreX86PCRel32:
-		case ld::Fixup::kindStoreX86PCRel32_1:
-		case ld::Fixup::kindStoreX86PCRel32_2:
-		case ld::Fixup::kindStoreX86PCRel32_4:
-		case ld::Fixup::kindStoreX86PCRel32GOTLoad:
-		case ld::Fixup::kindStoreX86PCRel32GOTLoadNowLEA:
-		case ld::Fixup::kindStoreX86PCRel32GOT:
-		case ld::Fixup::kindStoreX86PCRel32TLVLoad:
-		case ld::Fixup::kindStoreX86PCRel32TLVLoadNowLEA:
-		case ld::Fixup::kindStoreARMBranch24:
-		case ld::Fixup::kindStoreThumbBranch22:
-		case ld::Fixup::kindStoreARMLoad12:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoad:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoadNowLEA:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32TLVLoad:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32TLVLoadNowLEA:
-		case ld::Fixup::kindStoreTargetAddressARMBranch24:
-		case ld::Fixup::kindStoreTargetAddressThumbBranch22:
-		case ld::Fixup::kindStoreTargetAddressARMLoad12:
-#if SUPPORT_ARCH_arm64
-		case ld::Fixup::kindStoreARM64Page21:
-		case ld::Fixup::kindStoreARM64PageOff12:
-		case ld::Fixup::kindStoreARM64GOTLoadPage21:
-		case ld::Fixup::kindStoreARM64GOTLoadPageOff12:
-		case ld::Fixup::kindStoreARM64GOTLeaPage21:
-		case ld::Fixup::kindStoreARM64GOTLeaPageOff12:
-		case ld::Fixup::kindStoreARM64TLVPLoadPage21:
-		case ld::Fixup::kindStoreARM64TLVPLoadPageOff12:
-		case ld::Fixup::kindStoreARM64TLVPLoadNowLeaPage21:
-		case ld::Fixup::kindStoreARM64TLVPLoadNowLeaPageOff12:
-		case ld::Fixup::kindStoreARM64PCRelToGOT:
-		case ld::Fixup::kindStoreTargetAddressARM64Page21:
-		case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
-		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
-		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
-		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
-		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPageOff12:
-		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPage21:
-		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPageOff12:
-		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPage21:
-		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPageOff12:
-#endif
-			return true;
-		case ld::Fixup::kindStoreTargetAddressX86BranchPCRel32:
-#if SUPPORT_ARCH_arm64
-		case ld::Fixup::kindStoreTargetAddressARM64Branch26:
-#endif
-			return (_options.outputKind() != Options::kKextBundle);
-		default:
-			break;
-	}
-	return false;
+	return fixup->isPcRelStore(_options.outputKind() == Options::kKextBundle);
 }
 
 bool OutputFile::isStore(ld::Fixup::Kind kind)
@@ -3757,6 +4056,9 @@ bool OutputFile::isStore(ld::Fixup::Kind kind)
 		case ld::Fixup::kindSubtractAddend:
 		case ld::Fixup::kindSetTargetImageOffset:
 		case ld::Fixup::kindSetTargetSectionOffset:
+#if SUPPORT_ARCH_arm64e
+		case ld::Fixup::kindSetAuthData:
+#endif
 			return false;
 		default:
 			break;
@@ -3765,52 +4067,9 @@ bool OutputFile::isStore(ld::Fixup::Kind kind)
 }
 
 
-bool OutputFile::setsTarget(ld::Fixup::Kind kind)
+bool OutputFile::setsTarget(const ld::Fixup &fixup)
 {
-	switch ( kind ) { 
-		case ld::Fixup::kindSetTargetAddress:
-		case ld::Fixup::kindLazyTarget:
-		case ld::Fixup::kindStoreTargetAddressLittleEndian32:
-		case ld::Fixup::kindStoreTargetAddressLittleEndian64:
-		case ld::Fixup::kindStoreTargetAddressBigEndian32:
-		case ld::Fixup::kindStoreTargetAddressBigEndian64:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32:
-		case ld::Fixup::kindStoreTargetAddressX86BranchPCRel32:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoad:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoadNowLEA:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32TLVLoad:
-		case ld::Fixup::kindStoreTargetAddressX86PCRel32TLVLoadNowLEA:
-		case ld::Fixup::kindStoreTargetAddressX86Abs32TLVLoad:
-		case ld::Fixup::kindStoreTargetAddressARMBranch24:
-		case ld::Fixup::kindStoreTargetAddressThumbBranch22:
-		case ld::Fixup::kindStoreTargetAddressARMLoad12:
-#if SUPPORT_ARCH_arm64
-		case ld::Fixup::kindStoreTargetAddressARM64Branch26:
-		case ld::Fixup::kindStoreTargetAddressARM64Page21:
-		case ld::Fixup::kindStoreTargetAddressARM64PageOff12:
-		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPage21:
-		case ld::Fixup::kindStoreTargetAddressARM64GOTLoadPageOff12:
-		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPage21:
-		case ld::Fixup::kindStoreTargetAddressARM64GOTLeaPageOff12:
-		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPage21:
-		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadPageOff12:
-		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPage21:
-		case ld::Fixup::kindStoreTargetAddressARM64TLVPLoadNowLeaPageOff12:
-#endif
-			return true;
-		case ld::Fixup::kindStoreX86DtraceCallSiteNop:
-		case ld::Fixup::kindStoreX86DtraceIsEnableSiteClear:
-		case ld::Fixup::kindStoreARMDtraceCallSiteNop:
-		case ld::Fixup::kindStoreARMDtraceIsEnableSiteClear:
-		case ld::Fixup::kindStoreARM64DtraceCallSiteNop:
-		case ld::Fixup::kindStoreARM64DtraceIsEnableSiteClear:
-		case ld::Fixup::kindStoreThumbDtraceCallSiteNop:
-		case ld::Fixup::kindStoreThumbDtraceIsEnableSiteClear:
-			return (_options.outputKind() == Options::kObjectFile);
-		default:
-			break;
-	}
-	return false;
+	return fixup.setsTarget(_options.outputKind() == Options::kObjectFile);
 }
 
 bool OutputFile::isPointerToTarget(ld::Fixup::Kind kind)
@@ -3819,6 +4078,9 @@ bool OutputFile::isPointerToTarget(ld::Fixup::Kind kind)
 		case ld::Fixup::kindSetTargetAddress:
 		case ld::Fixup::kindStoreTargetAddressLittleEndian32:
 		case ld::Fixup::kindStoreTargetAddressLittleEndian64:
+#if SUPPORT_ARCH_arm64e
+		case ld::Fixup::kindStoreTargetAddressLittleEndianAuth64:
+#endif
 		case ld::Fixup::kindStoreTargetAddressBigEndian32:
 		case ld::Fixup::kindStoreTargetAddressBigEndian64:
 		case ld::Fixup::kindLazyTarget:
@@ -3900,7 +4162,10 @@ void OutputFile::generateLinkEditInfo(ld::Internal& state)
 				if ( _options.makeCompressedDyldInfo() ) {
 					uint8_t wtype = BIND_TYPE_OVERRIDE_OF_WEAKDEF_IN_DYLIB;
 					bool nonWeakDef = (atom->combine() == ld::Atom::combineNever);
-					_weakBindingInfo.push_back(BindingInfo(wtype, atom->name(), nonWeakDef, atom->finalAddress(), 0));
+					// Don't push weak binding info for threaded bind.
+					// Instead we use a special ordinal in the regular bind info
+					if ( !_options.useLinkedListBinding() )
+						_weakBindingInfo.push_back(BindingInfo(wtype, atom->name(), nonWeakDef, atom->finalAddress(), 0));
 				}
 				this->overridesWeakExternalSymbols = true;
 				if ( _options.warnWeakExports()	)
@@ -3915,6 +4180,9 @@ void OutputFile::generateLinkEditInfo(ld::Internal& state)
 			const ld::Atom*		minusTarget = NULL;
 			uint64_t			targetAddend = 0;
 			uint64_t			minusTargetAddend = 0;
+#if SUPPORT_ARCH_arm64e
+			ld::Fixup*			fixupWithAuthData = NULL;
+#endif
 			for (ld::Fixup::iterator fit = atom->fixupsBegin(); fit != atom->fixupsEnd(); ++fit) {
 				if ( fit->firstInCluster() ) {
 					fixupWithTarget = NULL;
@@ -3925,7 +4193,7 @@ void OutputFile::generateLinkEditInfo(ld::Internal& state)
 					targetAddend = 0;
 					minusTargetAddend = 0;
 				}
-				if ( this->setsTarget(fit->kind) ) {
+				if ( this->setsTarget(*fit) ) {
 					switch ( fit->binding ) {
 						case ld::Fixup::bindingNone:
 						case ld::Fixup::bindingByNameUnbound:
@@ -3976,22 +4244,33 @@ void OutputFile::generateLinkEditInfo(ld::Internal& state)
 					case ld::Fixup::kindDataInCodeEnd:
 						hasDataInCode = true;
 						break;
+#if SUPPORT_ARCH_arm64e
+					case ld::Fixup::kindSetAuthData:
+						fixupWithAuthData = fit;
+						break;
+#endif
 					default:
                         break;    
 				}
-				if ( this->isStore(fit->kind) ) {
+				if ( fit->isStore() ) {
 					fixupWithStore = fit;
 				}
 				if ( fit->lastInCluster() ) {
 					if ( (fixupWithStore != NULL) && (target != NULL) ) {
 						if ( _options.outputKind() == Options::kObjectFile ) {
 							this->addSectionRelocs(state, sect, atom, fixupWithTarget, fixupWithMinusTarget, fixupWithAddend, fixupWithStore,
+#if SUPPORT_ARCH_arm64e
+												   fixupWithAuthData,
+#endif
 													target, minusTarget, targetAddend, minusTargetAddend);
 						}
 						else {
 							if ( _options.makeCompressedDyldInfo() ) {
 								this->addDyldInfo(state, sect, atom, fixupWithTarget, fixupWithMinusTarget, fixupWithStore,
-													target, minusTarget, targetAddend, minusTargetAddend);
+												  target, minusTarget, targetAddend, minusTargetAddend);
+							} else if ( _options.makeThreadedStartsSection() ) {
+								this->addThreadedRebaseInfo(state, sect, atom, fixupWithTarget, fixupWithMinusTarget, fixupWithStore,
+															target, minusTarget, targetAddend, minusTargetAddend);
 							}
 							else { 
 								this->addClassicRelocs(state, sect, atom, fixupWithTarget, fixupWithMinusTarget, fixupWithStore,
@@ -4022,7 +4301,7 @@ void OutputFile::noteTextReloc(const ld::Atom* atom, const ld::Atom* target)
 			warning("text reloc in %s to %s", atom->name(), target->name());
 	} 
 	else if ( _options.positionIndependentExecutable() && (_options.outputKind() == Options::kDynamicExecutable) 
-		&& ((_options.iOSVersionMin() >= ld::iOS_4_3) || (_options.macosxVersionMin() >= ld::mac10_7)) ) {
+			 && _options.platforms().minOS(ld::version2010Fall)) {
 		if ( ! this->pieDisabled ) {
 			switch ( _options.architecture()) {
 #if SUPPORT_ARCH_arm64
@@ -4063,7 +4342,7 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 		return;
 
 	// no need to rebase or bind PCRel stores
-	if ( this->isPcRelStore(fixupWithStore->kind) ) {
+	if ( this->isPcRelStore(fixupWithStore) ) {
 		// as long as target is in same linkage unit
 		if ( (target == NULL) || (target->definition() != ld::Atom::definitionProxy) ) {
 			// make sure target is not global and weak
@@ -4242,7 +4521,21 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 				}
 			}
 		}
-	} 
+	}
+
+	// Find the ordinal for the bind target
+	int compressedOrdinal = 0;
+	if ( needsBinding || needsLazyBinding || needsWeakBinding ) {
+		compressedOrdinal = this->compressedOrdinalForAtom(target);
+	}
+	// Linked list binding puts the weak binds in to the regular binds but with a special ordinal.
+	if ( needsWeakBinding && _options.useLinkedListBinding() ) {
+		assert(!needsLazyBinding);
+		needsWeakBinding = false;
+		needsBinding = true;
+		needsRebase = false;
+		compressedOrdinal = BIND_SPECIAL_DYLIB_WEAK_LOOKUP;
+	}
 
 	// record dyld info for this cluster
 	if ( needsRebase ) {
@@ -4288,9 +4581,11 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 					// do nothing
 					break;
 			}
+			_hasUnalignedFixup = true;
 		}
 		_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
 	}
+
 	if ( needsBinding ) {
 		if ( inReadOnlySeg ) {
 			noteTextReloc(atom, target);
@@ -4310,17 +4605,122 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 					// do nothing
 					break;
 			}
+			_hasUnalignedFixup = true;
 		}
-		_bindingInfo.push_back(BindingInfo(type, this->compressedOrdinalForAtom(target), target->name(), weak_import, address, addend));
+		_bindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
 	}
 	if ( needsLazyBinding ) {
 		if ( _options.bindAtLoad() )
-			_bindingInfo.push_back(BindingInfo(type, this->compressedOrdinalForAtom(target), target->name(), weak_import, address, addend));
+			_bindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
 		else
-			_lazyBindingInfo.push_back(BindingInfo(type, this->compressedOrdinalForAtom(target), target->name(), weak_import, address, addend));
+			_lazyBindingInfo.push_back(BindingInfo(type, compressedOrdinal, target->name(), weak_import, address, addend));
 	}
 	if ( needsWeakBinding )
 		_weakBindingInfo.push_back(BindingInfo(type, 0, target->name(), false, address, addend));
+}
+
+void OutputFile::addThreadedRebaseInfo(ld::Internal& state,  ld::Internal::FinalSection* sect, const ld::Atom* atom,
+									   ld::Fixup* fixupWithTarget, ld::Fixup* fixupWithMinusTarget, ld::Fixup* fixupWithStore,
+									   const ld::Atom* target, const ld::Atom* minusTarget,
+									   uint64_t targetAddend, uint64_t minusTargetAddend)
+{
+	if ( sect->isSectionHidden() )
+		return;
+
+	// no need to rebase or bind PCRel stores
+	if ( this->isPcRelStore(fixupWithStore) ) {
+		// as long as target is in same linkage unit
+		if ( (target == NULL) || (target->definition() != ld::Atom::definitionProxy) ) {
+			// make sure target is not global and weak
+			if ( (target->scope() == ld::Atom::scopeGlobal) && (target->combine() == ld::Atom::combineByName) && (target->definition() == ld::Atom::definitionRegular)) {
+				if ( (atom->section().type() == ld::Section::typeCFI)
+					|| (atom->section().type() == ld::Section::typeDtraceDOF)
+					|| (atom->section().type() == ld::Section::typeUnwindInfo) ) {
+					// ok for __eh_frame and __uwind_info to use pointer diffs to global weak symbols
+					return;
+				}
+				// <rdar://problem/13700961> spurious warning when weak function has reference to itself
+				if ( fixupWithTarget->binding == ld::Fixup::bindingDirectlyBound ) {
+					// ok to ignore pc-rel references within a weak function to itself
+					return;
+				}
+				// Have direct reference to weak-global.  This should be an indrect reference
+				const char* demangledName = strdup(_options.demangleSymbol(atom->name()));
+				warning("direct access in function '%s' from file '%s' to global weak symbol '%s' from file '%s' means the weak symbol cannot be overridden at runtime. "
+						"This was likely caused by different translation units being compiled with different visibility settings.",
+						  demangledName, atom->safeFilePath(), _options.demangleSymbol(target->name()), target->safeFilePath());
+			}
+			return;
+		}
+	}
+
+	// no need to rebase or bind PIC internal pointer diff
+	if ( minusTarget != NULL ) {
+		// with pointer diffs, both need to be in same linkage unit
+		assert(minusTarget->definition() != ld::Atom::definitionProxy);
+		assert(target != NULL);
+		assert(target->definition() != ld::Atom::definitionProxy);
+		if ( target == minusTarget ) {
+			// This is a compile time constant and could have been optimized away by compiler
+			return;
+		}
+
+		// check if target of pointer-diff is global and weak
+		if ( (target->scope() == ld::Atom::scopeGlobal) && (target->combine() == ld::Atom::combineByName) && (target->definition() == ld::Atom::definitionRegular) ) {
+			if ( (atom->section().type() == ld::Section::typeCFI)
+				|| (atom->section().type() == ld::Section::typeDtraceDOF)
+				|| (atom->section().type() == ld::Section::typeUnwindInfo) ) {
+				// ok for __eh_frame and __uwind_info to use pointer diffs to global weak symbols
+				return;
+			}
+			// Have direct reference to weak-global.  This should be an indrect reference
+			const char* demangledName = strdup(_options.demangleSymbol(atom->name()));
+			warning("direct access in function '%s' from file '%s' to global weak symbol '%s' from file '%s' means the weak symbol cannot be overridden at runtime. "
+					"This was likely caused by different translation units being compiled with different visibility settings.",
+					  demangledName, atom->safeFilePath(), _options.demangleSymbol(target->name()), target->safeFilePath());
+		}
+		return;
+	}
+
+	// no need to rebase or bind an atom's references to itself if the output is not slidable
+	if ( (atom == target) && !_options.outputSlidable() )
+		return;
+
+	// cluster has no target, so needs no rebasing or binding
+	if ( target == NULL )
+		return;
+
+	const uint64_t minAlignment = 4;
+	bool inReadOnlySeg = ( strcmp(sect->segmentName(), "__TEXT") == 0 );
+	bool needsRebase = false;
+
+	uint8_t	rebaseType = REBASE_TYPE_POINTER;
+	uint64_t address =  atom->finalAddress() + fixupWithTarget->offsetInAtom;
+
+	// special case lazy pointers
+	switch ( target->definition() ) {
+		case ld::Atom::definitionProxy:
+			break;
+		case ld::Atom::definitionRegular:
+		case ld::Atom::definitionTentative:
+			needsRebase = true;
+			break;
+		case ld::Atom::definitionAbsolute:
+			break;
+	}
+
+	// record dyld info for this cluster
+	if ( needsRebase ) {
+		if ( inReadOnlySeg ) {
+			noteTextReloc(atom, target);
+			sect->hasLocalRelocs = true;  // so dyld knows to change permissions on __TEXT segment
+		}
+		if ( ((address & (minAlignment-1)) != 0) ) {
+			throwf("pointer not aligned to at least 4-bytes at address 0x%llX (%s + %lld from %s)",
+				   address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
+		}
+		_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
+	}
 }
 
 
@@ -4350,7 +4750,7 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 	}
 	
 	// no need to rebase or bind PCRel stores
-	if ( this->isPcRelStore(fixupWithStore->kind) ) {
+	if ( this->isPcRelStore(fixupWithStore) ) {
 		// as long as target is in same linkage unit
 		if ( (target == NULL) || (target->definition() != ld::Atom::definitionProxy) )
 			return;
@@ -4400,6 +4800,9 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 		case ld::Fixup::kindStoreBigEndian64:
 		case ld::Fixup::kindStoreTargetAddressLittleEndian32:
 		case ld::Fixup::kindStoreTargetAddressLittleEndian64:
+#if SUPPORT_ARCH_arm64e
+		case ld::Fixup::kindStoreTargetAddressLittleEndianAuth64:
+#endif
 		case ld::Fixup::kindStoreTargetAddressBigEndian32:
 		case ld::Fixup::kindStoreTargetAddressBigEndian64:
 			// is pointer 
@@ -4490,6 +4893,24 @@ void OutputFile::addClassicRelocs(ld::Internal& state, ld::Internal::FinalSectio
 				throwf("no supported runtime hi16 relocation in %s from %s to %s", atom->name(), atom->safeFilePath(), target->name());
 			break;
 
+#if SUPPORT_ARCH_arm64e
+		case ld::Fixup::kindStoreLittleEndianAuth64:
+			if ( _options.outputKind() == Options::kKextBundle ) {
+				if ( target->definition() == ld::Atom::definitionProxy ) {
+					_externalRelocsAtom->addExternalPointerReloc(relocAddress, target);
+					sect->hasExternalRelocs = true;
+					fixupWithTarget->contentAddendOnly = true;
+				}
+				else {
+					_localRelocsAtom->addPointerReloc(relocAddress, target->machoSection());
+					sect->hasLocalRelocs = true;
+				}
+			}
+			else {
+				throwf("authenticated pointer in atom %s from %s to %s is not supported", atom->name(), atom->safeFilePath(), target->name());
+			}
+			break;
+#endif
 		default:
 			break;
 	}
@@ -4561,7 +4982,10 @@ bool OutputFile::useSectionRelocAddend(ld::Fixup* fixupWithTarget)
 
 void OutputFile::addSectionRelocs(ld::Internal& state, ld::Internal::FinalSection* sect, const ld::Atom* atom, 
 								ld::Fixup* fixupWithTarget, ld::Fixup* fixupWithMinusTarget,  
-								ld::Fixup* fixupWithAddend, ld::Fixup* fixupWithStore, 
+								ld::Fixup* fixupWithAddend, ld::Fixup* fixupWithStore,
+#if SUPPORT_ARCH_arm64e
+								  ld::Fixup* fixupWithAuthData,
+#endif
 								const ld::Atom* target, const ld::Atom* minusTarget, 
 								uint64_t targetAddend, uint64_t minusTargetAddend)
 {
@@ -4611,7 +5035,7 @@ void OutputFile::addSectionRelocs(ld::Internal& state, ld::Internal::FinalSectio
 				fixupWithTarget->contentAddendOnly = true;
 				fixupWithStore->contentAddendOnly = true;
 			}
-			else if ( isPcRelStore(fixupWithStore->kind) ) {
+			else if ( isPcRelStore(fixupWithStore) ) {
 				fixupWithTarget->contentDetlaToAddendOnly = true;
 				fixupWithStore->contentDetlaToAddendOnly = true;
 			}
@@ -4625,6 +5049,9 @@ void OutputFile::addSectionRelocs(ld::Internal& state, ld::Internal::FinalSectio
 	if ( fixupWithStore != NULL ) {
 		_sectionsRelocationsAtom->addSectionReloc(sect, fixupWithStore->kind, atom, fixupWithStore->offsetInAtom, 
 													targetUsesExternalReloc, minusTargetUsesExternalReloc,
+#if SUPPORT_ARCH_arm64e
+												  fixupWithAuthData,
+#endif
 													target, targetAddend, minusTarget, minusTargetAddend);
 	}
 
@@ -4651,7 +5078,7 @@ void OutputFile::makeSplitSegInfo(ld::Internal& state)
 			for (ld::Fixup::iterator fit = atom->fixupsBegin(), end=atom->fixupsEnd(); fit != end; ++fit) {
 				if ( fit->firstInCluster() ) 
 					target = NULL;
-				if ( this->setsTarget(fit->kind) ) {
+				if ( this->setsTarget(*fit) ) {
 					accumulator = addressOf(state, fit, &target);
 					thumbTarget = targetIsThumb(state, fit);
 					if ( thumbTarget ) 
@@ -4726,6 +5153,13 @@ void OutputFile::makeSplitSegInfo(ld::Internal& state)
 						assert(target != NULL);
 						hadSubtract = true;
 						break;
+#if SUPPORT_ARCH_arm64e
+					case ld::Fixup::kindStoreLittleEndianAuth64:
+					case ld::Fixup::kindStoreTargetAddressLittleEndianAuth64:
+					case ld::Fixup::kindSetAuthData:
+						throw "authenticated pointers are not supported in split seg v1";
+						break;
+#endif
 					default:
 						break;
 				}
@@ -4770,7 +5204,7 @@ void OutputFile::makeSplitSegInfoV2(ld::Internal& state)
 					toSectionIndex = 255;
 					fromOffset = atom->finalAddress() + fit->offsetInAtom - sect->address;
 				}
-				if ( this->setsTarget(fit->kind) ) {
+				if ( this->setsTarget(*fit) ) {
 					accumulator = addressAndTarget(state, fit, &target);
 					thumbTarget = targetIsThumb(state, fit);
 					if ( thumbTarget ) 
@@ -4812,9 +5246,19 @@ void OutputFile::makeSplitSegInfoV2(ld::Internal& state)
 					case ld::Fixup::kindStoreTargetAddressLittleEndian64:
 						if ( hadSubtract )
 							kind = DYLD_CACHE_ADJ_V2_DELTA_64;
+						else if ( _options.useLinkedListBinding() && !this->_hasUnalignedFixup )
+							kind = DYLD_CACHE_ADJ_V2_THREADED_POINTER_64;
 						else
 							kind = DYLD_CACHE_ADJ_V2_POINTER_64;
 						break;
+#if SUPPORT_ARCH_arm64e
+					case ld::Fixup::kindStoreLittleEndianAuth64:
+					case ld::Fixup::kindStoreTargetAddressLittleEndianAuth64:
+						// FIXME: Do we need to handle subtracts on authenticated pointers?
+						assert(!hadSubtract);
+						kind = DYLD_CACHE_ADJ_V2_THREADED_POINTER_64;
+						break;
+#endif
 					case ld::Fixup::kindStoreX86PCRel32:
 					case ld::Fixup::kindStoreX86PCRel32_1:
 					case ld::Fixup::kindStoreX86PCRel32_2:

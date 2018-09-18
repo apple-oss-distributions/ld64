@@ -35,7 +35,7 @@ run: all
 all:
 	${CXX} ${CXXFLAGS} -flto foo.cxx -c -o foo.o
 	${CXX} ${CXXFLAGS} -flto bar.cxx -c -o bar.o
-	${CC} ${CCFLAGS} foo.o bar.o -dynamiclib -o libfoo.dylib -exported_symbols_list foo.exp
+	${CXX} ${CXXFLAGS} foo.o bar.o -dynamiclib -o libfoo.dylib -exported_symbols_list foo.exp
 	nm -m libfoo.dylib | grep "weak external" | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} libfoo.dylib
 	

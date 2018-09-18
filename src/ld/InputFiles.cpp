@@ -217,10 +217,11 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	// handle inlined framework first.
 	if (info.isInlined) {
 		auto interface = _options.findTAPIFile(info.path);
-		auto file = textstub::dylib::parse(info.path, std::move(interface), info.modTime, info.ordinal, _options, indirectDylib);
-		assert(file && "could not locate the inlined file");
+		if (!interface)
+			throwf("could not find inlined dylib file: %s", info.path);
+		auto file = textstub::dylib::parse(info.path, interface, info.modTime, info.ordinal, _options, indirectDylib);
 		if (!file)
-			throwf("could not parse inline dylib file: %s(%s)", interface->getInstallName().c_str(), info.path);
+			throwf("could not parse inlined dylib file: %s(%s)", interface->getInstallName().c_str(), info.path);
 		return file;
 	}
 	// map in whole file
@@ -247,11 +248,19 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 		const struct fat_arch* archs = (struct fat_arch*)(p + sizeof(struct fat_header));
 		bool sliceFound = false;
 		sliceCount = OSSwapBigToHostInt32(fh->nfat_arch);
-		if ( _options.preferSubArchitecture() ) {
-			// first try to find a slice that match cpu-type and cpu-sub-type
+		// first try to find a slice that match cpu-type and cpu-sub-type
+		for (uint32_t i=0; i < sliceCount; ++i) {
+			if ( (OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)_options.architecture())
+			  && ((OSSwapBigToHostInt32(archs[i].cpusubtype) & ~CPU_SUBTYPE_MASK) == (uint32_t)_options.subArchitecture()) ) {
+				sliceToUse = i;
+				sliceFound = true;
+				break;
+			}
+		}
+		if ( !sliceFound && _options.allowSubArchitectureMismatches() ) {
+			// look for any slice that matches just cpu-type
 			for (uint32_t i=0; i < sliceCount; ++i) {
-				if ( (OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)_options.architecture())
-				  && (OSSwapBigToHostInt32(archs[i].cpusubtype) == (uint32_t)_options.subArchitecture()) ) {
+				if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)_options.architecture() ) {
 					sliceToUse = i;
 					sliceFound = true;
 					break;
@@ -259,9 +268,10 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 			}
 		}
 		if ( !sliceFound ) {
-			// look for any slice that matches just cpu-type
-			for (uint32_t i=0; i < sliceCount; ++i) {
-				if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)_options.architecture() ) {
+			// Look for a fallback slice.
+			for (uint32_t i = 0; i < sliceCount; ++i) {
+				if ( OSSwapBigToHostInt32(archs[i].cputype) == (uint32_t)_options.fallbackArchitecture() &&
+					OSSwapBigToHostInt32(archs[i].cpusubtype) == (uint32_t)_options.fallbackSubArchitecture() ) {
 					sliceToUse = i;
 					sliceFound = true;
 					break;
@@ -313,9 +323,11 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	objOpts.armUsesZeroCostExceptions = _options.armUsesZeroCostExceptions();
 	objOpts.simulator			= _options.targetIOSSimulator();
 	objOpts.ignoreMismatchPlatform = ((_options.outputKind() == Options::kPreload) || (_options.outputKind() == Options::kStaticExecutable));
+#if SUPPORT_ARCH_arm64e
+	objOpts.supportsAuthenticatedPointers = _options.supportsAuthenticatedPointers();
+#endif
 	objOpts.subType				= _options.subArchitecture();
-	objOpts.platform			= _options.platform();
-	objOpts.minOSVersion		= _options.minOSversion();
+	objOpts.platforms			= _options.platforms();
 	objOpts.srcKind				= ld::relocatable::File::kSourceObj;
 	objOpts.treateBitcodeAsData	= _options.bitcodeKind() == Options::kBitcodeAsData;
 	objOpts.usingBitcode		= _options.bundleBitcode();
@@ -427,7 +439,7 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	}
 	else {
 		if ( isFatFile )
-			throwf("file is universal (%u slices) but does not contain a(n) %s slice: %s", sliceCount, _options.architectureName(), info.path);
+			throwf("file is universal (%u slices) but does not contain the %s architecture: %s", sliceCount, _options.architectureName(), info.path);
 		else
 			throwf("file was built for %s which is not the architecture being linked (%s): %s", fileArch(p, len), _options.architectureName(), info.path);
 	}
@@ -659,7 +671,8 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
  				}
  			}
 			catch (const char* msg) {
-				warning("Auto-Linking %s", msg);
+				// <rdar://problem/40829444> only warn about missing auto-linked framework if some missing symbol error happens later
+				state.missingLinkerOptionFrameworks.insert(frameworkName);
 			}
 			state.linkerOptionFrameworks.insert(frameworkName);
  		}
@@ -701,7 +714,8 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
  				}
  			}
 			catch (const char* msg) {
-				warning("Auto-Linking %s", msg);
+				// <rdar://problem/40829444> only warn about missing auto-linked library if some missing symbol error happens later
+				state.missingLinkerOptionLibraries.insert(libName);
 			}
 			state.linkerOptionLibraries.insert(libName);
 		}
@@ -861,9 +875,10 @@ void InputFiles::inferArchitecture(Options& opts, const char** archName)
 				if ( amount >= readAmount ) {
 					cpu_type_t type;
 					cpu_subtype_t subtype;
-					Options::Platform platform;
-					if ( mach_o::relocatable::isObjectFile(buffer, &type, &subtype, &platform) ) {
-						opts.setArchitecture(type, subtype, platform);
+					ld::Platform platform;
+					uint32_t	minOsVersion;
+					if ( mach_o::relocatable::isObjectFile(buffer, &type, &subtype, &platform, &minOsVersion) ) {
+						opts.setArchitecture(type, subtype, platform, minOsVersion);
 						*archName = opts.architectureName();
 						return;
 					}
@@ -875,11 +890,11 @@ void InputFiles::inferArchitecture(Options& opts, const char** archName)
 	// no thin .o files found, so default to same architecture this tool was built as
 	warning("-arch not specified");
 #if __i386__
-	opts.setArchitecture(CPU_TYPE_I386, CPU_SUBTYPE_X86_ALL, Options::kPlatformOSX);
+	opts.setArchitecture(CPU_TYPE_I386, CPU_SUBTYPE_X86_ALL, ld::kPlatform_macOS, 0);
 #elif __x86_64__
-	opts.setArchitecture(CPU_TYPE_X86_64, CPU_SUBTYPE_X86_64_ALL, Options::kPlatformOSX);
+	opts.setArchitecture(CPU_TYPE_X86_64, CPU_SUBTYPE_X86_64_ALL, ld::kPlatform_macOS, 0);
 #elif __arm__
-	opts.setArchitecture(CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V6, Options::kPlatformOSX);
+	opts.setArchitecture(CPU_TYPE_ARM, CPU_SUBTYPE_ARM_V6, ld::kPlatform_macOS, 0);
 #else
 	#error unknown default architecture
 #endif
@@ -1485,8 +1500,16 @@ void InputFiles::dylibs(ld::Internal& state)
 	state.bundleLoader = _bundleLoader;
 	
 	// <rdar://problem/10807040> give an error when -nostdlib is used and libSystem is missing
-	if ( (state.dylibs.size() == 0) && _options.needsEntryPointLoadCommand() ) 
-		throw "dynamic main executables must link with libSystem.dylib";
+	if ( (state.dylibs.size() == 0) && _options.needsEntryPointLoadCommand() )  {
+		// HACK until 39514191 is fixed
+		bool grandfather = false;
+		for (const File* inFile : _inputFiles) {
+			if ( strstr(inFile->path(), "exit-asm.o") != NULL )
+				grandfather = true;
+		}
+		if ( !grandfather )
+			throw "dynamic main executables must link with libSystem.dylib";
+	}
 }
 
 void InputFiles::archives(ld::Internal& state)

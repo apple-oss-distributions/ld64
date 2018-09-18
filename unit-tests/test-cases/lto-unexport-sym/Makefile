@@ -37,6 +37,7 @@ all:
     # Check that unexported symbols are hidden
 	nm a.out | grep "t _bar" | ${FAIL_IF_EMPTY}
 	nm a.out | grep "t _foo" | ${FAIL_IF_EMPTY}
-	
+	${PASS_IFF} true
+
 clean:
 	rm a.out b.o a.o

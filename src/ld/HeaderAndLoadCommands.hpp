@@ -69,6 +69,8 @@ public:
 	virtual const char*							name() const		{ return "mach-o header and load commands"; }
 	virtual uint64_t							size() const;
 	virtual uint64_t							objectAddress() const { return _address; }
+	virtual bool								lcBuildVersionDisabled() const;
+
 	virtual void								copyRawContent(uint8_t buffer[]) const;
 
 	// overrides of HeaderAndLoadCommandsAbtract
@@ -105,8 +107,8 @@ private:
 	uint8_t*					copyDylibIDLoadCommand(uint8_t* p) const;
 	uint8_t*					copyRoutinesLoadCommand(uint8_t* p) const;
 	uint8_t*					copyUUIDLoadCommand(uint8_t* p) const;
-	uint8_t*					copyVersionLoadCommand(uint8_t* p) const;
-	uint8_t*					copyBuildVersionLoadCommand(uint8_t* p) const;
+	uint8_t*					copyVersionLoadCommand(uint8_t* p, const ld::Platform& platform, uint32_t minVersion, uint32_t sdkVersion) const;
+	uint8_t*					copyBuildVersionLoadCommand(uint8_t* p, const ld::Platform& platform, uint32_t minVersion, uint32_t sdkVersion) const;
 	uint8_t*					copySourceVersionLoadCommand(uint8_t* p) const;
 	uint8_t*					copyThreadsLoadCommand(uint8_t* p) const;
 	uint8_t*					copyEntryPointLoadCommand(uint8_t* p) const;
@@ -146,12 +148,12 @@ private:
 	bool						_hasRPathLoadCommands;
 	bool						_hasSubFrameworkLoadCommand;
 	bool						_hasVersionLoadCommand;
-	bool						_hasBuildVersionLoadCommand;
 	bool						_hasFunctionStartsLoadCommand;
 	bool						_hasDataInCodeLoadCommand;
 	bool						_hasSourceVersionLoadCommand;
 	bool						_hasOptimizationHints;
-	Options::Platform			_platform;
+	bool						_simulatorSupportDylib;
+	ld::VersionSet			 	_platforms;
 	uint32_t					_dylibLoadCommmandsCount;
 	uint32_t					_allowableClientLoadCommmandsCount;
 	uint32_t					_dyldEnvironExrasCount;
@@ -238,21 +240,24 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	}
 	_hasRPathLoadCommands = (_options.rpaths().size() != 0);
 	_hasSubFrameworkLoadCommand = (_options.umbrellaName() != NULL);
-	_platform = _options.platform();
-	if ( (_platform == Options::kPlatformUnknown) && (_state.derivedPlatform != 0) )
-		_platform = (Options::Platform)_state.derivedPlatform;
-	if ( _options.addVersionLoadCommand() ) {
-		_hasBuildVersionLoadCommand = _options.addBuildVersionLoadCommand();
-		_hasVersionLoadCommand = !_hasBuildVersionLoadCommand;
+	_platforms = _options.platforms();
+	if ( _platforms.empty() && (!_state.derivedPlatforms.empty()) )
+		_platforms = _state.derivedPlatforms;
+	if (_platforms.contains(ld::kPlatform_macOS) &&
+		((strcmp(_options.installPath(), "/usr/lib/system/libsystem_kernel.dylib") == 0)
+		 || (strcmp(_options.installPath(), "/usr/lib/system/libsystem_platform.dylib") == 0)
+		 || (strcmp(_options.installPath(), "/usr/lib/system/libsystem_pthread.dylib") == 0)
+		 || (strcmp(_options.installPath(), "/usr/lib/system/libsystem_platform_debug.dylib") == 0)
+		 || (strcmp(_options.installPath(), "/usr/lib/system/libsystem_pthread_debug.dylib") == 0)
+		 || (strcmp(_options.installPath(), "/System/Library/PrivateFrameworks/SiriUI.framework/Versions/A/SiriUI") == 0))) {
+		_simulatorSupportDylib = true;
+	} else {
+		_simulatorSupportDylib = false;
 	}
-	else if (((_options.outputKind() == Options::kObjectFile) && (_platform != Options::kPlatformUnknown) && !state.objectFileFoundWithNoVersion) ) {
-		_hasBuildVersionLoadCommand = (_platform == Options::kPlatform_bridgeOS);
-		_hasVersionLoadCommand = !_hasBuildVersionLoadCommand;
-	}
-	else {
-		_hasVersionLoadCommand = false;
-		_hasBuildVersionLoadCommand = false;
-	}
+	_hasVersionLoadCommand = _options.addVersionLoadCommand();
+	// in ld -r mode, only if all input .o files have load command, then add one to output
+	if ( !_hasVersionLoadCommand && (_options.outputKind() == Options::kObjectFile) && !state.objectFileFoundWithNoVersion )
+		_hasVersionLoadCommand = true;
 	_hasFunctionStartsLoadCommand = _options.addFunctionStarts();
 	_hasDataInCodeLoadCommand = _options.addDataInCodeInfo();
 	_hasSourceVersionLoadCommand = _options.needsSourceVersionLoadCommand();
@@ -424,12 +429,22 @@ uint64_t HeaderAndLoadCommandsAtom<A>::size() const
 	if ( _hasUUIDLoadCommand )
 		sz += sizeof(macho_uuid_command<P>);
 
-	if ( _hasVersionLoadCommand )
-		sz += sizeof(macho_version_min_command<P>);
-	
-	if ( _hasBuildVersionLoadCommand )
-		sz += alignedSize(sizeof(macho_build_version_command<P>) + sizeof(macho_build_tool_version<P>)*_toolsVersions.size());
-	
+	if ( _hasVersionLoadCommand ) {
+		if (_simulatorSupportDylib) {
+#if 0
+//FIXME hack to workaround simulator issues without cctools changes
+			sz += sizeof(macho_version_min_command<P>);
+			sz += (_options.platforms().count() * alignedSize(sizeof(macho_build_version_command<P>) + sizeof(macho_build_tool_version<P>)*_toolsVersions.size()));
+#else
+			sz += sizeof(macho_version_min_command<P>);
+#endif
+		} else if (_options.platforms().minOS(ld::supportsLCBuildVersion) && !lcBuildVersionDisabled()) {
+			sz += (_options.platforms().count() * alignedSize(sizeof(macho_build_version_command<P>) + sizeof(macho_build_tool_version<P>)*_toolsVersions.size()));
+		} else {
+			sz += sizeof(macho_version_min_command<P>);
+		}
+	}
+
 	if ( _hasSourceVersionLoadCommand )
 		sz += sizeof(macho_source_version_command<P>);
 		
@@ -529,13 +544,23 @@ uint32_t HeaderAndLoadCommandsAtom<A>::commandsCount() const
 		
 	if ( _hasUUIDLoadCommand )
 		++count;
-	
-	if ( _hasVersionLoadCommand )
-		++count;
 
-	if ( _hasBuildVersionLoadCommand )
-		++count;
-	
+	if ( _hasVersionLoadCommand ) {
+		if (_simulatorSupportDylib) {
+#if 0
+			//FIXME hack to workaround simulator issues without cctools changes
+			++count;
+			count += _options.platforms().count();
+#else
+			++count;
+#endif
+		} else if (_options.platforms().minOS(ld::supportsLCBuildVersion) && !lcBuildVersionDisabled()) {
+			count += _options.platforms().count();
+		} else {
+			++count;
+		}
+	}
+
 	if ( _hasSourceVersionLoadCommand )
 		++count;
 		
@@ -642,10 +667,6 @@ uint32_t HeaderAndLoadCommandsAtom<A>::flags() const
 				bits |= MH_WEAK_DEFINES;
 			if ( _writer.usesWeakExternalSymbols || _state.hasWeakExternalSymbols )
 				bits |= MH_BINDS_TO_WEAK;
-			if ( _options.prebind() )
-				bits |= MH_PREBOUND;
-			if ( _options.splitSeg() )
-				bits |= MH_SPLIT_SEGS;
 			if ( (_options.outputKind() == Options::kDynamicLibrary) 
 					&& _writer._noReExportedDylibs 
 					&& _options.useSimplifiedDylibReExports() ) {
@@ -661,6 +682,11 @@ uint32_t HeaderAndLoadCommandsAtom<A>::flags() const
 				bits |= MH_NO_HEAP_EXECUTION;
 			if ( _options.markAppExtensionSafe() && (_options.outputKind() == Options::kDynamicLibrary) )
 				bits |= MH_APP_EXTENSION_SAFE;
+#if 0
+			//FIXME hack to workaround simulator issues without cctools changes
+			if (_simulatorSupportDylib)
+				bits |= MH_SIM_SUPPORT;
+#endif
 		}
 		if ( _options.hasExecutableStack() )
 			bits |= MH_ALLOW_STACK_EXECUTION;
@@ -688,7 +714,7 @@ uint32_t HeaderAndLoadCommandsAtom<x86>::cpuSubType() const
 template <>
 uint32_t HeaderAndLoadCommandsAtom<x86_64>::cpuSubType() const
 {
-	if ( (_options.outputKind() == Options::kDynamicExecutable) && (_state.cpuSubType == CPU_SUBTYPE_X86_64_ALL) && (_options.macosxVersionMin() >= ld::mac10_5) )
+	if ( (_options.outputKind() == Options::kDynamicExecutable) && (_state.cpuSubType == CPU_SUBTYPE_X86_64_ALL) && _options.platforms().minOS(ld::mac10_5) )
 		return (_state.cpuSubType | 0x80000000);
 	else
 		return _state.cpuSubType;
@@ -846,6 +872,8 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 		case ld::Section::typeDtraceDOF:
 			return S_DTRACE_DOF;
 		case ld::Section::typeUnwindInfo:
+			return S_REGULAR;
+		case ld::Section::typeThreadStarts:
 			return S_REGULAR;
 		case ld::Section::typeObjCClassRefs:
 		case ld::Section::typeObjC2CategoryList:
@@ -1179,40 +1207,44 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyUUIDLoadCommand(uint8_t* p) const
 
 
 template <typename A>
-uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p) const
+uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p, const ld::Platform& platform, uint32_t minVersion, uint32_t sdkVersion) const
 {
 	macho_version_min_command<P>* cmd = (macho_version_min_command<P>*)p;
-	switch (_platform) {
-		case Options::kPlatformOSX:
+	switch (platform) {
+		case ld::kPlatform_macOS:
 			cmd->set_cmd(LC_VERSION_MIN_MACOSX);
 			cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
-			cmd->set_version(_state.minOSVersion);
-			cmd->set_sdk(_options.sdkVersion());
+			cmd->set_version(minVersion);
+			cmd->set_sdk(sdkVersion);
 			break;
-		case Options::kPlatformiOS:
+		case ld::kPlatform_iOS:
+		case ld::kPlatform_iOSSimulator:
 			cmd->set_cmd(LC_VERSION_MIN_IPHONEOS);
 			cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
-			cmd->set_version(_state.minOSVersion);
-			cmd->set_sdk(_options.sdkVersion());
+			cmd->set_version(minVersion);
+			cmd->set_sdk(sdkVersion);
 			break;
-		case Options::kPlatformWatchOS:
+		case ld::kPlatform_watchOS:
+		case ld::kPlatform_watchOSSimulator:
 			cmd->set_cmd(LC_VERSION_MIN_WATCHOS);
 			cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
-			cmd->set_version(_state.minOSVersion);
-			cmd->set_sdk(_options.sdkVersion());
+			cmd->set_version(minVersion);
+			cmd->set_sdk(sdkVersion);
 			break;
-#if SUPPORT_APPLE_TV
-		case Options::kPlatform_tvOS:
+		case ld::kPlatform_tvOS:
+		case ld::kPlatform_tvOSSimulator:
 			cmd->set_cmd(LC_VERSION_MIN_TVOS);
 			cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
-			cmd->set_version(_state.minOSVersion);
-			cmd->set_sdk(_options.sdkVersion());
+			cmd->set_version(minVersion);
+			cmd->set_sdk(sdkVersion);
 			break;
-#endif
-		case Options::kPlatformUnknown:
+		case ld::kPlatform_unknown:
 			assert(0 && "unknown platform");
 			break;
-		case Options::kPlatform_bridgeOS:
+		case ld::kPlatform_iOSMac:
+			assert(0 && "iOSMac uses LC_BUILD_VERSION");
+			break;
+		case ld::kPlatform_bridgeOS:
 			assert(0 && "bridgeOS uses LC_BUILD_VERSION");
 			break;
 	}
@@ -1222,15 +1254,15 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p) const
 
 
 template <typename A>
-uint8_t* HeaderAndLoadCommandsAtom<A>::copyBuildVersionLoadCommand(uint8_t* p) const
+	uint8_t* HeaderAndLoadCommandsAtom<A>::copyBuildVersionLoadCommand(uint8_t* p, const ld::Platform& platform, uint32_t minVersion, uint32_t sdkVersion) const
 {
 	macho_build_version_command<P>* cmd = (macho_build_version_command<P>*)p;
 	
 	cmd->set_cmd(LC_BUILD_VERSION);
 	cmd->set_cmdsize(alignedSize(sizeof(macho_build_version_command<P>) + sizeof(macho_build_tool_version<P>)*_toolsVersions.size()));
-	cmd->set_platform(_options.platform());
-	cmd->set_minos(_state.minOSVersion);
-	cmd->set_sdk(_options.sdkVersion());
+	cmd->set_platform(platform);
+	cmd->set_minos(minVersion);
+	cmd->set_sdk(sdkVersion);
 	cmd->set_ntools(_toolsVersions.size());
 	macho_build_tool_version<P>* tools = (macho_build_tool_version<P>*)(p + sizeof(macho_build_version_command<P>));
 	for (uint64_t tool : _toolsVersions) {
@@ -1551,6 +1583,17 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyOptimizationHintsLoadCommand(uint8_t*
 	return p + sizeof(macho_linkedit_data_command<P>);
 }
 
+template <typename A>
+bool HeaderAndLoadCommandsAtom<A>::lcBuildVersionDisabled() const {
+	static std::once_flag envChecked;
+	static bool disabled = false;
+	std::call_once(envChecked, [&](){
+		if (getenv("LD_FORCE_LEGACY_VERSION_LOAD_CMDS") != nullptr ) {
+			disabled = true;
+		}
+	});
+	return disabled;
+}
 
 template <typename A>
 void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
@@ -1568,7 +1611,7 @@ void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 	mh->set_flags(this->flags());
 
 	// copy load commands
-	uint8_t* p = &buffer[sizeof(macho_header<P>)];
+	__block uint8_t* p = &buffer[sizeof(macho_header<P>)];
 	
 	if ( _options.outputKind() == Options::kObjectFile )
 		p = this->copySingleSegmentLoadCommand(p);
@@ -1595,12 +1638,33 @@ void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 		
 	if ( _hasUUIDLoadCommand )
 		p = this->copyUUIDLoadCommand(p);
-	
-	if ( _hasVersionLoadCommand )
-		p = this->copyVersionLoadCommand(p);
 
-	if ( _hasBuildVersionLoadCommand )
-		p = this->copyBuildVersionLoadCommand(p);
+	if ( _hasVersionLoadCommand ) {
+		if (_simulatorSupportDylib) {
+#if 0
+			//FIXME hack to workaround simulator issues without cctools changes
+			p = this->copyVersionLoadCommand(p, ld::kPlatform_macOS, 0, _options.sdkVersion());
+			_options.platforms().forEach(^(ld::Platform platform, uint32_t version, bool &stop) {
+				p = this->copyBuildVersionLoadCommand(p, platform, version, _options.sdkVersion());
+			});
+#else
+			_options.platforms().forEach(^(ld::Platform platform, uint32_t version, bool &stop) {
+				if (platform == ld::kPlatform_macOS) {
+					p = this->copyVersionLoadCommand(p, platform, version, _options.sdkVersion());
+				}
+			});
+#endif
+		} else if (_options.platforms().minOS(ld::supportsLCBuildVersion) && !lcBuildVersionDisabled()) {
+			_options.platforms().forEach(^(ld::Platform platform, uint32_t version, bool &stop) {
+				p = this->copyBuildVersionLoadCommand(p, platform, version, _options.sdkVersion());
+			});
+		} else {
+			assert(_platforms.count() == 1 && "LC_BUILD_VERSION required when there are multiple platforms");
+			_options.platforms().forEach(^(ld::Platform platform, uint32_t version, bool &stop) {
+				p = this->copyVersionLoadCommand(p, platform, version, _options.sdkVersion());
+			});
+		}
+	}
 
 	if ( _hasSourceVersionLoadCommand )
 		p = this->copySourceVersionLoadCommand(p);

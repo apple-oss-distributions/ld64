@@ -10,11 +10,12 @@ VALID_ARCHS ?= "i386 x86_64 armv6"
 
 
 MYDIR=$(shell cd ../../bin;pwd)
-LD				= ld
+LD			= ld
 OBJECTDUMP		= ObjectDump
-OBJCIMAGEINFO	= objcimageinfo
+OBJCIMAGEINFO		= objcimageinfo
 MACHOCHECK		= machocheck
 OTOOL 			= xcrun otool
+MTOC			= xcrun mtoc
 REBASE			= rebase
 DYLDINFO		= dyldinfo
 
@@ -60,7 +61,8 @@ ifeq ($(ARCH),ppc)
 	OSX_SDK = /Developer/SDKs/MacOSX10.6.sdk
 endif
 
-CC		 = $(shell xcrun -find clang) -arch ${ARCH} -mmacosx-version-min=10.8 -isysroot $(OSX_SDK)
+CC		= $(shell xcrun -find clang) -arch ${ARCH} -mmacosx-version-min=10.8 -isysroot $(OSX_SDK)
+AS		= $(shell xcrun -f as) -arch ${ARCH} -mmacosx-version-min=10.8
 CCFLAGS = -Wall 
 LDFLAGS = -syslibroot $(OSX_SDK)
 ASMFLAGS =
@@ -68,12 +70,13 @@ VERSION_NEW_LINKEDIT = -mmacosx-version-min=10.6
 VERSION_OLD_LINKEDIT = -mmacosx-version-min=10.4
 LD_NEW_LINKEDIT = -macosx_version_min 10.6
 
-CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} -isysroot $(OSX_SDK)
+CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} -mmacosx-version-min=10.9 -isysroot $(OSX_SDK)
 CXXFLAGS = -Wall -stdlib=libc++ 
 
 ifeq ($(ARCH),armv6)
   LDFLAGS := -syslibroot $(IOS_SDK)
   override FILEARCH = arm
+  AS = $(shell xcrun -f as) -arch ${ARCH} -miphoneos-version-min=5.0
   CC = $(shell xcrun -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK) 
   CXX = $(shell xcrun -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK) 
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=4.0
@@ -87,6 +90,7 @@ endif
 ifeq ($(ARCH),armv7)
   LDFLAGS := -syslibroot $(IOS_SDK)
   override FILEARCH = arm
+  AS = $(shell xcrun -f as) -arch ${ARCH} -miphoneos-version-min=5.0
   CC = $(shell xcrun -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   CXX = $(shell xcrun -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=4.0
@@ -103,6 +107,7 @@ ifeq ($(ARCH),thumb)
   CXXFLAGS += -mthumb
   override ARCH = armv6
   override FILEARCH = arm
+  AS = $(shell xcrun -f as) -arch ${ARCH} -miphoneos-version-min=5.0
   CC = $(shell xcrun -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   CXX = $(shell xcrun -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=4.0
@@ -119,6 +124,7 @@ ifeq ($(ARCH),thumb2)
   CXXFLAGS += -mthumb
   override ARCH = armv7
   override FILEARCH = arm
+  AS = $(shell xcrun -f as) -arch ${ARCH} -miphoneos-version-min=5.0
   CC = $(shell xcrun -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   CXX = $(shell xcrun -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=5.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=4.0
@@ -131,6 +137,7 @@ endif
 
 ifeq ($(ARCH),arm64)
   LDFLAGS := -syslibroot $(IOS_SDK)
+  AS = $(shell xcrun -f as) -arch ${ARCH} -miphoneos-version-min=5.0
   CC  = $(shell xcrun --sdk iphoneos.internal -find clang) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=9.0 -isysroot $(IOS_SDK)
   CXX = $(shell xcrun --sdk iphoneos.internal -find clang++) -arch ${ARCH} -ccc-install-dir ${LD_PATH} -miphoneos-version-min=9.0 -isysroot $(IOS_SDK)
   VERSION_NEW_LINKEDIT = -miphoneos-version-min=7.0

@@ -38,7 +38,7 @@ run:
 	libtool -static bar.o baz.o foo.o -o liball.a
 	${CC} ${CCFLAGS} liball.a -all_load -dynamiclib -o liball.dylib -nodefaultlibs -lSystem
 	${FAIL_IF_BAD_MACHO} liball.dylib
-	nm -fap liball.dylib | ./stabs-filter.pl > liball.dylib.stabs
+	nm -ap liball.dylib | ./stabs-filter.pl > liball.dylib.stabs
 	${PASS_IFF} diff liball.dylib.stabs expected-stabs
 
 clean:

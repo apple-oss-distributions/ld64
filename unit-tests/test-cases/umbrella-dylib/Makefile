@@ -32,19 +32,19 @@ run: all
 
 all:
 	# build bootstrap dylib of with all code
-	${CC} ${CCFLAGS} -dynamiclib a.c b.c c.c -o libBig.stub  -install_name /usr/lib/libBig.dylib 
+	${CC} ${CCFLAGS} -dynamiclib a.c b.c c.c -o libBig.stub  -install_name /usr/local/lib/libBig.dylib 
 	# link each sub library against bootstrap to intra-Big symbols
-	${CC} ${CCFLAGS} -dynamiclib a.c -o liba.dylib libBig.stub -install_name /usr/local/lib/big/liba.dylib -umbrella Big
-	${CC} ${CCFLAGS} -dynamiclib b.c -o libb.dylib libBig.stub -install_name /usr/local/lib/big/libb.dylib -umbrella Big
-	${CC} ${CCFLAGS} -dynamiclib c.c -o libc.dylib libBig.stub -install_name /usr/local/lib/big/libc.dylib -umbrella Big
-	${CC} ${CCFLAGS} -dynamiclib -Wl,-reexport_library,liba.dylib -Wl,-reexport_library,libb.dylib -Wl,-reexport_library,libc.dylib -o libBig.dylib -install_name /usr/lib/libBig.dylib 
+	${CC} ${CCFLAGS} -dynamiclib a.c -o liba.dylib libBig.stub -install_name /usr/local/lib/liba.dylib -umbrella Big
+	${CC} ${CCFLAGS} -dynamiclib b.c -o libb.dylib libBig.stub -install_name /usr/local/lib/libb.dylib -umbrella Big
+	${CC} ${CCFLAGS} -dynamiclib c.c -o libc.dylib libBig.stub -install_name /usr/local/lib/libc.dylib -umbrella Big
+	${CC} ${CCFLAGS} -dynamiclib -Wl,-reexport_library,liba.dylib -Wl,-reexport_library,libb.dylib -Wl,-reexport_library,libc.dylib -o libBig.dylib -install_name /usr/local/lib/libBig.dylib 
 	# re-link against correct dylibs now that everything is built
-	${CC} ${CCFLAGS} -dynamiclib a.c -o liba.dylib libc.dylib -install_name /usr/local/lib/big/liba.dylib -umbrella Big
+	${CC} ${CCFLAGS} -dynamiclib a.c -o liba.dylib libc.dylib -install_name /usr/local/lib/liba.dylib -umbrella Big
 	${DYLDINFO} -lazy_bind liba.dylib | grep c2 | grep libc | ${FAIL_IF_EMPTY}
-	${CC} ${CCFLAGS} -dynamiclib b.c -o libb.dylib libc.dylib -install_name /usr/local/lib/big/libb.dylib -umbrella Big
-	${CC} ${CCFLAGS} -dynamiclib c.c -o libc.dylib liba.dylib -install_name /usr/local/lib/big/libc.dylib -umbrella Big
+	${CC} ${CCFLAGS} -dynamiclib b.c -o libb.dylib libc.dylib -install_name /usr/local/lib/libb.dylib -umbrella Big
+	${CC} ${CCFLAGS} -dynamiclib c.c -o libc.dylib liba.dylib -install_name /usr/local/lib/libc.dylib -umbrella Big
 	${DYLDINFO} -lazy_bind libc.dylib | grep a2 | grep liba | ${FAIL_IF_EMPTY}
-	${CC} ${CCFLAGS} -dynamiclib -Wl,-reexport_library,liba.dylib -Wl,-reexport_library,libb.dylib -Wl,-reexport_library,libc.dylib -o libBig.dylib -install_name /usr/lib/libBig.dylib 
+	${CC} ${CCFLAGS} -dynamiclib -Wl,-reexport_library,liba.dylib -Wl,-reexport_library,libb.dylib -Wl,-reexport_library,libc.dylib -o libBig.dylib -install_name /usr/local/lib/libBig.dylib 
 	${CC} ${CCFLAGS} main.c -o main libBig.dylib -L.
 	${PASS_IFF_GOOD_MACHO} main
 

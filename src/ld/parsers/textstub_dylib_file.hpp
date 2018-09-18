@@ -36,7 +36,7 @@ extern ld::dylib::File* parse(const uint8_t* fileContent, uint64_t fileLength, c
 							  time_t modTime, const Options& opts, ld::File::Ordinal ordinal,
 							  bool bundleLoader, bool indirectDylib);
 
-extern ld::dylib::File *parse(const char *path, std::unique_ptr<tapi::LinkerInterfaceFile> &&file, time_t modTime,
+extern ld::dylib::File *parse(const char *path, tapi::LinkerInterfaceFile* file, time_t modTime,
                               ld::File::Ordinal ordinal, const Options& opts, bool indirectDylib);
 
 } // namespace dylib

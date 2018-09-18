@@ -179,7 +179,7 @@ private:
 
 SectionBoundaryAtom* SectionBoundaryAtom::makeSectionBoundaryAtom(const char* name, bool start, const char* segSectName)
 {
-	
+
 	const char* segSectDividor = strrchr(segSectName, '$');
 	if ( segSectDividor == NULL )
 		throwf("malformed section$ symbol name: %s", name);
@@ -189,8 +189,12 @@ SectionBoundaryAtom* SectionBoundaryAtom::makeSectionBoundaryAtom(const char* na
 		throwf("malformed section$ symbol name: %s", name);
 	char segName[18];
 	strlcpy(segName, segSectName, segNameLen+1);
-	
-	const ld::Section* section = new ld::Section(strdup(segName), sectionName, ld::Section::typeUnclassified);
+
+	ld::Section::Type sectType = ld::Section::typeUnclassified;
+	if (!strcmp(segName, "__TEXT") && !strcmp(sectionName, "__thread_starts"))
+		sectType = ld::Section::typeThreadStarts;
+
+	const ld::Section* section = new ld::Section(strdup(segName), sectionName, sectType);
 	return new SectionBoundaryAtom(name, *section, (start ? ld::Atom::typeSectionStart : typeSectionEnd));
 }
 
@@ -279,15 +283,7 @@ SegmentBoundaryAtom* SegmentBoundaryAtom::makeOldSegmentBoundaryAtom(const char*
 
 void Resolver::initializeState()
 {
-	// set initial objc constraint based on command line options
-	if ( _options.objcGc() )
-		_internal.objcObjectConstraint = ld::File::objcConstraintRetainReleaseOrGC;
-	else if ( _options.objcGcOnly() )
-		_internal.objcObjectConstraint = ld::File::objcConstraintGC;
-	
 	_internal.cpuSubType = _options.subArchitecture();
-	_internal.minOSVersion = _options.minOSversion();
-	_internal.derivedPlatform = 0;
 	
 	// In -r mode, look for -linker_option additions
 	if ( _options.outputKind() == Options::kObjectFile ) {
@@ -364,6 +360,10 @@ void Resolver::doFile(const ld::File& file)
 				_inputFiles.createIndirectDylibs();
 			}
 		}
+		// update which form of ObjC is being used
+		if ( objFile->hasObjC() )
+			_internal.hasObjC = true;
+
 		// Resolve bitcode section in the object file
 		if ( _options.bundleBitcode() ) {
 			if ( objFile->getBitcode() == NULL ) {
@@ -372,27 +372,31 @@ void Resolver::doFile(const ld::File& file)
 					_internal.filesFromCompilerRT.push_back(objFile);
 				} else if (objFile->sourceKind() != ld::relocatable::File::kSourceLTO  ) {
 					// No bitcode section, figure out if the object file comes from LTO/compiler static library
-					switch ( _options.platform() ) {
-					case Options::kPlatformOSX:
-					case Options::kPlatform_bridgeOS:
-					case Options::kPlatformUnknown:
-						warning("all bitcode will be dropped because '%s' was built without bitcode. "
-								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target. ", file.path());
-						_internal.filesWithBitcode.clear();
-						_internal.dropAllBitcode = true;
-						break;
-					case Options::kPlatformiOS:
-						throwf("'%s' does not contain bitcode. "
-							   "You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
-						break;
-					case Options::kPlatformWatchOS:
-#if SUPPORT_APPLE_TV
-					case Options::kPlatform_tvOS:
-#endif
-						throwf("'%s' does not contain bitcode. "
-								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE) or obtain an updated library from the vendor", file.path());
-						break;
-					}
+					_options.platforms().forEach(^(ld::Platform platform, uint32_t version, bool &stop) {
+						switch ( platform ) {
+							case ld::kPlatform_macOS:
+							case ld::kPlatform_bridgeOS:
+							case ld::kPlatform_iOSMac:
+							case ld::kPlatform_unknown:
+								warning("all bitcode will be dropped because '%s' was built without bitcode. "
+										"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target. ", file.path());
+								_internal.filesWithBitcode.clear();
+								_internal.dropAllBitcode = true;
+								break;
+							case ld::kPlatform_iOS:
+							case ld::kPlatform_iOSSimulator:
+								throwf("'%s' does not contain bitcode. "
+									   "You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
+								break;
+							case ld::kPlatform_watchOS:
+							case ld::kPlatform_watchOSSimulator:
+							case ld::kPlatform_tvOS:
+							case ld::kPlatform_tvOSSimulator:
+								throwf("'%s' does not contain bitcode. "
+									   "You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE) or obtain an updated library from the vendor", file.path());
+								break;
+						}
+					});
 				}
 			} else {
 				// contains bitcode, check if it is just a marker
@@ -412,47 +416,9 @@ void Resolver::doFile(const ld::File& file)
 			}
 		}
 
-		// update which form of ObjC is being used
-		switch ( file.objCConstraint() ) {
-			case ld::File::objcConstraintNone:
-				break;
-			case ld::File::objcConstraintRetainRelease:
-				if ( _internal.objcObjectConstraint == ld::File::objcConstraintGC )
-					throwf("%s built with incompatible Garbage Collection settings to link with previous .o files", file.path());
-				if ( _options.objcGcOnly() )
-					throwf("command line specified -objc_gc_only, but file is retain/release based: %s", file.path());
-				if ( _options.objcGc() )
-					throwf("command line specified -objc_gc, but file is retain/release based: %s", file.path());
-				if ( !_options.targetIOSSimulator() && (_internal.objcObjectConstraint != ld::File::objcConstraintRetainReleaseForSimulator) )
-					_internal.objcObjectConstraint = ld::File::objcConstraintRetainRelease;
-				break;
-			case ld::File::objcConstraintRetainReleaseOrGC:
-				if ( _internal.objcObjectConstraint == ld::File::objcConstraintNone )
-					_internal.objcObjectConstraint = ld::File::objcConstraintRetainReleaseOrGC;
-				if ( _options.targetIOSSimulator() )
-					warning("linking ObjC for iOS Simulator, but object file (%s) was compiled for MacOSX", file.path());
-				break;
-			case ld::File::objcConstraintGC:
-				if ( _internal.objcObjectConstraint == ld::File::objcConstraintRetainRelease )
-					throwf("%s built with incompatible Garbage Collection settings to link with previous .o files", file.path());
-				_internal.objcObjectConstraint = ld::File::objcConstraintGC;
-				if ( _options.targetIOSSimulator() )
-					warning("linking ObjC for iOS Simulator, but object file (%s) was compiled for MacOSX", file.path());
-				break;
-			case ld::File::objcConstraintRetainReleaseForSimulator:
-				if ( _internal.objcObjectConstraint == ld::File::objcConstraintNone ) {
-					if ( !_options.targetIOSSimulator() && (_options.outputKind() != Options::kObjectFile) )
-						warning("ObjC object file (%s) was compiled for iOS Simulator, but linking for MacOSX", file.path());
-					_internal.objcObjectConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
-				}
-				else if ( _internal.objcObjectConstraint != ld::File::objcConstraintRetainReleaseForSimulator ) {
-					_internal.objcObjectConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
-				}
-				break;
-		}
-	
 		// verify all files use same version of Swift language
 		if ( file.swiftVersion() != 0 ) {
+			_internal.someObjectFileHasSwift = true;
 			if ( _internal.swiftVersion == 0 ) {
 				_internal.swiftVersion = file.swiftVersion();
 			}
@@ -494,17 +460,18 @@ void Resolver::doFile(const ld::File& file)
 		if ( objFile->hasllvmProfiling() )
 			_havellvmProfiling = true;
 
+#if MULTI
 		// update minOSVersion off all .o files
 		uint32_t objMinOS = objFile->minOSVersion();
 		if ( !objMinOS )
 			_internal.objectFileFoundWithNoVersion = true;
 		if ( (_options.outputKind() == Options::kObjectFile) && (objMinOS > _internal.minOSVersion) )
 			_internal.minOSVersion = objMinOS;
+#endif
 
-		uint32_t objPlatform = objFile->platform();
-		if ( (objPlatform != 0) && (_options.outputKind() == Options::kObjectFile) && (_internal.derivedPlatform == 0)  )
-			_internal.derivedPlatform = objPlatform;
-
+		auto objPlatforms = objFile->platforms();
+		if ( (!objPlatforms.empty()) && (_options.outputKind() == Options::kObjectFile) && (_internal.derivedPlatforms.empty())  )
+			_internal.derivedPlatforms = objPlatforms;
 		// update set of known tools used
 		for (const std::pair<uint32_t,uint32_t>& entry : objFile->toolVersions()) {
 			uint64_t combined = (uint64_t)entry.first << 32 | entry.second;
@@ -586,27 +553,31 @@ void Resolver::doFile(const ld::File& file)
 				if ( realpath(tempPath, tcLibPath) == NULL ||
 					 realpath(dylibFile->path(), tempPath) == NULL ||
 					 strncmp(tcLibPath, tempPath, strlen(tcLibPath)) != 0 ) {
-					switch ( _options.platform() ) {
-					case Options::kPlatformOSX:
-					case Options::kPlatform_bridgeOS:
-					case Options::kPlatformUnknown:
-						warning("all bitcode will be dropped because '%s' was built without bitcode. "
-								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
-						_internal.filesWithBitcode.clear();
-						_internal.dropAllBitcode = true;
-						break;
-					case Options::kPlatformiOS:
-						throwf("'%s' does not contain bitcode. "
-							   "You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
-						break;
-					case Options::kPlatformWatchOS:
-#if SUPPORT_APPLE_TV
-					case Options::kPlatform_tvOS:
-#endif
-						throwf("'%s' does not contain bitcode. "
-								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE) or obtain an updated library from the vendor", file.path());
-						break;
-					}
+					_options.platforms().forEach(^(ld::Platform platform, uint32_t version, bool &stop) {
+						switch ( platform ) {
+							case ld::kPlatform_macOS:
+							case ld::kPlatform_bridgeOS:
+							case ld::kPlatform_iOSMac:
+							case ld::kPlatform_unknown:
+								warning("all bitcode will be dropped because '%s' was built without bitcode. "
+										"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
+								_internal.filesWithBitcode.clear();
+								_internal.dropAllBitcode = true;
+								break;
+							case ld::kPlatform_iOS:
+							case ld::kPlatform_iOSSimulator:
+								throwf("'%s' does not contain bitcode. "
+									   "You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
+								break;
+							case ld::kPlatform_watchOS:
+							case ld::kPlatform_watchOSSimulator:
+							case ld::kPlatform_tvOS:
+							case ld::kPlatform_tvOSSimulator:
+								throwf("'%s' does not contain bitcode. "
+									   "You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE) or obtain an updated library from the vendor", file.path());
+								break;
+						}
+					});
 				}
 			}
 			// Error on bitcode marker in non-system frameworks if -bitcode_verify is used
@@ -617,42 +588,21 @@ void Resolver::doFile(const ld::File& file)
 					   dylibFile->path());
 		}
 
-		// update which form of ObjC dylibs are being linked
-		switch ( dylibFile->objCConstraint() ) {
-			case ld::File::objcConstraintNone:
-				break;
-			case ld::File::objcConstraintRetainRelease:
-				if ( _internal.objcDylibConstraint == ld::File::objcConstraintGC )
-					throwf("%s built with incompatible Garbage Collection settings to link with previous dylibs", file.path());
-				if ( _options.objcGcOnly() )
-					throwf("command line specified -objc_gc_only, but dylib is retain/release based: %s", file.path());
-				if ( _options.objcGc() )
-					throwf("command line specified -objc_gc, but dylib is retain/release based: %s", file.path());
-				if ( _options.targetIOSSimulator() )
-					warning("linking ObjC for iOS Simulator, but dylib (%s) was compiled for MacOSX", file.path());
-				_internal.objcDylibConstraint = ld::File::objcConstraintRetainRelease;
-				break;
-			case ld::File::objcConstraintRetainReleaseOrGC:
-				if ( _internal.objcDylibConstraint == ld::File::objcConstraintNone )
-					_internal.objcDylibConstraint = ld::File::objcConstraintRetainReleaseOrGC;
-				if ( _options.targetIOSSimulator() )
-					warning("linking ObjC for iOS Simulator, but dylib (%s) was compiled for MacOSX", file.path());
-				break;
-			case ld::File::objcConstraintGC:
-				if ( _internal.objcDylibConstraint == ld::File::objcConstraintRetainRelease )
-					throwf("%s built with incompatible Garbage Collection settings to link with previous dylibs", file.path());
-				if ( _options.targetIOSSimulator() )
-					warning("linking ObjC for iOS Simulator, but dylib (%s) was compiled for MacOSX", file.path());
- 				_internal.objcDylibConstraint = ld::File::objcConstraintGC;
-				break;
-			case ld::File::objcConstraintRetainReleaseForSimulator:
-				if ( _internal.objcDylibConstraint == ld::File::objcConstraintNone )
-					_internal.objcDylibConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
-				else if ( _internal.objcDylibConstraint != ld::File::objcConstraintRetainReleaseForSimulator ) {
-					warning("ObjC dylib (%s) was compiled for iOS Simulator, but dylibs others were compiled for MacOSX", file.path());
-					_internal.objcDylibConstraint = ld::File::objcConstraintRetainReleaseForSimulator;
+		// Don't allow swift frameworks to link other swift frameworks.
+		if ( !_internal.firstSwiftDylibFile && _options.outputKind() == Options::kDynamicLibrary
+			&& file.swiftVersion() != 0 && getenv("LD_DISALLOW_SWIFT_LINKING_SWIFT")) {
+			// Check that we aren't a whitelisted path.
+			bool inWhiteList = false;
+			const char *whitelistedPaths[] = { "/System/Library/PrivateFrameworks/Swift" };
+			for (auto whitelistedPath : whitelistedPaths) {
+				if (!strncmp(whitelistedPath, dylibFile->installPath(), strlen(whitelistedPath))) {
+					inWhiteList = true;
+					break;
 				}
-				break;
+			}
+			if (!inWhiteList) {
+				_internal.firstSwiftDylibFile = dylibFile;
+			}
 		}
 
 		// <rdar://problem/25680358> verify dylibs use same version of Swift language
@@ -692,9 +642,9 @@ void Resolver::doFile(const ld::File& file)
 		const char* depInstallName = dylibFile->installPath();
 		// <rdar://problem/17229513> embedded frameworks are only supported on iOS 8 and later
 		if ( (depInstallName != NULL) && (depInstallName[0] != '/') ) {
-			if ( (_options.iOSVersionMin() != iOSVersionUnset) && (_options.iOSVersionMin() < iOS_8_0) ) {
+			if ( _options.platforms().contains(ld::kPlatform_iOS) && !_options.platforms().minOS(iOS_8_0) ) {
 				// <rdar://problem/17598404> only warn about linking against embedded dylib if it is built for iOS 8 or later
-				if ( dylibFile->minOSVersion() >= iOS_8_0 )
+				if ( dylibFile->platforms().minOS(ld::iOS_8_0) )
 					throwf("embedded dylibs/frameworks are only supported on iOS 8.0 and later (%s)", depInstallName);
 			}
 		}
@@ -709,7 +659,6 @@ void Resolver::doFile(const ld::File& file)
 			}
 		}
 	}
-
 }
 
 void Resolver::doAtom(const ld::Atom& atom)
@@ -1076,6 +1025,9 @@ void Resolver::markLive(const ld::Atom& atom, WhyLiveBackChain* previous)
 			case ld::Fixup::kindSubtractTargetAddress:
 			case ld::Fixup::kindStoreTargetAddressLittleEndian32:
 			case ld::Fixup::kindStoreTargetAddressLittleEndian64:
+#if SUPPORT_ARCH_arm64e
+			case ld::Fixup::kindStoreTargetAddressLittleEndianAuth64:
+#endif
 			case ld::Fixup::kindStoreTargetAddressBigEndian32:
 			case ld::Fixup::kindStoreTargetAddressBigEndian64:
 			case ld::Fixup::kindStoreTargetAddressX86PCRel32:
@@ -1507,6 +1459,10 @@ void Resolver::checkUndefines(bool force)
 	int unresolvableExportsCount = 0;
 	if ( unresolvableCount != 0 ) {
 		if ( doPrint ) {
+			for (const auto& lib : _internal.missingLinkerOptionLibraries)
+				warning("Could not find auto-linked library '%s'", lib);
+			for (const auto& frm : _internal.missingLinkerOptionFrameworks)
+				warning("Could not find auto-linked framework '%s'", frm);
 			if ( _options.printArchPrefix() )
 				fprintf(stderr, "Undefined symbols for architecture %s:\n", _options.architectureName());
 			else
@@ -1663,6 +1619,7 @@ void Resolver::fillInHelpersInInternalState()
 	}
 	
 	_internal.classicBindingHelper = NULL;
+	// FIXME: What about fMakeThreadedStartsSection?
 	if ( needsStubHelper && !_options.makeCompressedDyldInfo() ) { 
 		// "dyld_stub_binding_helper" comes from .o file, so should already exist in symbol table
 		if ( _symbolTable.hasName("dyld_stub_binding_helper") ) {
@@ -1683,6 +1640,7 @@ void Resolver::fillInHelpersInInternalState()
 	}
 	
 	_internal.compressedFastBinderProxy = NULL;
+	// FIXME: What about fMakeThreadedStartsSection?
 	if ( needsStubHelper && _options.makeCompressedDyldInfo() ) { 
 		// "dyld_stub_binder" comes from libSystem.dylib so will need to manually resolve
 		if ( !_symbolTable.hasName("dyld_stub_binder") ) {
@@ -1713,6 +1671,11 @@ void Resolver::fillInInternalState()
 	// <rdar://problem/7783918> make sure there is a __text section so that codesigning works
 	if ( (_options.outputKind() == Options::kDynamicLibrary) || (_options.outputKind() == Options::kDynamicBundle) )
 		_internal.getFinalSection(*new ld::Section("__TEXT", "__text", ld::Section::typeCode));
+
+	// Don't allow swift frameworks to link other swift frameworks.
+	if ( _internal.someObjectFileHasSwift && _internal.firstSwiftDylibFile != nullptr )
+		throwf("linking swift frameworks against other swift frameworks (%s) is not permitted",
+			   _internal.firstSwiftDylibFile->path());
 }
 
 void Resolver::fillInEntryPoint()
@@ -1782,6 +1745,7 @@ void Resolver::linkTimeOptimize()
 	optOpt.outputFilePath				= _options.outputFilePath();
 	optOpt.tmpObjectFilePath			= _options.tempLtoObjectPath();
 	optOpt.ltoCachePath					= _options.ltoCachePath();
+	optOpt.ltoPruneIntervalOverwrite	= _options.ltoPruneIntervalOverwrite();
 	optOpt.ltoPruneInterval				= _options.ltoPruneInterval();
 	optOpt.ltoPruneAfter				= _options.ltoPruneAfter();
 	optOpt.ltoMaxCacheSize				= _options.ltoMaxCacheSize();
@@ -1802,12 +1766,14 @@ void Resolver::linkTimeOptimize()
 	optOpt.armUsesZeroCostExceptions    = _options.armUsesZeroCostExceptions();
 	optOpt.simulator					= _options.targetIOSSimulator();
 	optOpt.ignoreMismatchPlatform		= ((_options.outputKind() == Options::kPreload) || (_options.outputKind() == Options::kStaticExecutable));
+#if SUPPORT_ARCH_arm64e
+	optOpt.supportsAuthenticatedPointers = _options.supportsAuthenticatedPointers();
+#endif
 	optOpt.bitcodeBundle				= (_options.bundleBitcode() && (_options.bitcodeKind() != Options::kBitcodeMarker));
 	optOpt.maxDefaultCommonAlignment	= _options.maxDefaultCommonAlign();
 	optOpt.arch							= _options.architecture();
 	optOpt.mcpu							= _options.mcpuLTO();
-	optOpt.platform						= _options.platform();
-	optOpt.minOSVersion					= _options.minOSversion();
+	optOpt.platforms					= _options.platforms();
 	optOpt.llvmOptions					= &_options.llvmOptions();
 	optOpt.initialUndefines				= &_options.initialUndefines();
 	

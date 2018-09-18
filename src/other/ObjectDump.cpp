@@ -35,6 +35,8 @@
 #include "parsers/macho_relocatable_file.h"
 #include "parsers/lto_file.h"
 
+const ld::VersionSet ld::File::_platforms;
+
 static bool			sDumpContent= true;
 static bool			sDumpStabs	= false;
 static bool			sSort		= true;
@@ -1258,8 +1260,9 @@ static ld::relocatable::File* createReader(const char* path)
 	if ( ! foundFatSlice ) {
 		cpu_type_t archOfObj;
 		cpu_subtype_t subArchOfObj;
-		Options::Platform platform;
-		if ( mach_o::relocatable::isObjectFile(p, &archOfObj, &subArchOfObj, &platform) ) {
+		ld::Platform platform;
+		uint32_t minOS;
+		if ( mach_o::relocatable::isObjectFile(p, &archOfObj, &subArchOfObj, &platform, &minOS) ) {
 			objOpts.architecture = archOfObj;
 			objOpts.subType = subArchOfObj;
 		}

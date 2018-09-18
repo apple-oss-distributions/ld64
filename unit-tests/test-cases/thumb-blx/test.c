@@ -26,10 +26,10 @@
 
 int main()
 {
-	malloc(1);
-	malloc(2);
-	malloc(3);
-	malloc(4);
+	(void)malloc(1);
+	(void)malloc(2);
+	(void)malloc(3);
+	(void)malloc(4);
 	return 0;
 }
 

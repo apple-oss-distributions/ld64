@@ -55,6 +55,7 @@ struct OptimizeOptions {
 	int									ltoPruneInterval;
 	int									ltoPruneAfter;
 	unsigned							ltoMaxCacheSize;
+	bool								ltoPruneIntervalOverwrite;
 	bool								preserveAllGlobals;
 	bool								verbose; 
 	bool								saveTemps; 
@@ -72,12 +73,14 @@ struct OptimizeOptions {
 	bool								armUsesZeroCostExceptions;
 	bool								simulator;
 	bool								ignoreMismatchPlatform;
+#if SUPPORT_ARCH_arm64e
+	bool								supportsAuthenticatedPointers;
+#endif
 	bool								bitcodeBundle;
 	uint8_t								maxDefaultCommonAlignment;
 	cpu_type_t							arch;
 	const char*							mcpu;
-	Options::Platform					platform;
-	uint32_t							minOSVersion;
+	ld::VersionSet						platforms;
 	const std::vector<const char*>*		llvmOptions;
 	const std::vector<const char*>*		initialUndefines;
 };

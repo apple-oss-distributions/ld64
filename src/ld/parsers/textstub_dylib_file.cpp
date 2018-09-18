@@ -53,82 +53,107 @@ public:
 					File(const char* path, const uint8_t* fileContent, uint64_t fileLength, const Options *opts,
 						 time_t mTime, ld::File::Ordinal ordinal, bool linkingFlatNamespace,
 						 bool linkingMainExecutable, bool hoistImplicitPublicDylibs,
-						 Options::Platform platform, uint32_t linkMinOSVersion, bool allowWeakImports,
+						 const ld::VersionSet& platforms, bool allowWeakImports,
 						 cpu_type_t cpuType, cpu_subtype_t cpuSubType, bool enforceDylibSubtypesMatch,
 						 bool allowSimToMacOSX, bool addVers, bool buildingForSimulator,
-						 bool logAllFiles, const char* installPath, bool indirectDylib);
-					File(std::unique_ptr<tapi::LinkerInterfaceFile> &&file, const char *path, const Options *opts,
+						 bool logAllFiles, const char* installPath, bool indirectDylib,
+					         bool ignoreMismatchPlatform, bool usingBitcode);
+					File(tapi::LinkerInterfaceFile* file, const char *path, const Options *opts,
 						 time_t mTime, ld::File::Ordinal ordinal, bool linkingFlatNamespace,
 						 bool linkingMainExecutable, bool hoistImplicitPublicDylibs,
-						 Options::Platform platform, uint32_t linkMinOSVersion, bool allowWeakImports,
+						 const ld::VersionSet& platforms, bool allowWeakImports,
 						 cpu_type_t cpuType, cpu_subtype_t cpuSubType, bool enforceDylibSubtypesMatch,
 						 bool allowSimToMacOSX, bool addVers, bool buildingForSimulator,
-						 bool logAllFiles, const char* installPath, bool indirectDylib);
+						 bool logAllFiles, const char* installPath, bool indirectDylib,
+					         bool ignoreMismatchPlatform, bool usingBitcode);
 	virtual			~File() noexcept {}
 	
 	// overrides of generic::dylib::File
 	virtual void	processIndirectLibraries(ld::dylib::File::DylibHandler*, bool addImplicitDylibs) override final;
 
 private:
-	void			init(tapi::LinkerInterfaceFile *file, const Options *opts, bool buildingForSimulator,
-						 bool indirectDylib, bool linkingFlatNamespace, bool linkingMainExecutable,
-						 const char *path, Options::Platform platform, const char *targetInstallPath);
-	void			buildExportHashTable(const tapi::LinkerInterfaceFile* file);
+	void				init(tapi::LinkerInterfaceFile* file, const Options *opts, bool buildingForSimulator,
+									 bool indirectDylib, bool linkingFlatNamespace, bool linkingMainExecutable,
+									 const char *path, const ld::VersionSet& platforms, const char *targetInstallPath,
+									 bool ignoreMismatchPlatform, bool usingBitcode);
+	void				buildExportHashTable(const tapi::LinkerInterfaceFile* file);
+	static bool useSimulatorVariant();
 	
-	const Options 	*_opts;
-	std::unique_ptr<tapi::LinkerInterfaceFile> _interface;
+	const Options* _opts;
+	tapi::LinkerInterfaceFile* _interface;
 };
 
-static ld::File::ObjcConstraint mapObjCConstraint(tapi::ObjCConstraint constraint) {
-	switch (constraint) {
-	case tapi::ObjCConstraint::None:
-		return ld::File::objcConstraintNone;
-	case tapi::ObjCConstraint::Retain_Release:
-		return ld::File::objcConstraintRetainRelease;
-	case tapi::ObjCConstraint::Retain_Release_For_Simulator:
-		return ld::File::objcConstraintRetainReleaseForSimulator;
-	case tapi::ObjCConstraint::Retain_Release_Or_GC:
-		return ld::File::objcConstraintRetainReleaseOrGC;
-	case tapi::ObjCConstraint::GC:
-		return ld::File::objcConstraintGC;
-	}
+template <> bool File<x86>::useSimulatorVariant() { return true; }
+template <> bool File<x86_64>::useSimulatorVariant() { return true; }
+template <typename A> bool File<A>::useSimulatorVariant() { return false; }
 
-	return ld::File::objcConstraintNone;
-}
 
-static Options::Platform mapPlatform(tapi::Platform platform) {
+static ld::VersionSet mapPlatform(tapi::Platform platform, bool useSimulatorVariant) {
+	ld::VersionSet platforms;
 	switch (platform) {
 	case tapi::Platform::Unknown:
-		return Options::kPlatformUnknown;
+		break;
 	case tapi::Platform::OSX:
-		return Options::kPlatformOSX;
+		platforms.add({ld::kPlatform_macOS, 0});
+		break;
 	case tapi::Platform::iOS:
-		return Options::kPlatformiOS;
+		if (useSimulatorVariant)
+			platforms.add({ld::kPlatform_iOSSimulator, 0});
+		else
+			platforms.add({ld::kPlatform_iOS, 0});
+		break;
 	case tapi::Platform::watchOS:
-		return Options::kPlatformWatchOS;
+		if (useSimulatorVariant)
+			platforms.add({ld::kPlatform_watchOSSimulator, 0});
+		else
+			platforms.add({ld::kPlatform_watchOS, 0});
+		break;
 	case tapi::Platform::tvOS:
-		return Options::kPlatform_tvOS;
+		if (useSimulatorVariant)
+			platforms.add({ld::kPlatform_tvOSSimulator, 0});
+		else
+			platforms.add({ld::kPlatform_tvOS, 0});
+		break;
 	#if ((TAPI_API_VERSION_MAJOR == 1 &&  TAPI_API_VERSION_MINOR >= 2) || (TAPI_API_VERSION_MAJOR > 1))
 	case tapi::Platform::bridgeOS:
-		return Options::kPlatform_bridgeOS;
+		platforms.add({ld::kPlatform_bridgeOS, 0});
+		break;
+	#endif
+	#if ((TAPI_API_VERSION_MAJOR == 1 &&  TAPI_API_VERSION_MINOR >= 4) || (TAPI_API_VERSION_MAJOR > 1))
+	case tapi::Platform::iOSMac:
+		platforms.add({ld::kPlatform_iOSMac, 0});
+		break;
+	case tapi::Platform::zippered:
+		platforms.add({ld::kPlatform_macOS, 0});
+		platforms.add({ld::kPlatform_iOSMac, 0});
+		break;
 	#endif
 	}
 
-	return Options::kPlatformUnknown;
+	return platforms;
 }
 
-	template <typename A>
-	File<A>::File(const char* path, const uint8_t* fileContent, uint64_t fileLength, const Options *opts,
-			  time_t mTime, ld::File::Ordinal ord, bool linkingFlatNamespace,
-			  bool linkingMainExecutable, bool hoistImplicitPublicDylibs, Options::Platform platform,
-			  uint32_t linkMinOSVersion, bool allowWeakImports, cpu_type_t cpuType, cpu_subtype_t cpuSubType,
-				bool enforceDylibSubtypesMatch, bool allowSimToMacOSX, bool addVers,
-			  bool buildingForSimulator, bool logAllFiles, const char* targetInstallPath,
-			  bool indirectDylib)
-	: Base(strdup(path), mTime, ord, platform, linkMinOSVersion, allowWeakImports, linkingFlatNamespace,
-		   hoistImplicitPublicDylibs, allowSimToMacOSX, addVers)
+template <typename A>
+File<A>::File(const char* path, const uint8_t* fileContent, uint64_t fileLength, const Options *opts,
+		  time_t mTime, ld::File::Ordinal ord, bool linkingFlatNamespace,
+		  bool linkingMainExecutable, bool hoistImplicitPublicDylibs, const ld::VersionSet& platforms,
+		  bool allowWeakImports, cpu_type_t cpuType, cpu_subtype_t cpuSubType,
+		  bool enforceDylibSubtypesMatch, bool allowSimToMacOSX, bool addVers,
+		  bool buildingForSimulator, bool logAllFiles, const char* targetInstallPath,
+		  bool indirectDylib, bool ignoreMismatchPlatform, bool usingBitcode)
+: Base(strdup(path), mTime, ord, platforms, allowWeakImports, linkingFlatNamespace,
+	   hoistImplicitPublicDylibs, allowSimToMacOSX, addVers)
 {
+	std::unique_ptr<tapi::LinkerInterfaceFile> file;
 	std::string errorMessage;
+	__block uint32_t linkMinOSVersion = 0;
+	//FIXME handle this correctly once we have multi-platfrom TAPI
+	platforms.forEach(^(ld::Platform platform, uint32_t version, bool &stop) {
+		if (linkMinOSVersion == 0)
+			linkMinOSVersion = version;
+		if (platform == ld::kPlatform_macOS)
+			linkMinOSVersion = version;
+	});
 
 // <rdar://problem/29038544> Support $ld$weak symbols in .tbd files
 #if ((TAPI_API_VERSION_MAJOR == 1 &&  TAPI_API_VERSION_MINOR >= 3) || (TAPI_API_VERSION_MAJOR > 1))
@@ -141,9 +166,9 @@ static Options::Platform mapPlatform(tapi::Platform platform) {
 		if (!allowWeakImports)
 			flags |= tapi::ParsingFlags::DisallowWeakImports;
 
-		_interface.reset(tapi::LinkerInterfaceFile::create(
+		_interface = tapi::LinkerInterfaceFile::create(
 			path, cpuType, cpuSubType, flags,
-			tapi::PackedVersion32(linkMinOSVersion), errorMessage));
+			tapi::PackedVersion32(linkMinOSVersion), errorMessage);
 	} else
 #endif
 #if ((TAPI_API_VERSION_MAJOR == 1 &&  TAPI_API_VERSION_MINOR >= 1) || (TAPI_API_VERSION_MAJOR > 1))
@@ -155,9 +180,9 @@ static Options::Platform mapPlatform(tapi::Platform platform) {
 		if (!allowWeakImports)
 			flags |= tapi::ParsingFlags::DisallowWeakImports;
 
-		_interface.reset(tapi::LinkerInterfaceFile::create(
+		_interface = tapi::LinkerInterfaceFile::create(
 			path, fileContent, fileLength, cpuType, cpuSubType, flags,
-			tapi::PackedVersion32(linkMinOSVersion), errorMessage));
+			tapi::PackedVersion32(linkMinOSVersion), errorMessage);
 	} else
 #endif
 #if (TAPI_API_VERSION_MAJOR >= 1)
@@ -165,9 +190,9 @@ static Options::Platform mapPlatform(tapi::Platform platform) {
 		auto matchingType = enforceDylibSubtypesMatch ?
 			tapi::CpuSubTypeMatching::Exact : tapi::CpuSubTypeMatching::ABI_Compatible;
 
-		_interface.reset(tapi::LinkerInterfaceFile::create(
+		_interface = tapi::LinkerInterfaceFile::create(
 			path, fileContent, fileLength, cpuType, cpuSubType, matchingType,
-			tapi::PackedVersion32(linkMinOSVersion), errorMessage));
+			tapi::PackedVersion32(linkMinOSVersion), errorMessage);
 	}
 #endif
 
@@ -181,29 +206,31 @@ static Options::Platform mapPlatform(tapi::Platform platform) {
 	if ( logAllFiles )
 		printf("%s\n", path);
 
-	init(_interface.get(), opts, buildingForSimulator, indirectDylib, linkingFlatNamespace,
-		 linkingMainExecutable, path, platform, targetInstallPath);
+	init(_interface, opts, buildingForSimulator, indirectDylib, linkingFlatNamespace,
+		 linkingMainExecutable, path, platforms, targetInstallPath, ignoreMismatchPlatform, usingBitcode);
 }
 
 	template<typename A>
-	File<A>::File(std::unique_ptr<tapi::LinkerInterfaceFile> &&file, const char* path, const Options *opts,
+	File<A>::File(tapi::LinkerInterfaceFile* file, const char* path, const Options *opts,
 				  time_t mTime, ld::File::Ordinal ordinal, bool linkingFlatNamespace,
 				 bool linkingMainExecutable, bool hoistImplicitPublicDylibs,
-				 Options::Platform platform, uint32_t linkMinOSVersion, bool allowWeakImports,
+				 const ld::VersionSet& platforms, bool allowWeakImports,
 				 cpu_type_t cpuType, cpu_subtype_t cpuSubType, bool enforceDylibSubtypesMatch,
 				 bool allowSimToMacOSX, bool addVers, bool buildingForSimulator,
-				 bool logAllFiles, const char* installPath, bool indirectDylib)
-	: Base(strdup(path), mTime, ordinal, platform, linkMinOSVersion, allowWeakImports, linkingFlatNamespace,
-		   hoistImplicitPublicDylibs, allowSimToMacOSX, addVers), _interface(std::move(file))
+				 bool logAllFiles, const char* installPath, bool indirectDylib,
+				 bool ignoreMismatchPlatform, bool usingBitcode)
+	: Base(strdup(path), mTime, ordinal, platforms, allowWeakImports, linkingFlatNamespace,
+		   hoistImplicitPublicDylibs, allowSimToMacOSX, addVers), _interface(file)
 {
-	init(_interface.get(), opts, buildingForSimulator, indirectDylib, linkingFlatNamespace,
-		 linkingMainExecutable, path, platform, installPath);
+	init(_interface, opts, buildingForSimulator, indirectDylib, linkingFlatNamespace,
+		 linkingMainExecutable, path, platforms, installPath, ignoreMismatchPlatform, usingBitcode);
 }
 	
 template<typename A>
-void File<A>::init(tapi::LinkerInterfaceFile *file, const Options *opts, bool buildingForSimulator,
+void File<A>::init(tapi::LinkerInterfaceFile* file, const Options *opts, bool buildingForSimulator,
 				   bool indirectDylib, bool linkingFlatNamespace, bool linkingMainExecutable,
-				   const char *path, Options::Platform platform, const char *targetInstallPath) {
+				   const char *path, const ld::VersionSet& platforms, const char *targetInstallPath,
+				   bool ignoreMismatchPlatform, bool usingBitcode) {
 	_opts = opts;
 	this->_bitcode = std::unique_ptr<ld::Bitcode>(new ld::Bitcode(nullptr, 0));
 	this->_noRexports = !file->hasReexportedLibraries();
@@ -213,7 +240,6 @@ void File<A>::init(tapi::LinkerInterfaceFile *file, const Options *opts, bool bu
 	this->_dylibCurrentVersion = file->getCurrentVersion();
 	this->_dylibCompatibilityVersion = file->getCompatibilityVersion();
 	this->_swiftVersion = file->getSwiftVersion();
-	this->_objcConstraint = mapObjCConstraint(file->getObjCConstraint());
 	this->_parentUmbrella = file->getParentFrameworkName().empty() ? nullptr : strdup(file->getParentFrameworkName().c_str());
 	this->_appExtensionSafe = file->isApplicationExtensionSafe();
 
@@ -237,21 +263,35 @@ void File<A>::init(tapi::LinkerInterfaceFile *file, const Options *opts, bool bu
 	
 	for (const auto &client : file->allowableClients())
 		this->_allowableClients.emplace_back(strdup(client.c_str()));
-	
-	auto dylibPlatform = mapPlatform(file->getPlatform());
-	if ( (dylibPlatform != platform) && (platform != Options::kPlatformUnknown) ) {
-		this->_wrongOS = true;
-		if ( this->_addVersionLoadCommand && !indirectDylib ) {
-			if ( buildingForSimulator ) {
-				if ( !this->_allowSimToMacOSXLinking )
-					throwf("building for %s simulator, but linking against dylib built for %s (%s).",
-						   Options::platformName(platform), Options::platformName(dylibPlatform), path);
+
+	ld::VersionSet lcPlatforms = mapPlatform(file->getPlatform(), useSimulatorVariant());
+	this->_platforms = lcPlatforms;
+
+	// check cross-linking
+	platforms.forEach(^(ld::Platform platform, uint32_t version, bool &stop) {
+		if (!lcPlatforms.contains(platform) ) {
+			this->_wrongOS = true;
+			if ( this->_addVersionLoadCommand && !indirectDylib && !ignoreMismatchPlatform ) {
+				if (buildingForSimulator && !this->_allowSimToMacOSXLinking) {
+					if ( usingBitcode )
+						throwf("building for %s simulator, but linking against dylib built for %s,",
+									 platforms.to_str().c_str(), lcPlatforms.to_str().c_str());
+					else
+						warning("URGENT: building for %s simulator, but linking against dylib (%s) built for %s. "
+										"Note: This will be an error in the future.",
+										platforms.to_str().c_str(), path, lcPlatforms.to_str().c_str());
+				}
 			} else {
-				throwf("building for %s, but linking against dylib built for %s (%s).",
-					   Options::platformName(platform), Options::platformName(dylibPlatform), path);
+				if ( usingBitcode )
+					throwf("building for %s, but linking against dylib built for %s,",
+								 platforms.to_str().c_str(), lcPlatforms.to_str().c_str());
+				else if ( (getenv("RC_XBS") != NULL) && (getenv("RC_BUILDIT") == NULL) ) // FIXME: remove after platform bringup
+					warning("URGENT: building for %s, but linking against dylib (%s) built for %s. "
+									"Note: This will be an error in the future.",
+									platforms.to_str().c_str(), path, lcPlatforms.to_str().c_str());
 			}
 		}
-	}
+	});
 	
 	for (const auto& reexport : file->reexportedLibraries()) {
 		const char *path = strdup(reexport.c_str());
@@ -297,7 +337,7 @@ void File<A>::buildExportHashTable(const tapi::LinkerInterfaceFile* file) {
 template <typename A>
 void File<A>::processIndirectLibraries(ld::dylib::File::DylibHandler* handler, bool addImplicitDylibs) {
 	if (_interface)
-		_opts->addTAPIInterface(_interface.get(), this->path());
+		_opts->addTAPIInterface(_interface, this->path());
 	Base::processIndirectLibraries(handler, addImplicitDylibs);
 }
 
@@ -310,107 +350,143 @@ public:
 	static ld::dylib::File*	parse(const char* path, const uint8_t* fileContent,
 								  uint64_t fileLength, time_t mTime,
 								  ld::File::Ordinal ordinal, const Options& opts,
-								  bool indirectDylib)
+								  bool indirectDylib, cpu_type_t architecture, cpu_subtype_t subArchitecture)
 	{
 		return new File<A>(path, fileContent, fileLength, &opts, mTime, ordinal,
 						   opts.flatNamespace(),
 						   opts.linkingMainExecutable(),
 						   opts.implicitlyLinkIndirectPublicDylibs(),
-						   opts.platform(),
-						   opts.minOSversion(),
+						   opts.platforms(),
 						   opts.allowWeakImports(),
-						   opts.architecture(),
-						   opts.subArchitecture(),
+						   architecture,
+						   subArchitecture,
 						   opts.enforceDylibSubtypesMatch(),
 						   opts.allowSimulatorToLinkWithMacOSX(),
 						   opts.addVersionLoadCommand(),
 						   opts.targetIOSSimulator(),
 						   opts.logAllFiles(),
 						   opts.installPath(),
-						   indirectDylib);
+						   indirectDylib,
+						   opts.outputKind() == Options::kPreload,
+				   		   opts.bundleBitcode());
 	}
 	
-	static ld::dylib::File*	parse(const char* path, std::unique_ptr<tapi::LinkerInterfaceFile> &&file, time_t mTime,
+	static ld::dylib::File*	parse(const char* path, tapi::LinkerInterfaceFile* file, time_t mTime,
 								  ld::File::Ordinal ordinal, const Options& opts,
-								  bool indirectDylib)
+								  bool indirectDylib, cpu_type_t architecture, cpu_subtype_t subArchitecture)
 	{
-		return new File<A>(std::move(file), path, &opts, mTime, ordinal,
+		return new File<A>(file, path, &opts, mTime, ordinal,
 						   opts.flatNamespace(),
 						   opts.linkingMainExecutable(),
 						   opts.implicitlyLinkIndirectPublicDylibs(),
-						   opts.platform(),
-						   opts.minOSversion(),
+						   opts.platforms(),
 						   opts.allowWeakImports(),
-						   opts.architecture(),
-						   opts.subArchitecture(),
+						   architecture,
+						   subArchitecture,
 						   opts.enforceDylibSubtypesMatch(),
 						   opts.allowSimulatorToLinkWithMacOSX(),
 						   opts.addVersionLoadCommand(),
 						   opts.targetIOSSimulator(),
 						   opts.logAllFiles(),
 						   opts.installPath(),
-						   indirectDylib);
+						   indirectDylib,
+						   opts.outputKind() == Options::kPreload,
+						   opts.bundleBitcode());
 	}
 
 };
+
+
+static ld::dylib::File* parseAsArchitecture(const uint8_t* fileContent, uint64_t fileLength, const char* path,
+											time_t modTime, ld::File::Ordinal ordinal, const Options& opts,
+											bool bundleLoader, bool indirectDylib,
+											cpu_type_t architecture, cpu_subtype_t subArchitecture)
+{
+	switch ( architecture ) {
+#if SUPPORT_ARCH_x86_64
+		case CPU_TYPE_X86_64:
+			return Parser<x86_64>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib, architecture, subArchitecture);
+#endif
+#if SUPPORT_ARCH_i386
+		case CPU_TYPE_I386:
+			return Parser<x86>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib, architecture, subArchitecture);
+#endif
+#if SUPPORT_ARCH_arm_any
+		case CPU_TYPE_ARM:
+			return Parser<arm>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib, architecture, subArchitecture);
+#endif
+#if SUPPORT_ARCH_arm64
+		case CPU_TYPE_ARM64:
+			return Parser<arm64>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib, architecture, subArchitecture);
+#endif
+		default:
+			throwf("unsupported architecture for tbd file");
+	}
+	assert(0 && "function should return valid pointer or throw");
+}
+
+
+static ld::dylib::File *parseAsArchitecture(const char *path, tapi::LinkerInterfaceFile* file, time_t modTime,
+																						ld::File::Ordinal ordinal, const Options& opts, bool indirectDylib,
+																						cpu_type_t architecture, cpu_subtype_t subArchitecture)
+{
+	switch ( architecture ) {
+#if SUPPORT_ARCH_x86_64
+		case CPU_TYPE_X86_64:
+			return Parser<x86_64>::parse(path, file, modTime, ordinal, opts, indirectDylib, architecture, subArchitecture);
+#endif
+#if SUPPORT_ARCH_i386
+		case CPU_TYPE_I386:
+			return Parser<x86>::parse(path, file, modTime, ordinal, opts, indirectDylib, architecture, subArchitecture);
+#endif
+#if SUPPORT_ARCH_arm_any
+		case CPU_TYPE_ARM:
+			return Parser<arm>::parse(path, file, modTime, ordinal, opts, indirectDylib, architecture, subArchitecture);
+#endif
+#if SUPPORT_ARCH_arm64
+		case CPU_TYPE_ARM64:
+			return Parser<arm64>::parse(path, file, modTime, ordinal, opts, indirectDylib, architecture, subArchitecture);
+#endif
+		default:
+			throwf("unsupported architecture for tbd file");
+	}
+	assert(0 && "function should return valid pointer or throw");
+}
+
 
 //
 // main function used by linker to instantiate ld::Files
 //
 ld::dylib::File* parse(const uint8_t* fileContent, uint64_t fileLength, const char* path,
-					   time_t modTime, const Options& opts, ld::File::Ordinal ordinal,
+					   time_t modtime, const Options& opts, ld::File::Ordinal ordinal,
 					   bool bundleLoader, bool indirectDylib)
 {
+	if (!tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
+		return nullptr;
 
-	switch ( opts.architecture() ) {
-#if SUPPORT_ARCH_x86_64
-		case CPU_TYPE_X86_64:
-		if (tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
-			return Parser<x86_64>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib);
-#endif
-#if SUPPORT_ARCH_i386
-		case CPU_TYPE_I386:
-		if (tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
-			return Parser<x86>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib);
-#endif
-#if SUPPORT_ARCH_arm_any
-		case CPU_TYPE_ARM:
-		if (tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
-			return Parser<arm>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib);
-#endif
-#if SUPPORT_ARCH_arm64
-		case CPU_TYPE_ARM64:
-		if (tapi::LinkerInterfaceFile::isSupported(path, fileContent, fileLength))
-			return Parser<arm64>::parse(path, fileContent, fileLength, modTime, ordinal, opts, indirectDylib);
-#endif
+	try {
+		return parseAsArchitecture(fileContent, fileLength, path, modtime, ordinal, opts, bundleLoader, indirectDylib, opts.architecture(), opts.subArchitecture());
+	} catch (...) {
+		if (!opts.fallbackArchitecture())
+			throw;
 	}
-	return nullptr;
+
+	warning("architecture %s not present in TBD %s, attempting fallback", opts.architectureName(), path);
+	return parseAsArchitecture(fileContent, fileLength, path, modtime, ordinal, opts, bundleLoader, indirectDylib, opts.fallbackArchitecture(), opts.fallbackSubArchitecture());
 }
 
-ld::dylib::File *parse(const char *path, std::unique_ptr<tapi::LinkerInterfaceFile> &&file, time_t modTime,
+ld::dylib::File *parse(const char *path, tapi::LinkerInterfaceFile* file, time_t modTime,
 					   ld::File::Ordinal ordinal, const Options& opts, bool indirectDylib) {
-	switch ( opts.architecture() ) {
-#if SUPPORT_ARCH_x86_64
-		case CPU_TYPE_X86_64:
-			return Parser<x86_64>::parse(path, std::move(file), modTime, ordinal, opts, indirectDylib);
-#endif
-#if SUPPORT_ARCH_i386
-		case CPU_TYPE_I386:
-			return Parser<x86>::parse(path, std::move(file), modTime, ordinal, opts, indirectDylib);
-#endif
-#if SUPPORT_ARCH_arm_any
-		case CPU_TYPE_ARM:
-			return Parser<arm>::parse(path, std::move(file), modTime, ordinal, opts, indirectDylib);
-#endif
-#if SUPPORT_ARCH_arm64
-		case CPU_TYPE_ARM64:
-			return Parser<arm64>::parse(path, std::move(file), modTime, ordinal, opts, indirectDylib);
-#endif
+	try {
+		return parseAsArchitecture(path, file, modTime, ordinal, opts, indirectDylib, opts.architecture(), opts.subArchitecture());
+	} catch (...) {
+		if (!opts.fallbackArchitecture())
+			throw;
 	}
-	return nullptr;
 
+	warning("architecture %s not present in TBD %s, attempting fallback", opts.architectureName(), path);
+	return parseAsArchitecture(path, file, modTime, ordinal, opts, indirectDylib, opts.fallbackArchitecture(), opts.fallbackSubArchitecture());
 }
-
 
 } // namespace dylib
 } // namespace textstub

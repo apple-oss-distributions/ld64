@@ -33,12 +33,11 @@ include ${TESTROOT}/include/common.makefile
 STRING_LABEL_COUNT = 0
 
 ifeq (${ARCH},x86_64)
-	STRING_LABEL_COUNT = 3
+	STRING_LABEL_COUNT = 2
 endif
-ifeq (${ARCH},i386)
-	STRING_LABEL_COUNT = 1
+ifeq (${ARCH},arm64)
+	STRING_LABEL_COUNT = 2
 endif
-
 
 
 run: all
@@ -56,4 +55,4 @@ all:
 	${PASS_IFF} /usr/bin/true
 
 clean:
-	rm  foo.o bar.o foobar.o libfoobar.dylib
+	rm -f foo.o bar.o foobar.o libfoobar.dylib

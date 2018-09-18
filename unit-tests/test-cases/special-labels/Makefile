@@ -31,7 +31,7 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	as -arch ${ARCH} -L extra.s -o extra.o
+	${AS} -Wa,-L extra.s -o extra.o
 	${CC} ${CCFLAGS} main.c extra.o -o main
 	nm main | grep "lother" | ${FAIL_IF_STDIN}
 	nm main | grep "L123" | ${FAIL_IF_STDIN}

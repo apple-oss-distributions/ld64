@@ -371,8 +371,10 @@ ld::relocatable::File* Parser::parseMachOFile(const uint8_t* p, size_t len, cons
 	objOpts.armUsesZeroCostExceptions = options.armUsesZeroCostExceptions;
 	objOpts.simulator			= options.simulator;
 	objOpts.ignoreMismatchPlatform = options.ignoreMismatchPlatform;
-	objOpts.platform			= options.platform;
-	objOpts.minOSVersion		= options.minOSVersion;
+#if SUPPORT_ARCH_arm64e
+	objOpts.supportsAuthenticatedPointers = options.supportsAuthenticatedPointers;
+#endif
+	objOpts.platforms			= options.platforms;
 	objOpts.subType				= 0;
 	objOpts.srcKind				= ld::relocatable::File::kSourceLTO;
 	objOpts.treateBitcodeAsData = false;
@@ -1059,7 +1061,8 @@ thinlto_code_gen_t Parser::init_thinlto_codegen(const std::vector<File*>&       
 			}
 		}
 		thinlto_codegen_set_cache_dir(thingenerator, options.ltoCachePath);
-		thinlto_codegen_set_cache_pruning_interval(thingenerator, options.ltoPruneInterval);
+		if (options.ltoPruneIntervalOverwrite)
+			thinlto_codegen_set_cache_pruning_interval(thingenerator, options.ltoPruneInterval);
 		thinlto_codegen_set_cache_entry_expiration(thingenerator, options.ltoPruneAfter);
 		thinlto_codegen_set_final_cache_size_relative_to_available_space(thingenerator, options.ltoMaxCacheSize);
 	}
@@ -1129,7 +1132,10 @@ thinlto_code_gen_t Parser::init_thinlto_codegen(const std::vector<File*>&       
 			}
 		}
 		if (atom->contentType() == ld::Atom::typeLTOtemporary &&
-			((lto::File *)atom->file())->isThinLTO()) {
+			((lto::File *)atom->file())->isThinLTO() &&
+			atom != &((lto::File *)atom->file())->internalAtom()) {
+			assert(atom->scope() != ld::Atom::scopeTranslationUnit && "LTO should not expose static atoms");
+			assert(llvmAtoms.find(atom->name()) == llvmAtoms.end() && "Unexpected llvmAtom with duplicate name");
 			llvmAtoms[atom->name()] = (Atom*)atom;
 		}
 	}
@@ -1179,6 +1185,13 @@ thinlto_code_gen_t Parser::init_thinlto_codegen(const std::vector<File*>&       
 		} else {
 			if ( logMustPreserve ) fprintf(stderr, "NOT preserving(%s)\n", name);
 		}
+
+		// <rdar://problem/16165191> tell code generator to preserve initial undefines
+		for (const char* undefName : *options.initialUndefines) {
+			if ( logMustPreserve ) fprintf(stderr, "thinlto_codegen_add_cross_referenced_symbol(%s) because it is an initial undefine\n", undefName);
+			::thinlto_codegen_add_cross_referenced_symbol(thingenerator, undefName, strlen(undefName));
+		}
+
 // FIXME: to be implemented
 //		else if ( options.relocatable && hasNonllvmAtoms ) {
 //			// <rdar://problem/14334895> ld -r mode but merging in some mach-o files, so need to keep libLTO from optimizing away anything
@@ -1242,6 +1255,9 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 		// Save the codegenerator
 		thinlto_code_gen_t bitcode_generator = thingenerator;
 		// Create a new codegen generator for the codegen part.
+		// Clear out the stored atoms so we can recompute them.
+		deadllvmAtoms.clear();
+		llvmAtoms.clear();
 		thingenerator = init_thinlto_codegen(files, allAtoms, state, options, deadllvmAtoms, llvmAtoms);
 		// Disable the optimizer
 		thinlto_codegen_set_codegen_only(thingenerator, true);
@@ -1465,6 +1481,14 @@ void Parser::AtomSyncer::doAtom(const ld::Atom& machoAtom)
 			if (log) fprintf(stderr, "demote %s to hidden after LTO\n", name);
 			(const_cast<ld::Atom*>(&machoAtom))->setScope(ld::Atom::scopeLinkageUnit);
 		}
+		// If both llvmAtom and machoAtom has the same scope and combine, but machoAtom loses auto hide, add it back.
+		// rdar://problem/38646854
+		if (pos->second->scope() == machoAtom.scope() &&
+			pos->second->combine() == machoAtom.combine() &&
+			pos->second->autoHide() && !machoAtom.autoHide()) {
+			if (log) fprintf(stderr, "set %s to auto hide after LTO\n", name);
+			(const_cast<ld::Atom*>(&machoAtom))->setAutoHide();
+		}
 		pos->second->setCompiledAtom(machoAtom);
 		_lastProxiedAtom = &machoAtom;
 		_lastProxiedFile = pos->second->file();
@@ -1513,7 +1537,7 @@ void Parser::AtomSyncer::doAtom(const ld::Atom& machoAtom)
 			if ( (_lastProxiedAtom != NULL) && (_lastProxiedAtom->section() == machoAtom.section()) ) {
 				ld::Atom* ma = const_cast<ld::Atom*>(&machoAtom);
 				ma->setFile(_lastProxiedFile);
-				if (log) fprintf(stderr, "AtomSyncer, mach-o atom %s is proxied to %s (path=%s)\n", machoAtom.name(), _lastProxiedAtom->name(), _lastProxiedFile->path());
+				if (log) fprintf(stderr, "AtomSyncer, mach-o atom %s is static and being assigned to %s\n", machoAtom.name(), _lastProxiedFile->path());
 			}
 			if (log) fprintf(stderr, "AtomSyncer, mach-o atom %p is totally new (name=%s)\n", &machoAtom, machoAtom.name());
 		}

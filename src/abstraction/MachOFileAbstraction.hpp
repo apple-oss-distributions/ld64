@@ -64,6 +64,9 @@
 #ifndef MH_KEXT_BUNDLE
 	#define MH_KEXT_BUNDLE 11
 #endif
+#ifndef MH_SIM_SUPPORT
+	#define MH_SIM_SUPPORT 0x08000000
+#endif
 #ifndef LC_DYLD_INFO
 	#define	LC_DYLD_INFO 	0x22	/* compressed dyld information */
 	#define	LC_DYLD_INFO_ONLY (0x22|LC_REQ_DYLD)	/* compressed dyld information only */
@@ -133,7 +136,35 @@
 	#define EXPORT_SYMBOL_FLAGS_INDIRECT_DEFINITION			0x08
 	#define EXPORT_SYMBOL_FLAGS_HAS_SPECIALIZATIONS			0x10
 
-#endif 
+#endif
+
+#ifndef BIND_SPECIAL_DYLIB_WEAK_LOOKUP
+#define BIND_SPECIAL_DYLIB_WEAK_LOOKUP				-3
+#endif
+
+#ifndef BIND_OPCODE_THREADED
+#define BIND_OPCODE_THREADED	0xD0
+#endif
+
+#ifndef BIND_SUBOPCODE_THREADED_SET_BIND_ORDINAL_TABLE_SIZE_ULEB
+#define BIND_SUBOPCODE_THREADED_SET_BIND_ORDINAL_TABLE_SIZE_ULEB	0x00
+#endif
+
+#ifndef BIND_SUBOPCODE_THREADED_APPLY
+#define BIND_SUBOPCODE_THREADED_APPLY								0x01
+#endif
+
+#if SUPPORT_ARCH_arm64e
+
+// clang encodes the combination of the key bits as these values.
+typedef enum {
+	ptrauth_key_asia = 0,
+	ptrauth_key_asib = 1,
+	ptrauth_key_asda = 2,
+	ptrauth_key_asdb = 3,
+} ptrauth_key;
+
+#endif
 
 #ifndef S_THREAD_LOCAL_REGULAR
 	#define S_THREAD_LOCAL_REGULAR                   0x11
@@ -276,6 +307,9 @@
 #define ARM64_RELOC_TLVP_LOAD_PAGEOFF12 9 // offset within page of TLVP slot, scaled by r_length
 #define ARM64_RELOC_ADDEND				10 // r_symbolnum is addend for next reloc
 
+#if SUPPORT_ARCH_arm64e
+	#define ARM64_RELOC_AUTHENTICATED_POINTER				11 // An authenticated pointer.
+#endif
 
 
 #define UNW_ARM64_X0     0
@@ -505,6 +539,7 @@
 #define DYLD_CACHE_ADJ_V2_THUMB_MOVW_MOVT		0x0A
 #define DYLD_CACHE_ADJ_V2_THUMB_BR22			0x0B
 #define DYLD_CACHE_ADJ_V2_IMAGE_OFF_32			0x0C
+#define DYLD_CACHE_ADJ_V2_THREADED_POINTER_64			0x0D
 
 
 #ifndef LC_BUILD_VERSION
@@ -554,6 +589,9 @@
 	};
 #endif
 
+#ifndef PLATFORM_IOSMAC
+	#define PLATFORM_IOSMAC 6
+#endif
 
 // kind target-address fixup-addr [adj] 
 

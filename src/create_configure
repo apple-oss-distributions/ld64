@@ -25,18 +25,7 @@ do
 	fi
 done
 
-if [ -n "${RC_HIDE_TIDE}" ]; then
-	echo "#define ALL_SUPPORTED_ARCHS  \"${RC_SUPPORTED_ARCHS}\"" >> ${DERIVED_FILE_DIR}/configure.h
-	echo "#define SUPPORT_APPLE_TV 0" >> ${DERIVED_FILE_DIR}/configure.h
-else
-	if [ -n "${DT_VARIANT}" -a "${DT_VARIANT}" != "PONDEROSA" ]; then
-		echo "#define ALL_SUPPORTED_ARCHS  \"${RC_SUPPORTED_ARCHS}\"" >> ${DERIVED_FILE_DIR}/configure.h
-		echo "#define SUPPORT_APPLE_TV 0" >> ${DERIVED_FILE_DIR}/configure.h
-	else
-		echo "#define ALL_SUPPORTED_ARCHS  \"${RC_SUPPORTED_ARCHS} (tvOS)\"" >> ${DERIVED_FILE_DIR}/configure.h
-		echo "#define SUPPORT_APPLE_TV 1" >> ${DERIVED_FILE_DIR}/configure.h
-	fi
-fi
+echo "#define ALL_SUPPORTED_ARCHS  \"${RC_SUPPORTED_ARCHS}\"" >> ${DERIVED_FILE_DIR}/configure.h
 
 if [ -f "${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib" ]; then
 	echo "${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib" >  ${DERIVED_FILE_DIR}/linkExtras

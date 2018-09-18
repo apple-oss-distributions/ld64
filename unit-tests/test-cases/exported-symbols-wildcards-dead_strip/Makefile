@@ -31,8 +31,8 @@ run: all
 
 all:
 	${CC} -dynamiclib foo.c -o libfoo.dylib -Wl,-exported_symbol -Wl,'_AB*' -dead_strip
-	nm -j -f libfoo.dylib | grep _good | ${FAIL_IF_EMPTY}
-	nm -j -f libfoo.dylib | grep _bad | ${FAIL_IF_STDIN}
+	nm -j libfoo.dylib | grep _good | ${FAIL_IF_EMPTY}
+	nm -j libfoo.dylib | grep _bad | ${FAIL_IF_STDIN}
 	${PASS_IFF_GOOD_MACHO} libfoo.dylib
 	
 clean:

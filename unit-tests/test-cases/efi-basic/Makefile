@@ -60,10 +60,12 @@ all:
 	${CC} -arch $(ARCH)  -o MtocTest1.obj $(LOCAL_CC_FLAGS) -c MtocTest.c 
 	libtool -static -o MtocTest1.lib MtocTest1.obj	
 	${LD} -arch $(ARCH)  -o MtocTest1.macho  -u __ModuleEntryPoint -e __ModuleEntryPoint $(LD_ARG) -preload -segalign 0x20 -pie -seg1addr 0x240 -map MtocTest1.map LibTest1.lib MtocTest1.lib
-	/usr/local/efi/bin/mtoc -subsystem application -align 0x20 -d MtocTest1.macho MtocTest1.macho MtocTest1.pecoff
-	otool -rR MtocTest1.macho > otool-reloc.log
-	otool -l MtocTest1.macho > otool-load.log 
-	/usr/local/efi/bin/objdump -b $(OBJ_DUMP_ARCH) -x MtocTest1.pecoff > objdump-raw.log
+	${MTOC} -subsystem application -align 0x20 -d MtocTest1.macho MtocTest1.macho MtocTest1.pecoff
+	${OTOOL} -r MtocTest1.macho > otool-reloc.log
+	${OTOOL} -l MtocTest1.macho > otool-load.log 
+# The following will fail as the binutils objdump is no longer available.
+#	/usr/local/efi/bin/objdump -b $(OBJ_DUMP_ARCH) -x MtocTest1.pecoff > objdump-raw.log
+	./efi-pecoff-util MtocTest1.pecoff > efi-pecoff-util-raw.log
 	${PASS_IFF_SUCCESS} ./mtoctest.py --arch $(ARCH)
   
   

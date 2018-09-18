@@ -40,7 +40,7 @@ all-old:
 	# -sub_library for 10.4
 	${CC} ${CCFLAGS} -dynamiclib bar.c -o libbar.dylib  -install_name /usr/lib/libbar.dylib -mmacosx-version-min=10.4
 	${FAIL_IF_BAD_MACHO} libbar.dylib
-	${CC} ${CCFLAGS} -dynamiclib middle.c -o libmiddle.dylib -lbar -L. -sub_library libbar -install_name /mid/libmiddle.dylib -mmacosx-version-min=10.4
+	${CC} ${CCFLAGS} -dynamiclib middle.c -o libmiddle.dylib -lbar -L. -sub_library libbar -install_name /usr/lib/libmiddle.dylib -mmacosx-version-min=10.4
 	${FAIL_IF_BAD_MACHO} libmiddle.dylib
 	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo.dylib -lmiddle -L. -sub_library libmiddle -install_name /usr/lib/libfoo.dylib -mmacosx-version-min=10.4
 	${FAIL_IF_BAD_MACHO} libfoo.dylib
@@ -54,7 +54,7 @@ all-new:
 	# -sub_library for 10.5
 	${CC} ${CCFLAGS} -dynamiclib bar.c -o libbar.dylib  -install_name /usr/lib/libbar.dylib 
 	${FAIL_IF_BAD_MACHO} libbar.dylib
-	${CC} ${CCFLAGS} -dynamiclib middle.c -o libmiddle.dylib -lbar -L. -sub_library libbar -install_name /mid/libmiddle.dylib 
+	${CC} ${CCFLAGS} -dynamiclib middle.c -o libmiddle.dylib -lbar -L. -sub_library libbar -install_name /usr/lib/libmiddle.dylib 
 	${FAIL_IF_BAD_MACHO} libmiddle.dylib
 	${CC} ${CCFLAGS} -dynamiclib foo.c -o libfoo.dylib -lmiddle -L. -sub_library libmiddle -install_name /usr/lib/libfoo.dylib 
 	${FAIL_IF_BAD_MACHO} libfoo.dylib

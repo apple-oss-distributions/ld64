@@ -31,7 +31,7 @@ include ${TESTROOT}/include/common.makefile
 run: all
 
 all:
-	${CC} ${CCFLAGS} -flto -o foo foo.c -Wl,-dead_strip,-exported_symbol,_my_global -v
+	${CC} ${CCFLAGS} -flto -o foo foo.c -Wl,-dead_strip,-exported_symbol,_my_global
     # Check symbols that are expected to be preserved
 	nm -m foo | grep _global_metadata | ${FAIL_IF_EMPTY}
 	nm -m foo | grep _liveness_binder | ${FAIL_IF_EMPTY}
@@ -40,6 +40,7 @@ all:
 
     # Check symbols that are expected to be stripped
 	nm -m foo | grep unused | ${FAIL_IF_STDIN}
-	
+
+	${PASS_IFF} true
 clean:
 	rm  foo

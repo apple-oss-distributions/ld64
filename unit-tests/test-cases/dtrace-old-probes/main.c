@@ -13,12 +13,21 @@
 #define DTRACE_LAB(p, n)		\
    "__dtrace_probe$" DTRACE_TOSTRING(%=__LINE__) DTRACE_STRINGIFY(_##p##___##n)
 
+#if (defined __x86_64__ || defined __arm64__)
+#define DTRACE_LABEL(p, n)              \
+      ".section __DATA, __data\n\t"     \
+      ".globl " DTRACE_LAB(p, n) "\n\t" \
+      DTRACE_LAB(p, n) ":" ".quad 1f""\n\t"    \
+       ".text" "\n\t"                   \
+        "1:"
+#else
 #define DTRACE_LABEL(p, n)		\
       ".section __DATA, __data\n\t"	\
       ".globl " DTRACE_LAB(p, n) "\n\t"	\
        DTRACE_LAB(p, n) ":\n\t" ".long 1f""\n\t"	\
        ".text" "\n\t"			\
 	"1:"
+#endif
 
 #define DTRACE_CALL(p,n)	\
 	DTRACE_LABEL(p,n)	\
