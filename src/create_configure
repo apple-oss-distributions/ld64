@@ -39,7 +39,7 @@ else
 fi
 
 if [ -f "${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib" ]; then
-	echo "-Wl,-lazy_library,${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib" >  ${DERIVED_FILE_DIR}/linkExtras
+	echo "${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib" >  ${DERIVED_FILE_DIR}/linkExtras
 	echo "#define DEMANGLE_SWIFT 1" >> ${DERIVED_FILE_DIR}/configure.h
 else
 	echo "" > ${DERIVED_FILE_DIR}/linkExtras

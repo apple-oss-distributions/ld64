@@ -393,7 +393,7 @@ void MachOChecker<A>::checkMachHeader()
 		throw "sizeofcmds in mach_header is larger than file";
 	
 	uint32_t flags = fHeader->flags();
-	const uint32_t invalidBits = MH_INCRLINK | MH_LAZY_INIT | 0xFC000000;
+	const uint32_t invalidBits = MH_INCRLINK | MH_LAZY_INIT | 0xF8000000;
 	if ( flags & invalidBits )
 		throw "invalid bits in mach_header flags";
 	if ( (flags & MH_NO_REEXPORTED_DYLIBS) && (fHeader->filetype() != MH_DYLIB) ) 

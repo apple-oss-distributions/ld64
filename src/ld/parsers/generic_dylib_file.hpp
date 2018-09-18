@@ -138,7 +138,7 @@ public:
 
 
 	// overrides of ld::dylib::File
-	virtual void							processIndirectLibraries(ld::dylib::File::DylibHandler*, bool addImplicitDylibs) override final;
+	virtual void							processIndirectLibraries(ld::dylib::File::DylibHandler*, bool addImplicitDylibs) override;
 	virtual bool							providedExportAtom() const	override final { return _providedAtom; }
 	virtual const char*						parentUmbrella() const override final { return _parentUmbrella; }
 	virtual const std::vector<const char*>*	allowableClients() const override final { return _allowableClients.empty() ? nullptr : &_allowableClients; }

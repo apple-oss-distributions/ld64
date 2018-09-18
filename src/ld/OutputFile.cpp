@@ -5311,16 +5311,23 @@ void OutputFile::synthesizeDebugNotes(ld::Internal& state)
 	std::sort(atomsNeedingDebugNotes.begin(), atomsNeedingDebugNotes.end(), DebugNoteSorter());
 
 	// <rdar://problem/17689030> Add -add_ast_path option to linker which add N_AST stab entry to output
+	std::set<std::string> seenAstPaths;
 	const std::vector<const char*>&	astPaths = _options.astFilePaths();
 	for (std::vector<const char*>::const_iterator it=astPaths.begin(); it != astPaths.end(); it++) {
 		const char* path = *it;
+		if ( seenAstPaths.count(path) != 0 )
+			continue;
+		seenAstPaths.insert(path);
 		//  emit N_AST
 		ld::relocatable::File::Stab astStab;
 		astStab.atom	= NULL;
 		astStab.type	= N_AST;
 		astStab.other	= 0;
 		astStab.desc	= 0;
-		astStab.value	= fileModTime(path);
+		if ( _options.zeroModTimeInDebugMap() )
+			astStab.value = 0;
+		else
+			astStab.value = fileModTime(path);
 		astStab.string	= path;
 		state.stabs.push_back(astStab);
 	}
@@ -5387,11 +5394,17 @@ void OutputFile::synthesizeDebugNotes(ld::Internal& state)
 				objStab.desc		= 1;
 				if ( atomObjFile != NULL ) {
 					objStab.string	= assureFullPath(atomObjFile->debugInfoPath());
-					objStab.value	= atomObjFile->debugInfoModificationTime();
+					if ( _options.zeroModTimeInDebugMap() )
+						objStab.value	= 0;
+					else
+						objStab.value	= atomObjFile->debugInfoModificationTime();
 				}
 				else {
 					objStab.string	= assureFullPath(atomFile->path());
-					objStab.value	= atomFile->modificationTime();
+					if ( _options.zeroModTimeInDebugMap() )
+						objStab.value	= 0;
+					else
+						objStab.value	= atomFile->modificationTime();
 				}
 				state.stabs.push_back(objStab);
 				wroteStartSO = true;
@@ -5401,6 +5414,25 @@ void OutputFile::synthesizeDebugNotes(ld::Internal& state)
 				asprintf(&fullFilePath, "%s%s", newDirPath, newFilename);
 				// add both leaf path and full path
 				seenFiles.insert(fullFilePath);
+
+				// <rdar://problem/34121435> Add linker support for propagating N_AST debug notes from .o files to linked image
+				if ( const std::vector<relocatable::File::AstTimeAndPath>* asts = atomObjFile->astFiles() ) {
+					for (const relocatable::File::AstTimeAndPath& file : *asts) {
+						const char* cpath = file.path.c_str();
+						if ( seenAstPaths.count(cpath) != 0 )
+							continue;
+						seenAstPaths.insert(cpath);
+						//  generate N_AST in output
+						ld::relocatable::File::Stab astStab;
+						astStab.atom	= NULL;
+						astStab.type	= N_AST;
+						astStab.other	= 0;
+						astStab.desc	= 0;
+						astStab.value   = file.time;
+						astStab.string	= cpath;
+						state.stabs.push_back(astStab);
+					}
+				}
 			}
 			filename = newFilename;
 			dirPath = newDirPath;
@@ -5534,6 +5566,7 @@ void OutputFile::synthesizeDebugNotes(ld::Internal& state)
 			}
 		}
 	}
+
 }
 
 

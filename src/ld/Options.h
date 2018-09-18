@@ -28,6 +28,7 @@
 
 #include <stdint.h>
 #include <mach/machine.h>
+#include <tapi/tapi.h>
 
 #include <vector>
 #include <unordered_set>
@@ -36,6 +37,7 @@
 #include "ld.hpp"
 #include "Snapshot.h"
 #include "MachOFileAbstraction.hpp"
+
 
 extern void throwf (const char* format, ...) __attribute__ ((noreturn,format(printf, 1, 2)));
 extern void warning(const char* format, ...) __attribute__((format(printf, 1, 2)));
@@ -163,6 +165,7 @@ public:
 		LibraryOptions			options;
 		ld::File::Ordinal		ordinal;
 		bool					fromFileList;
+		bool					isInlined;
 
 		// These are used by the threaded input file parsing engine.
 		mutable int				inputFileSlot;	// The input file "slot" assigned to this particular file
@@ -171,7 +174,7 @@ public:
         // The use pattern for FileInfo is to create one on the stack in a leaf function and return
         // it to the calling frame by copy. Therefore the copy constructor steals the path string from
         // the source, which dies with the stack frame.
-        FileInfo(FileInfo const &other) : path(other.path), modTime(other.modTime), options(other.options), ordinal(other.ordinal), fromFileList(other.fromFileList), inputFileSlot(-1) { ((FileInfo&)other).path = NULL; };
+        FileInfo(FileInfo const &other) : path(other.path), modTime(other.modTime), options(other.options), ordinal(other.ordinal), fromFileList(other.fromFileList), isInlined(other.isInlined), inputFileSlot(-1) { ((FileInfo&)other).path = NULL; };
 
 		FileInfo &operator=(FileInfo other) {
 			std::swap(path, other.path);
@@ -179,16 +182,17 @@ public:
 			std::swap(options, other.options);
 			std::swap(ordinal, other.ordinal);
 			std::swap(fromFileList, other.fromFileList);
+			std::swap(isInlined, other.isInlined);
 			std::swap(inputFileSlot, other.inputFileSlot);
 			std::swap(readyToParse, other.readyToParse);
 			return *this;
 		}
 
         // Create an empty FileInfo. The path can be set implicitly by checkFileExists().
-        FileInfo() : path(NULL), modTime(-1), options(), fromFileList(false) {};
+        FileInfo() : path(NULL), modTime(-1), options(), fromFileList(false), isInlined(false) {};
         
         // Create a FileInfo for a specific path, but does not stat the file.
-        FileInfo(const char *_path) : path(strdup(_path)), modTime(-1), options(), fromFileList(false) {};
+        FileInfo(const char *_path) : path(strdup(_path)), modTime(-1), options(), fromFileList(false), isInlined(false) {};
 
         ~FileInfo() { if (path) ::free((void*)path); }
         
@@ -203,6 +207,19 @@ public:
         bool missing() const { return modTime == -1; }
 	};
 
+	class TAPIInterface {
+	public:
+		TAPIInterface(tapi::LinkerInterfaceFile *file, const char* path, const char *installName) :
+			_file(file), _tbdPath(path), _installName(installName) {}
+		tapi::LinkerInterfaceFile *getInterfaceFile() const { return _file; }
+		std::string getTAPIFilePath() const { return _tbdPath; }
+		const std::string &getInstallName() const { return _installName; }
+	private:
+		tapi::LinkerInterfaceFile *_file;
+		std::string _tbdPath;
+		std::string _installName;
+	};
+	
 	struct ExtraSection {
 		const char*				segmentName;
 		const char*				sectionName;
@@ -273,7 +290,7 @@ public:
 		  depFileList=0x10, depSection=0x10, depBundleLoader=0x10, depMisc=0x10, depNotFound=0x11,
 		  depOutputFile = 0x40 };
 	
-	void						dumpDependency(uint8_t, const char* path) const;
+	void						addDependency(uint8_t, const char* path) const;
 	
 	typedef const char* const*	UndefinesIterator;
 
@@ -286,6 +303,7 @@ public:
 	cpu_subtype_t				subArchitecture() const { return fSubArchitecture; }
 	bool						allowSubArchitectureMismatches() const { return fAllowCpuSubtypeMismatches; }
 	bool						enforceDylibSubtypesMatch() const { return fEnforceDylibSubtypesMatch; }
+	bool						warnOnSwiftABIVersionMismatches() const { return fWarnOnSwiftABIVersionMismatches; }
 	bool						forceCpuSubtypeAll() const { return fForceSubtypeAll; }
 	const char*					architectureName() const { return fArchitectureName; }
 	void						setArchitecture(cpu_type_t, cpu_subtype_t subtype, Options::Platform platform);
@@ -353,6 +371,8 @@ public:
 	bool						keepRelocations();
 	FileInfo					findFile(const std::string &path, const ld::dylib::File* fromDylib=nullptr) const;
 	bool						findFile(const std::string &path, const std::vector<std::string> &tbdExtensions, FileInfo& result) const;
+	bool						hasInlinedTAPIFile(const std::string &path) const;
+	std::unique_ptr<tapi::LinkerInterfaceFile>	findTAPIFile(const std::string &path) const;
 	UUIDMode					UUIDMode() const { return fUUIDMode; }
 	bool						warnStabs();
 	bool						pauseAtEnd() { return fPause; }
@@ -429,6 +449,7 @@ public:
 	bool						makeTentativeDefinitionsReal() const { return fMakeTentativeDefinitionsReal; }
 	const char*					dyldInstallPath() const { return fDyldInstallPath; }
 	bool						warnWeakExports() const { return fWarnWeakExports; }
+	bool						noWeakExports() const { return fNoWeakExports; }
 	bool						objcGcCompaction() const { return fObjcGcCompaction; }
 	bool						objcGc() const { return fObjCGc; }
 	bool						objcGcOnly() const { return fObjCGcOnly; }
@@ -468,7 +489,7 @@ public:
 	bool						ignoreAutoLink() const { return fIgnoreAutoLink; }
 	bool						allowDeadDuplicates() const { return fAllowDeadDups; }
 	bool						allowWeakImports() const { return fAllowWeakImports; }
-	bool						noInitializers() const { return fNoInitializers; }
+	Treatment					initializersTreatment() const { return fInitializersTreatment; }
 	BitcodeMode					bitcodeKind() const { return fBitcodeKind; }
 	bool						sharedRegionEncodingV2() const { return fSharedRegionEncodingV2; }
 	bool						useDataConstSegment() const { return fUseDataConstSegment; }
@@ -513,6 +534,10 @@ public:
 	bool						hasCodeSymbolMoves() const { return !fSymbolsMovesCode.empty(); }
 	void						writeToTraceFile(const char* buffer, size_t len) const;
 	UnalignedPointerTreatment	unalignedPointerTreatment() const { return fUnalignedPointerTreatment; }
+	bool						zeroModTimeInDebugMap() const { return fZeroModTimeInDebugMap; }
+	void						writeDependencyInfo() const;
+	std::vector<TAPIInterface>	&TAPIFiles() { return fTAPIFiles; }
+	void						addTAPIInterface(tapi::LinkerInterfaceFile *interface, const char *path) const;
 
 	static uint32_t				parseVersionNumber32(const char*);
 
@@ -547,6 +572,11 @@ private:
 	struct SymbolsMove {
 		const char*			toSegment;
 		SetWithWildcards	symbols;
+	};
+
+	struct DependencyEntry {
+		uint8_t				opcode;
+		std::string			path;
 	};
 
 	void						parse(int argc, const char* argv[]);
@@ -701,6 +731,7 @@ private:
 	bool								fNoEHLabels;
 	bool								fAllowCpuSubtypeMismatches;
 	bool								fEnforceDylibSubtypesMatch;
+	bool								fWarnOnSwiftABIVersionMismatches;
 	bool								fUseSimplifiedDylibReExports;
 	bool								fObjCABIVersion2Override;
 	bool								fObjCABIVersion1Override;
@@ -731,6 +762,7 @@ private:
 	bool								fTraceEmitJSON;
 	bool								fOutputSlidable;
 	bool								fWarnWeakExports;
+	bool								fNoWeakExports;
 	bool								fObjcGcCompaction;
 	bool								fObjCGc;
 	bool								fObjCGcOnly;
@@ -788,7 +820,8 @@ private:
 	bool								fIgnoreAutoLink;
 	bool								fAllowDeadDups;
 	bool								fAllowWeakImports;
-	bool								fNoInitializers;
+	Treatment							fInitializersTreatment;
+	bool								fZeroModTimeInDebugMap;
 	BitcodeMode							fBitcodeKind;
 	Platform							fPlatform;
 	DebugInfoStripping					fDebugInfoStripping;
@@ -825,10 +858,12 @@ private:
     bool								fSnapshotRequested;
     const char*							fPipelineFifo;
 	const char*							fDependencyInfoPath;
-	mutable int							fDependencyFileDescriptor;
 	mutable int							fTraceFileDescriptor;
 	uint8_t								fMaxDefaultCommonAlign;
 	UnalignedPointerTreatment			fUnalignedPointerTreatment;
+	mutable std::vector<DependencyEntry> fDependencies;
+	mutable std::vector<Options::TAPIInterface> fTAPIFiles;
+
 };
 
 

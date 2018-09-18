@@ -462,12 +462,22 @@ void Resolver::doFile(const ld::File& file)
 				Options::userReadableSwiftVersion(file.swiftVersion(), fileVersion);
 				Options::userReadableSwiftVersion(_internal.swiftVersion, otherVersion);
 				if ( file.swiftVersion() > _internal.swiftVersion ) {
-					throwf("%s compiled with newer version of Swift language (%s) than previous files (%s)", 
-						   file.path(), fileVersion, otherVersion);
+					if ( _options.warnOnSwiftABIVersionMismatches() ) {
+						warning("%s compiled with newer version of Swift language (%s) than previous files (%s)",
+						        file.path(), fileVersion, otherVersion);
+					} else {
+						throwf("%s compiled with newer version of Swift language (%s) than previous files (%s)",
+						       file.path(), fileVersion, otherVersion);
+					}
 				}
 				else {
-					throwf("%s compiled with older version of Swift language (%s) than previous files (%s)", 
-					       file.path(), fileVersion, otherVersion);
+					if ( _options.warnOnSwiftABIVersionMismatches() ) {
+						warning("%s compiled with older version of Swift language (%s) than previous files (%s)",
+						        file.path(), fileVersion, otherVersion);
+					} else {
+						throwf("%s compiled with older version of Swift language (%s) than previous files (%s)",
+						       file.path(), fileVersion, otherVersion);
+					}
 				}
 			}
 		}
@@ -479,7 +489,11 @@ void Resolver::doFile(const ld::File& file)
 		// remember if any .o file did not have MH_SUBSECTIONS_VIA_SYMBOLS bit set
 		if ( ! objFile->canScatterAtoms() )
 			_internal.allObjectFilesScatterable = false;
-	
+
+		// remember if building for profiling (so we don't warn about initializers)
+		if ( objFile->hasllvmProfiling() )
+			_havellvmProfiling = true;
+
 		// update minOSVersion off all .o files
 		uint32_t objMinOS = objFile->minOSVersion();
 		if ( !objMinOS )
@@ -652,12 +666,22 @@ void Resolver::doFile(const ld::File& file)
 				Options::userReadableSwiftVersion(file.swiftVersion(), fileVersion);
 				Options::userReadableSwiftVersion(_internal.swiftVersion, otherVersion);
 				if ( file.swiftVersion() > _internal.swiftVersion ) {
-					throwf("%s compiled with newer version of Swift language (%s) than previous files (%s)", 
-						   file.path(), fileVersion, otherVersion);
+					if ( _options.warnOnSwiftABIVersionMismatches() ) {
+						warning("%s compiled with newer version of Swift language (%s) than previous files (%s)",
+						        file.path(), fileVersion, otherVersion);
+					} else {
+						throwf("%s compiled with newer version of Swift language (%s) than previous files (%s)",
+						       file.path(), fileVersion, otherVersion);
+					}
 				}
 				else {
-					throwf("%s compiled with older version of Swift language (%s) than previous files (%s)", 
-					       file.path(), fileVersion, otherVersion);
+					if ( _options.warnOnSwiftABIVersionMismatches() ) {
+						warning("%s compiled with older version of Swift language (%s) than previous files (%s)",
+						        file.path(), fileVersion, otherVersion);
+					} else {
+						throwf("%s compiled with older version of Swift language (%s) than previous files (%s)",
+						       file.path(), fileVersion, otherVersion);
+					}
 				}
 			}
 		}
@@ -794,9 +818,17 @@ void Resolver::doAtom(const ld::Atom& atom)
 	if ( atom.section().type() == ld::Section::typeTempAlias )
 		_haveAliases = true;
 	
-	// prevent initializers if -no_inits used
-	if ( (atom.section().type() == ld::Section::typeInitializerPointers) && _options.noInitializers() ) {
-		throw "-no_inits specified, but initializer found";
+	// error or warn about initializers
+	if ( (atom.section().type() == ld::Section::typeInitializerPointers) && !_havellvmProfiling ) {
+		switch ( _options.initializersTreatment() ) {
+			case Options::kError:
+				throwf("static initializer found in '%s'",atom.safeFilePath());
+			case Options::kWarning:
+				warning("static initializer found in '%s'. Use -no_inits to make this an error.  Use -no_warn_inits to suppress warning",atom.safeFilePath());
+				break;
+			default:
+				break;
+		}
 	}
 	
 	if ( _options.deadCodeStrip() ) {
@@ -1832,7 +1864,7 @@ void Resolver::linkTimeOptimize()
 		// and re-compute dead code
 		this->deadStripOptimize(true);
 	}
-	
+
 	// <rdar://problem/12386559> if -exported_symbols_list on command line, re-force scope
 	if ( _options.hasExportMaskList() ) {
 		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
@@ -1856,6 +1888,23 @@ void Resolver::linkTimeOptimize()
 
 		// check new code does not override some dylib
 		this->checkDylibSymbolCollisions();
+
+		// <rdar://problem/33853815> remove undefs from LTO objects that gets optimized away
+		std::unordered_set<const ld::Atom*> mustPreserve;
+		if ( _internal.classicBindingHelper != NULL )
+			mustPreserve.insert(_internal.classicBindingHelper);
+		if ( _internal.compressedFastBinderProxy != NULL )
+			mustPreserve.insert(_internal.compressedFastBinderProxy);
+		if ( _internal.lazyBindingHelper != NULL )
+			mustPreserve.insert(_internal.lazyBindingHelper);
+		if ( const ld::Atom* entry = this->entryPoint(true) )
+			mustPreserve.insert(entry);
+		for (Options::UndefinesIterator uit=_options.initialUndefinesBegin(); uit != _options.initialUndefinesEnd(); ++uit) {
+			SymbolTable::IndirectBindingSlot slot = _symbolTable.findSlotForName(*uit);
+			if ( _internal.indirectBindingTable[slot] != NULL )
+				mustPreserve.insert(_internal.indirectBindingTable[slot]);
+		}
+		_symbolTable.removeDeadUndefs(_atoms, mustPreserve);
 	}
 }
 

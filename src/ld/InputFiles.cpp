@@ -214,6 +214,15 @@ const char* InputFiles::fileArch(const uint8_t* p, unsigned len)
 
 ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib)
 {
+	// handle inlined framework first.
+	if (info.isInlined) {
+		auto interface = _options.findTAPIFile(info.path);
+		auto file = textstub::dylib::parse(info.path, std::move(interface), info.modTime, info.ordinal, _options, indirectDylib);
+		assert(file && "could not locate the inlined file");
+		if (!file)
+			throwf("could not parse inline dylib file: %s(%s)", interface->getInstallName().c_str(), info.path);
+		return file;
+	}
 	// map in whole file
 	struct stat stat_buf;
 	int fd = ::open(info.path, O_RDONLY, 0);
@@ -455,19 +464,19 @@ void InputFiles::logDylib(ld::File* file, bool indirect, bool speculative)
 	if ( _options.dumpDependencyInfo() ) {
 		const ld::dylib::File* dylib = dynamic_cast<const ld::dylib::File*>(file);
 		if ( file == _bundleLoader ) {
-			_options.dumpDependency(Options::depBundleLoader, file->path());
+			_options.addDependency(Options::depBundleLoader, file->path());
 		}
 		else if ( (dylib != NULL ) && dylib->willBeUpwardDylib() ) {
 			if ( indirect ) 
-				_options.dumpDependency(Options::depUpwardIndirectDylib, file->path());
+				_options.addDependency(Options::depUpwardIndirectDylib, file->path());
 			else 
-				_options.dumpDependency(Options::depUpwardDirectDylib, file->path());
+				_options.addDependency(Options::depUpwardDirectDylib, file->path());
 		}
 		else {
 			if ( indirect ) 
-				_options.dumpDependency(Options::depIndirectDylib, file->path());
+				_options.addDependency(Options::depIndirectDylib, file->path());
 			else 
-				_options.dumpDependency(Options::depDirectDylib, file->path());
+				_options.addDependency(Options::depDirectDylib, file->path());
 		}
 	}
 }
@@ -620,13 +629,14 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 		for (const char* frameworkName : newFrameworks) {
 			if ( state.linkerOptionFrameworks.count(frameworkName) )
 				continue;
-			Options::FileInfo info = _options.findFramework(frameworkName);
-			if ( ! this->frameworkAlreadyLoaded(info.path, frameworkName) ) {
-				_linkerOptionOrdinal = _linkerOptionOrdinal.nextLinkerOptionOrdinal();
-				info.ordinal = _linkerOptionOrdinal;
-				try {
+			try {
+				Options::FileInfo info = _options.findFramework(frameworkName);
+				if ( ! this->frameworkAlreadyLoaded(info.path, frameworkName) ) {
+					_linkerOptionOrdinal = _linkerOptionOrdinal.nextLinkerOptionOrdinal();
+					info.ordinal = _linkerOptionOrdinal;
 					ld::File* reader = this->makeFile(info, true);
 					ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(reader);
+					ld::archive::File* archiveReader = dynamic_cast<ld::archive::File*>(reader);
 					if ( dylibReader != NULL ) {
 						if ( ! dylibReader->installPathVersionSpecific() ) {
 							dylibReader->forEachAtom(handler);
@@ -635,14 +645,22 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 							this->addDylib(dylibReader, info);
 						}
 					}
+					else if ( archiveReader != NULL ) {
+						_searchLibraries.push_back(LibraryInfo(archiveReader));
+						_options.addDependency(Options::depArchive, archiveReader->path());
+						//<rdar://problem/17787306> -force_load_swift_libs
+						if (info.options.fForceLoad) {
+							archiveReader->forEachAtom(handler);
+						}
+					}
 					else {
-						throwf("framework linker option at %s is not a dylib", info.path);
+						throwf("framework linker option at %s is not a dylib and not an archive", info.path);
  					}
  				}
-				catch (const char* msg) {
-					warning("Auto-Linking supplied '%s', %s", info.path, msg);
- 				}
  			}
+			catch (const char* msg) {
+				warning("Auto-Linking %s", msg);
+			}
 			state.linkerOptionFrameworks.insert(frameworkName);
  		}
 
@@ -653,11 +671,11 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 		for (const char* libName : newLibraries) {
 			if ( state.linkerOptionLibraries.count(libName) )
 				continue;
-			Options::FileInfo info = _options.findLibrary(libName);
-			if ( ! this->libraryAlreadyLoaded(info.path) ) {
-				_linkerOptionOrdinal = _linkerOptionOrdinal.nextLinkerOptionOrdinal();
-				info.ordinal = _linkerOptionOrdinal;
-				try {
+			try {
+				Options::FileInfo info = _options.findLibrary(libName);
+				if ( ! this->libraryAlreadyLoaded(info.path) ) {
+					_linkerOptionOrdinal = _linkerOptionOrdinal.nextLinkerOptionOrdinal();
+					info.ordinal = _linkerOptionOrdinal;
  					//<rdar://problem/17787306> -force_load_swift_libs
 					info.options.fForceLoad = _options.forceLoadSwiftLibs() && (strncmp(libName, "swift", 5) == 0);
 					ld::File* reader = this->makeFile(info, true);
@@ -671,8 +689,7 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 					}
 					else if ( archiveReader != NULL ) {
 						_searchLibraries.push_back(LibraryInfo(archiveReader));
-						if ( _options.dumpDependencyInfo() )
-							_options.dumpDependency(Options::depArchive, archiveReader->path());
+						_options.addDependency(Options::depArchive, archiveReader->path());
 						//<rdar://problem/17787306> -force_load_swift_libs
 						if (info.options.fForceLoad) {
 							archiveReader->forEachAtom(handler);
@@ -682,10 +699,10 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 						throwf("linker option dylib at %s is not a dylib", info.path);
  					}
  				}
-				catch (const char* msg) {
-					warning("Auto-Linking supplied '%s', %s", info.path, msg);
- 				}
  			}
+			catch (const char* msg) {
+				warning("Auto-Linking %s", msg);
+			}
 			state.linkerOptionLibraries.insert(libName);
 		}
 	}
@@ -736,8 +753,7 @@ void InputFiles::createOpaqueFileSections()
 	// extra command line sections always at end
 	for (Options::ExtraSection::const_iterator it=_options.extraSectionsBegin(); it != _options.extraSectionsEnd(); ++it) {
 		_inputFiles.push_back(opaque_section::parse(it->segmentName, it->sectionName, it->path, it->data, it->dataLen));
-		if ( _options.dumpDependencyInfo() )
-			_options.dumpDependency(Options::depSection, it->path);
+		_options.addDependency(Options::depSection, it->path);
 	}
 
 }
@@ -1199,8 +1215,7 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 			{
 				ld::relocatable::File* reloc = (ld::relocatable::File*)file;
 				_options.snapshot().recordObjectFile(reloc->path());
-				if ( _options.dumpDependencyInfo() )
-					_options.dumpDependency(Options::depObjectFile, reloc->path());
+				_options.addDependency(Options::depObjectFile, reloc->path());
 			}
 				break;
 			case ld::File::Dylib:
@@ -1220,8 +1235,7 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 					state.forceLoadCompilerRT = true;
 
 				_searchLibraries.push_back(LibraryInfo(archive));
-				if ( _options.dumpDependencyInfo() )
-					_options.dumpDependency(Options::depArchive, archive->path());
+				_options.addDependency(Options::depArchive, archive->path());
 			}
 				break;
 			case ld::File::Other:

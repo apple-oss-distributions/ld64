@@ -214,6 +214,7 @@ namespace relocatable {
 		};
 		typedef const std::vector< std::vector<const char*> > LinkerOptionsList;
 		typedef std::vector<std::pair<uint32_t,uint32_t>> ToolVersionList;
+		struct AstTimeAndPath { uint64_t time; std::string path; };
 
 											File(const char* pth, time_t modTime, Ordinal ord)
 												: ld::File(pth, modTime, ord, Reloc) { }
@@ -224,10 +225,12 @@ namespace relocatable {
 		virtual const std::vector<Stab>*	stabs() const = 0;
 		virtual bool						canScatterAtoms() const = 0;
 		virtual bool						hasLongBranchStubs()		{ return false; }
+		virtual bool						hasllvmProfiling() const    { return false; }
 		virtual LinkerOptionsList*			linkerOptions() const = 0;
 		virtual const ToolVersionList&		toolVersions() const = 0;
 		virtual SourceKind					sourceKind() const { return kSourceUnknown; }
 		virtual const uint8_t*				fileContent() const { return nullptr; }
+		virtual const std::vector<AstTimeAndPath>*	astFiles() const { return nullptr; }
 	};
 } // namespace relocatable
 

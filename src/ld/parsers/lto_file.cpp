@@ -1459,7 +1459,7 @@ void Parser::AtomSyncer::doAtom(const ld::Atom& machoAtom)
 	// update proxy atoms to point to real atoms and find new atoms
 	const char* name = machoAtom.name();
 	CStringToAtom::const_iterator pos = _llvmAtoms.find(name);
-	if ( pos != _llvmAtoms.end() ) {
+	if ( (pos != _llvmAtoms.end()) && (machoAtom.scope() != ld::Atom::scopeTranslationUnit) ) {
 		// turn Atom into a proxy for this mach-o atom
 		if (pos->second->scope() == ld::Atom::scopeLinkageUnit) {
 			if (log) fprintf(stderr, "demote %s to hidden after LTO\n", name);
@@ -1535,6 +1535,7 @@ void Parser::AtomSyncer::doAtom(const ld::Atom& machoAtom)
 				// If mach-o atom is referencing another mach-o atom then 
 				// reference is not going through Atom proxy. Fix it here to ensure that all
 				// llvm symbol references always go through Atom proxy.
+				if ( fit->u.target->scope() != ld::Atom::scopeTranslationUnit )
 				{
 					const char* targetName = fit->u.target->name();
 					CStringToAtom::const_iterator post = _llvmAtoms.find(targetName);

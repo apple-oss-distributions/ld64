@@ -945,6 +945,8 @@ void InternalState::setSectionSizesAndAlignments()
 						this->hasWeakExternalSymbols = true;
 						if ( _options.warnWeakExports()	) 
 							warning("weak external symbol: %s", atom->name());
+						else if ( _options.noWeakExports()	)
+							throwf("weak external symbol: %s", atom->name());
 				}
 			}
 			sect->size = offset;
@@ -1350,6 +1352,8 @@ int main(int argc, const char* argv[])
 		
 		// sort final sections
 		state.sortSections();
+
+		options.writeDependencyInfo();
 
 		// write output file
 		statistics.startOutput = mach_absolute_time();

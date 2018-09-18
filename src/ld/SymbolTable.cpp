@@ -860,6 +860,41 @@ const ld::Atom* SymbolTable::indirectAtom(IndirectBindingSlot slot) const
 	return _indirectBindingTable[slot];
 }
 
+
+void SymbolTable::removeDeadUndefs(std::vector<const ld::Atom*>& allAtoms, const std::unordered_set<const ld::Atom*>& keep)
+{
+	// mark the indirect entries in use
+	std::vector<bool> indirectUsed;
+	for (size_t i=0; i < _indirectBindingTable.size(); ++i)
+		indirectUsed.push_back(false);
+	for (const ld::Atom* atom : allAtoms) {
+		for (auto it = atom->fixupsBegin(); it != atom->fixupsEnd(); ++it) {
+			switch (it->binding) {
+				case ld::Fixup::bindingsIndirectlyBound:
+					indirectUsed[it->u.bindingIndex] = true;
+					break;
+				default:
+					break;
+			}
+		}
+	}
+
+	// any indirect entry not in use which points to an undefined proxy can be removed
+	for (size_t slot=0; slot < indirectUsed.size(); ++slot) {
+		if ( !indirectUsed[slot] ) {
+			const ld::Atom* atom = _indirectBindingTable[slot];
+			if ( (atom != nullptr) && (atom->definition() == ld::Atom::definitionProxy) && (keep.count(atom) == 0) ) {
+				const char* name = atom->name();
+				_indirectBindingTable[slot] = NULL;
+				_byNameReverseTable.erase(slot);
+				_byNameTable.erase(name);
+				allAtoms.erase(std::remove(allAtoms.begin(), allAtoms.end(), atom), allAtoms.end());
+			}
+		}
+	}
+
+}
+
 void SymbolTable::printStatistics()
 {
 //	fprintf(stderr, "cstring table size: %lu, bucket count: %lu, hash func called %u times\n", 

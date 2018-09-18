@@ -86,6 +86,7 @@ public:
 												_minOSVersion(0),
 												_platform(Options::kPlatformUnknown),
 												_canScatterAtoms(false),
+												_hasllvmProfiling(false),
 												_objcHasCategoryClassPropertiesField(false),
 												_srcKind(kSourceUnknown) { }
 	virtual									~File();
@@ -105,6 +106,7 @@ public:
 	virtual DebugInfoKind								debugInfo() const				{ return _debugInfoKind; }
 	virtual const std::vector<ld::relocatable::File::Stab>*	stabs() const				{ return &_stabs; }
 	virtual bool										canScatterAtoms() const			{ return _canScatterAtoms; }
+	virtual bool										hasllvmProfiling() const    	{ return _hasllvmProfiling; }
 	virtual const char*									translationUnitSource() const;
 	virtual LinkerOptionsList*							linkerOptions() const			{ return &_linkerOptions; }
 	virtual const ToolVersionList&						toolVersions() const			{ return _toolVersions; }
@@ -113,12 +115,15 @@ public:
 	virtual SourceKind									sourceKind() const				{ return _srcKind; }
 	
 	virtual const uint8_t*								fileContent() const				{ return _fileContent; }
+	virtual const std::vector<AstTimeAndPath>*			astFiles() const 				{ return &_astFiles; }
+
+	void										        setHasllvmProfiling()			{ _hasllvmProfiling = true; }
 private:
 	friend class Atom<A>;
 	friend class Section<A>;
 	friend class Parser<A>;
 	friend class CFISection<A>::OAS;
-	
+
 	typedef typename A::P					P;
 	
 	const uint8_t*							_fileContent;
@@ -132,6 +137,7 @@ private:
 	std::vector<ld::Atom::UnwindInfo>		_unwindInfos;
 	std::vector<ld::Atom::LineInfo>			_lineInfos;
 	std::vector<ld::relocatable::File::Stab>_stabs;
+	std::vector<AstTimeAndPath>				_astFiles;
 	ld::relocatable::File::DebugInfoKind	_debugInfoKind;
 	const char*								_dwarfTranslationUnitPath;
 	const macho_section<P>*					_dwarfDebugInfoSect;
@@ -144,6 +150,7 @@ private:
 	uint32_t								_minOSVersion;
 	Options::Platform						_platform;
 	bool									_canScatterAtoms;
+	bool									_hasllvmProfiling;
 	bool									_objcHasCategoryClassPropertiesField;
 	std::vector<std::vector<const char*> >	_linkerOptions;
 	std::unique_ptr<ld::Bitcode>			_bitcode;
@@ -1214,6 +1221,7 @@ private:
 
 	void											parseDebugInfo();
 	void											parseStabs();
+	void											addAstFiles();
 	void											appendAliasAtoms(uint8_t* atomBuffer);
 	static bool										isConstFunStabs(const char *stabStr);
 	bool											read_comp_unit(const char ** name, const char ** comp_dir,
@@ -1554,7 +1562,6 @@ template <typename A>
 bool Parser<A>::LabelAndCFIBreakIterator::next(Parser<A>& parser, const Section<A>& sect, uint32_t sectNum, pint_t startAddr, pint_t endAddr, 
 												pint_t* addr, pint_t* size, const macho_nlist<P>** symbol)
 {
-	bool cfiApplicable = (sect.machoSection()->flags() & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
 	// may not be a label on start of section, but need atom demarcation there
 	if ( newSection ) {
 		newSection = false;
@@ -1614,7 +1621,7 @@ bool Parser<A>::LabelAndCFIBreakIterator::next(Parser<A>& parser, const Section<
 			return true;
 		}
 		// no symbols in section, check CFI
-		if ( cfiApplicable && (cfiIndex < cfiStartsCount) ) {
+		if ( cfiIndex < cfiStartsCount ) {
 			pint_t nextCfiAddr = cfiStartsArray[cfiIndex];
 			if ( nextCfiAddr < endAddr ) {
 				// use cfi
@@ -2185,18 +2192,13 @@ bool Parser<A>::parseLoadCommands(Options::Platform platform, uint32_t linkMinOS
 	}
 
 
-	// validate just one segment
+	// record range of sections
 	if ( segment == NULL ) 
 		throw "missing LC_SEGMENT";
-	if ( segment->filesize() > _fileLength )
-		throw "LC_SEGMENT filesize too large";
-
-	// record and validate sections
 	_sectionsStart = (macho_section<P>*)((char*)segment + sizeof(macho_segment_command<P>));
 	_machOSectionsCount = segment->nsects();
 	if ( (sizeof(macho_segment_command<P>) + _machOSectionsCount * sizeof(macho_section<P>)) > segment->cmdsize() )
 		throw "too many sections for size of LC_SEGMENT command";
-
 	return true;
 }
 
@@ -3630,6 +3632,8 @@ bool Parser<A>::isConstFunStabs(const char *stabStr)
 template <typename A>
 void Parser<A>::parseDebugInfo()
 {
+	addAstFiles();
+	
 	// check for dwarf __debug_info section
 	if ( _file->_dwarfDebugInfoSect == NULL ) {
 		// if no DWARF debug info, look for stabs
@@ -3999,6 +4003,22 @@ void Parser<A>::parseStabs()
 	}
 }
 
+
+template <typename A>
+void Parser<A>::addAstFiles()
+{
+	// scan symbol table for N_AST entries
+	for (uint32_t symbolIndex = 0; symbolIndex < _symbolCount; ++symbolIndex ) {
+		const macho_nlist<P>& sym = this->symbolFromIndex(symbolIndex);
+		if ( (sym.n_type() == N_AST) &&  (sym.n_strx() != 0) ) {
+			const char* symString = this->nameFromSymbol(sym);
+			ld::relocatable::File::AstTimeAndPath entry;
+			entry.time = sym.n_value();
+			entry.path = symString;
+			_file->_astFiles.push_back(entry);
+		}
+	}
+}
 
 
 // Look at the compilation unit DIE and determine
@@ -4445,7 +4465,7 @@ bool CFISection<A>::needsRelocating()
 
 template <>
 void CFISection<x86_64>::cfiParse(class Parser<x86_64>& parser, uint8_t* buffer,
-									libunwind::CFI_Atom_Info<CFISection<x86_64>::OAS>::CFI_Atom_Info cfiArray[], 
+									libunwind::CFI_Atom_Info<CFISection<x86_64>::OAS> cfiArray[],
 									uint32_t& count, const pint_t cuStarts[], uint32_t cuCount)
 {
 	const uint32_t sectionSize = this->_machOSection->size();
@@ -4510,7 +4530,7 @@ void CFISection<x86_64>::cfiParse(class Parser<x86_64>& parser, uint8_t* buffer,
 
 template <>
 void CFISection<x86>::cfiParse(class Parser<x86>& parser, uint8_t* buffer, 
-									libunwind::CFI_Atom_Info<CFISection<x86>::OAS>::CFI_Atom_Info cfiArray[], 
+									libunwind::CFI_Atom_Info<CFISection<x86>::OAS> cfiArray[],
 									uint32_t& count, const pint_t cuStarts[], uint32_t cuCount)
 {
 	// create ObjectAddressSpace object for use by libunwind
@@ -4531,7 +4551,7 @@ void CFISection<x86>::cfiParse(class Parser<x86>& parser, uint8_t* buffer,
 
 template <>
 void CFISection<arm>::cfiParse(class Parser<arm>& parser, uint8_t* buffer, 
-									libunwind::CFI_Atom_Info<CFISection<arm>::OAS>::CFI_Atom_Info cfiArray[], 
+									libunwind::CFI_Atom_Info<CFISection<arm>::OAS> cfiArray[],
 									uint32_t& count, const pint_t cuStarts[], uint32_t cuCount)
 {
 	if ( !parser.armUsesZeroCostExceptions() ) {
@@ -4557,7 +4577,7 @@ void CFISection<arm>::cfiParse(class Parser<arm>& parser, uint8_t* buffer,
 
 template <>
 void CFISection<arm64>::cfiParse(class Parser<arm64>& parser, uint8_t* buffer, 
-									libunwind::CFI_Atom_Info<CFISection<arm64>::OAS>::CFI_Atom_Info cfiArray[], 
+									libunwind::CFI_Atom_Info<CFISection<arm64>::OAS> cfiArray[],
 									uint32_t& count, const pint_t cuStarts[], uint32_t cuCount)
 {
 	// copy __eh_frame data to buffer
@@ -5268,6 +5288,9 @@ SymboledSection<A>::SymboledSection(Parser<A>& parser, File<A>& f, const macho_s
 				_type = ld::Atom::typeLSDA;
 			else if ( this->type() == ld::Section::typeInitializerPointers )
 				_type = ld::Atom::typeInitializerPointers;
+			// <rdar://problem/34716321> don't warn about static initializers in dylibs built for profiling
+			if ( strncmp(s->sectname(), "__llvm_prf_", 11) == 0 )
+				this->_file.setHasllvmProfiling();
 			break;
 	}
 }
@@ -6285,8 +6308,6 @@ bool Section<x86_64>::addRelocFixup(class Parser<x86_64>& parser, const macho_re
 	Parser<x86_64>::TargetDesc		target;
 	Parser<x86_64>::TargetDesc		toTarget;
 	src.atom = this->findAtomByAddress(srcAddr);
-	if ( src.atom == NULL )
-		throwf("malformed mach-o, reloc addr 0x%llX not in any atom", srcAddr);
 	src.offsetInAtom = srcAddr - src.atom->_objAddress;
 	const uint8_t* fixUpPtr = file().fileContent() + sect->offset() + reloc->r_address();
 	uint64_t contentValue = 0;
@@ -7469,8 +7490,12 @@ bool Section<arm64>::addRelocFixup(class Parser<arm64>& parser, const macho_relo
 				parser.findTargetFromAddressAndSectionNum(contentValue, nextReloc->r_symbolnum(), toTarget);
 				useDirectBinding = (toTarget.atom->scope() == ld::Atom::scopeTranslationUnit);
 			}
-			if ( useDirectBinding )
-				parser.addFixup(src, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, toTarget.atom);
+			if ( useDirectBinding ) {
+				if ( (toTarget.atom->combine() == ld::Atom::combineByNameAndContent) || (toTarget.atom->combine() == ld::Atom::combineByNameAndReferences) )
+					parser.addFixup(src, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, ld::Fixup::bindingByContentBound, toTarget.atom);
+				else
+					parser.addFixup(src, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, toTarget.atom);
+			}
 			else
 				parser.addFixup(src, ld::Fixup::k1of4, ld::Fixup::kindSetTargetAddress, toTarget.weakImport, toTarget.name);
 			parser.addFixup(src, ld::Fixup::k2of4, ld::Fixup::kindAddAddend, toTarget.addend);

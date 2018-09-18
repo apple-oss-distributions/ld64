@@ -841,7 +841,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"${CONFIGURATION}\" == \"Debug\" ]; then\n    cd \"${TARGET_BUILD_DIR}\"\n    cd ..\n    mkdir -p lib\n    cd lib\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libLTO.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libtapi.dylib\"\nfi\n\n";
+			shellScript = "if [ \"${CONFIGURATION}\" == \"Debug\" ]; then\n    cd \"${TARGET_BUILD_DIR}\"\n    cd ..\n    mkdir -p lib\n    cd lib\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libLTO.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libtapi.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib\"\nfi\n\n";
 			showEnvVarsInLog = 0;
 		};
 		F96D5367094A2754008E9EE8 /* ShellScript */ = {
@@ -1280,10 +1280,10 @@
 					"-stdlib=libc++",
 					"-lxar",
 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
-					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-exported_symbol,__mh_execute_header",
 					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
 					"-ltapi",
+					"@$(DERIVED_FILE_DIR)/linkExtras",
 				);
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;
@@ -1353,10 +1353,10 @@
 					"-stdlib=libc++",
 					"-lxar",
 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
-					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-exported_symbol,__mh_execute_header",
 					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
 					"-ltapi",
+					"@$(DERIVED_FILE_DIR)/linkExtras",
 				);
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;
@@ -1626,10 +1626,10 @@
 					"-stdlib=libc++",
 					"-lxar",
 					"-Wl,-lazy_library,$(DT_TOOLCHAIN_DIR)/usr/lib/libLTO.dylib",
-					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-exported_symbol,__mh_execute_header",
 					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
 					"-ltapi",
+					"@$(DERIVED_FILE_DIR)/linkExtras",
 				);
 				PREBINDING = NO;
 				PRODUCT_NAME = ld;

@@ -45,7 +45,6 @@
 #include "MachOFileAbstraction.hpp"
 #include "Snapshot.h"
 
-
 // from FunctionNameDemangle.h
 extern "C" size_t fnd_get_demangled_name(const char *mangledName, char *outputBuffer, size_t length);
 
@@ -117,6 +116,10 @@ void throwf(const char* format, ...)
 
 bool Options::FileInfo::checkFileExists(const Options& options, const char *p)
 {
+	if (isInlined) {
+		modTime = 0;
+		return true;
+	}
 	struct stat statBuffer;
 	if (p == NULL) 
 	  p = path;
@@ -125,8 +128,7 @@ bool Options::FileInfo::checkFileExists(const Options& options, const char *p)
 		modTime = statBuffer.st_mtime;
 		return true;
 	}
-	if ( options.dumpDependencyInfo() )
-		options.dumpDependency(Options::depNotFound, p);
+	options.addDependency(Options::depNotFound, p);
 //	fprintf(stderr, "not found: %s\n", p);
     return false;
 }
@@ -160,7 +162,8 @@ Options::Options(int argc, const char* argv[])
 	  fUsingLazyDylibLinking(false), fEncryptable(true), fEncryptableForceOn(false), fEncryptableForceOff(false),
 	  fOrderData(true), fMarkDeadStrippableDylib(false),
 	  fMakeCompressedDyldInfo(true), fMakeCompressedDyldInfoForceOff(false), fNoEHLabels(false),
-	  fAllowCpuSubtypeMismatches(false), fEnforceDylibSubtypesMatch(false), fUseSimplifiedDylibReExports(false),
+	  fAllowCpuSubtypeMismatches(false), fEnforceDylibSubtypesMatch(false),
+	  fWarnOnSwiftABIVersionMismatches(false), fUseSimplifiedDylibReExports(false),
 	  fObjCABIVersion2Override(false), fObjCABIVersion1Override(false), fCanUseUpwardDylib(false),
 	  fFullyLoadArchives(false), fLoadAllObjcObjectsFromArchives(false), fFlatNamespace(false),
 	  fLinkingMainExecutable(false), fForFinalLinkedImage(false), fForStatic(false),
@@ -169,7 +172,7 @@ Options::Options(int argc, const char* argv[])
 	  fWarnCompactUnwind(false), fRemoveDwarfUnwindIfCompactExists(false),
 	  fAutoOrderInitializers(true), fOptimizeZeroFill(true), fMergeZeroFill(false), fLogObjectFiles(false),
 	  fLogAllFiles(false), fTraceDylibs(false), fTraceIndirectDylibs(false), fTraceArchives(false), fTraceEmitJSON(false),
-	  fOutputSlidable(false), fWarnWeakExports(false), 
+	  fOutputSlidable(false), fWarnWeakExports(false), fNoWeakExports(false),
 	  fObjcGcCompaction(false), fObjCGc(false), fObjCGcOnly(false), 
 	  fDemangle(false), fTLVSupport(false), 
 	  fVersionLoadCommand(false), fVersionLoadCommandForcedOn(false), 
@@ -192,11 +195,12 @@ Options::Options(int argc, const char* argv[])
 	  fBundleBitcode(false), fHideSymbols(false), fVerifyBitcode(false),
 	  fReverseMapUUIDRename(false), fDeDupe(true), fVerboseDeDupe(false),
 	  fReverseMapPath(NULL), fLTOCodegenOnly(false),
-	  fIgnoreAutoLink(false), fAllowDeadDups(false), fAllowWeakImports(true), fNoInitializers(false), fBitcodeKind(kBitcodeProcess),
+	  fIgnoreAutoLink(false), fAllowDeadDups(false), fAllowWeakImports(true), fInitializersTreatment(Options::kInvalid),
+	  fZeroModTimeInDebugMap(false), fBitcodeKind(kBitcodeProcess),
 	  fPlatform(kPlatformUnknown), fDebugInfoStripping(kDebugInfoMinimal), fTraceOutputFile(NULL),
 	  fMacVersionMin(ld::macVersionUnset), fIOSVersionMin(ld::iOSVersionUnset), fWatchOSVersionMin(ld::wOSVersionUnset),
 	  fSaveTempFiles(false), fSnapshotRequested(false), fPipelineFifo(NULL),
-	  fDependencyInfoPath(NULL), fDependencyFileDescriptor(-1), fTraceFileDescriptor(-1), fMaxDefaultCommonAlign(0),
+	  fDependencyInfoPath(NULL), fTraceFileDescriptor(-1), fMaxDefaultCommonAlign(0),
 	  fUnalignedPointerTreatment(kUnalignedPointerIgnore)
 {
 	this->checkForClassic(argc, argv);
@@ -206,18 +210,13 @@ Options::Options(int argc, const char* argv[])
 	this->reconfigureDefaults();
 	this->checkIllegalOptionCombinations();
 	
-	if ( this->dumpDependencyInfo() ) {
-		this->dumpDependency(depOutputFile, fOutputFile);
-		if ( fMapPath != NULL ) 
-		this->dumpDependency(depOutputFile, fMapPath);
-	}
+	this->addDependency(depOutputFile, fOutputFile);
+	if ( fMapPath != NULL )
+		this->addDependency(depOutputFile, fMapPath);
 }
 
 Options::~Options()
 {
-	if ( fDependencyFileDescriptor != -1 )
-		::close(fDependencyFileDescriptor);
-
 	if ( fTraceFileDescriptor != -1 )
 		::close(fTraceFileDescriptor);
 }
@@ -827,6 +826,16 @@ static std::string replace_extension(const std::string &path, const std::string 
 	return result;
 }
 
+void Options::addTAPIInterface(tapi::LinkerInterfaceFile *interface, const char *path) const {
+#if ((TAPI_API_VERSION_MAJOR == 1 &&  TAPI_API_VERSION_MINOR >= 3) || (TAPI_API_VERSION_MAJOR > 1))
+	if (tapi::APIVersion::isAtLeast(1, 3)) {
+		for (auto &name : interface->inlinedFrameworkNames()) {
+			fTAPIFiles.emplace_back(interface, path, name.c_str());
+		}
+	}
+#endif
+}
+
 bool Options::findFile(const std::string &path, const std::vector<std::string> &tbdExtensions, FileInfo& result) const
 {
 	FileInfo tbdInfo;
@@ -935,12 +944,72 @@ Options::FileInfo Options::findFile(const std::string &path, const ld::dylib::Fi
 		}
 	}
 
+	// find inlined TBD file before raw path.
+	// rdar://problem/35864452
+	if (hasInlinedTAPIFile(path)) {
+		FileInfo inlinedFile(path.c_str());
+		inlinedFile.isInlined = true;
+		return inlinedFile;
+	}
+
 	// try raw path
 	if ( findFile(path, {".tbd"}, result) )
 		return result;
 
 	// not found
 	throwf("file not found: %s", path.c_str());
+}
+
+bool Options::hasInlinedTAPIFile(const std::string &path) const {
+	for (const auto &dylib : fTAPIFiles) {
+		if (dylib.getInstallName() == path)
+			return true;
+	}
+	return false;
+}
+
+std::unique_ptr<tapi::LinkerInterfaceFile> Options::findTAPIFile(const std::string &path) const
+{
+	std::unique_ptr<tapi::LinkerInterfaceFile> interface;
+	std::string TBDPath;
+	
+	// create parsing options.
+	tapi::ParsingFlags flags = tapi::ParsingFlags::None;
+	if (enforceDylibSubtypesMatch())
+		flags |= tapi::ParsingFlags::ExactCpuSubType;
+	
+	if (!allowWeakImports())
+		flags |= tapi::ParsingFlags::DisallowWeakImports;
+	
+	// Search through all the inlined framework.
+	for (const auto &dylib : fTAPIFiles) {
+		if (dylib.getInstallName() == path) {
+			// If the install name matches, parse the framework.
+			std::string errorMessage;
+			auto file = dylib.getInterfaceFile()->getInlinedFramework(path.c_str(), architecture(), subArchitecture(),
+																	  flags, tapi::PackedVersion32(minOSversion()), errorMessage);
+			if (!file)
+				throw strdup(errorMessage.c_str());
+
+			if (!interface) {
+				// If this is the first inlined framework found, record the information.
+				interface.reset(file);
+				TBDPath = dylib.getTAPIFilePath();
+			} else {
+				// If we found other inlined framework already, check to see if their versions are the same.
+				// If not the same, emit an warning and record the newer one. Otherwise, just use the current one.
+				if (interface->getCurrentVersion() == file->getCurrentVersion())
+					continue;
+				warning("Inlined framework/dylib mismatch: %s (%s and %s)", path.c_str(),
+						TBDPath.c_str(), dylib.getTAPIFilePath().c_str());
+				if (interface->getCurrentVersion() < file->getCurrentVersion()) {
+					interface.reset(file);
+					TBDPath = dylib.getTAPIFilePath();
+				}
+			}
+		}
+	}
+	return interface;
 }
 
 // search for indirect dylib first using -F and -L paths first
@@ -1067,16 +1136,14 @@ void Options::loadFileList(const char* fileOfPaths, ld::File::Ordinal baseOrdina
 			file = fopen(realFileOfPaths, "r");
 			if ( file == NULL )
 				throwf("-filelist file '%s' could not be opened, errno=%d (%s)\n", realFileOfPaths, errno, strerror(errno));
-			if ( this->dumpDependencyInfo() )
-				this->dumpDependency(Options::depFileList, realFileOfPaths);
+			this->addDependency(Options::depFileList, realFileOfPaths);
 		}
 	}
 	else {
 		file = fopen(fileOfPaths, "r");
 		if ( file == NULL )
 			throwf("-filelist file '%s' could not be opened, errno=%d (%s)\n", fileOfPaths, errno, strerror(errno));
-		if ( this->dumpDependencyInfo() )
-			this->dumpDependency(Options::depFileList, fileOfPaths);
+		this->addDependency(Options::depFileList, fileOfPaths);
 	}
 
 	char path[PATH_MAX];
@@ -1287,8 +1354,7 @@ void Options::loadExportFile(const char* fileOfExports, const char* option, SetW
 	if ( read(fd, p, stat_buf.st_size) != stat_buf.st_size )
 		throwf("can't read %s file: %s", option, fileOfExports);
 
-	if ( this->dumpDependencyInfo() )
-		this->dumpDependency(Options::depMisc, fileOfExports);
+	this->addDependency(Options::depMisc, fileOfExports);
 
 	::close(fd);
 
@@ -1361,8 +1427,7 @@ void Options::parseAliasFile(const char* fileOfAliases)
 		throwf("can't read alias file: %s", fileOfAliases);
 	p[stat_buf.st_size] = '\n';
 	::close(fd);
-	if ( this->dumpDependencyInfo() )
-		this->dumpDependency(Options::depMisc, fileOfAliases);
+	this->addDependency(Options::depMisc, fileOfAliases);
 
 	// parse into symbols and add to fAliases
 	AliasPair pair;
@@ -1790,8 +1855,7 @@ void Options::parseOrderFile(const char* path, bool cstring)
 		throwf("can't read order file: %s", path);
 	::close(fd);
 	p[stat_buf.st_size] = '\n';
-	if ( this->dumpDependencyInfo() )
-		this->dumpDependency(Options::depMisc, path);
+	this->addDependency(Options::depMisc, path);
 
 	// parse into vector of pairs
 	char * const end = &p[stat_buf.st_size+1];
@@ -3492,6 +3556,9 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(arg, "-warn_weak_exports") == 0 ) {
 				fWarnWeakExports = true;
 			}
+			else if ( strcmp(arg, "-no_weak_exports") == 0 ) {
+				fNoWeakExports = true;
+			}
 			else if ( strcmp(arg, "-objc_gc_compaction") == 0 ) {
 				fObjcGcCompaction = true;
 				cannotBeUsedWithBitcode(arg);
@@ -3865,7 +3932,10 @@ void Options::parse(int argc, const char* argv[])
 				fAllowWeakImports = false;
 			}
 			else if ( strcmp(argv[i], "-no_inits") == 0 ) {
-				fNoInitializers = true;
+				fInitializersTreatment = Options::kError;
+			}
+			else if ( strcmp(argv[i], "-no_warn_inits") == 0 ) {
+				fInitializersTreatment = Options::kSuppress;
 			}
 			// put this last so that it does not interfer with other options starting with 'i'
 			else if ( strncmp(arg, "-i", 2) == 0 ) {
@@ -4192,6 +4262,9 @@ void Options::parsePreCommandLineEnvironmentSettings()
 	
 	if (getenv("LD_DYLIB_CPU_SUBTYPES_MUST_MATCH") != NULL)
 		fEnforceDylibSubtypesMatch = true;
+
+	if (getenv("LD_WARN_ON_SWIFT_ABI_VERSION_MISMATCHES") != NULL)
+		fWarnOnSwiftABIVersionMismatches = true;
 	
 	sWarningsSideFilePath = getenv("LD_WARN_FILE");
 	
@@ -4211,6 +4284,10 @@ void Options::parsePreCommandLineEnvironmentSettings()
     if (pipeFdString != NULL) {
 		fPipelineFifo = pipeFdString;
     }
+
+	// <rdar://problem/30746905> [Reproducible Builds] If env ZERO_AR_DATE is set, zero out timestamp in N_OSO stab
+	if ( getenv("ZERO_AR_DATE") != NULL )
+		fZeroModTimeInDebugMap = true;
 }
 
 
@@ -4649,6 +4726,9 @@ void Options::reconfigureDefaults()
 			fSharedRegionEncodingV2 = false;
 			// <rdar://problem/24772435> only use v2 for Swift dylibs on Mac OS X
 			if ( strncmp(this->installPath(), "/System/Library/PrivateFrameworks/Swift/", 40) == 0 )
+				fSharedRegionEncodingV2 = true;
+			// <rdar://problem/32525720> use v2 for ABI stable Swift dylibs on macOS
+			if ( strncmp(this->installPath(), "/System/Library/Frameworks/Swift/", 33) == 0 )
 				fSharedRegionEncodingV2 = true;
 			// <rdar://problem/31428120> an other OS frameworks that use swift need v2
 			for (const char* searchPath  : fLibrarySearchPaths ) {
@@ -5244,6 +5324,18 @@ void Options::reconfigureDefaults()
 	}
 	else {
 		fUnalignedPointerTreatment = Options::kUnalignedPointerIgnore;
+	}
+
+	// warn by default for OS dylibs
+	if ( fInitializersTreatment == Options::kInvalid ) {
+		if ( fSharedRegionEligible && (fOutputKind == Options::kDynamicLibrary) ) {
+			fInitializersTreatment = Options::kWarning;
+			// TEMP HACK
+			if ( (fOutputKind == Options::kDynamicLibrary) && (fDylibInstallName != NULL) && (strstr(fDylibInstallName, "EmbeddedAcousticRecognition.framework") != NULL) && !fNoWeakExports )
+				fInitializersTreatment = Options::kSuppress;
+		}
+		else
+			fInitializersTreatment = Options::kSuppress;
 	}
 
 }
@@ -5911,7 +6003,7 @@ const char* Options::demangleSymbol(const char* sym) const
 
 	static size_t size = 1024;
 	static char* buff = (char*)malloc(size);
-	
+
 #if DEMANGLE_SWIFT
 	// only try to demangle symbols that look like Swift symbols
 	if ( strncmp(sym, "__T", 3) == 0 ) {
@@ -5941,25 +6033,49 @@ const char* Options::demangleSymbol(const char* sym) const
 }
 
 
-void Options::dumpDependency(uint8_t opcode, const char* path) const
+void Options::writeDependencyInfo() const
+{
+	// do nothing if -dependency_info not used
+	if ( !dumpDependencyInfo() )
+		return;
+
+	// <rdar://problem/30750137> sort entries for build reproducibility
+	std::sort(fDependencies.begin(), fDependencies.end(), [](const DependencyEntry& a, const DependencyEntry& b) -> bool {
+		if ( a.opcode != b.opcode )
+			return (a.opcode < b.opcode);
+		return (a.path < b.path);
+	});
+
+	// one time open() of -dependency_info file
+	int fd = open(this->dependencyInfoPath(), O_WRONLY | O_TRUNC | O_CREAT, 0666);
+	if ( fd == -1 )
+		throwf("Could not open or create -dependency_info file: %s", this->dependencyInfoPath());
+
+	// write header
+	uint8_t version = depLinkerVersion;
+	if ( write(fd, &version, 1) == -1 )
+		throwf("write() to -dependency_info failed, errno=%d", errno);
+	extern const char ldVersionString[];
+	if ( write(fd, ldVersionString, strlen(ldVersionString)+1) == -1 )
+		throwf("write() to -dependency_info failed, errno=%d", errno);
+
+	// write each dependency
+	for (const auto& entry: fDependencies) {
+		//printf("%d %s\n", entry.opcode, entry.path.c_str());
+		if ( write(fd, &entry.opcode, 1) == -1 )
+			throwf("write() to -dependency_info failed, errno=%d", errno);
+		if ( write(fd, entry.path.c_str(), entry.path.size()+1) == -1 )
+			throwf("write() to -dependency_info failed, errno=%d", errno);
+	}
+
+	::close(fd);
+}
+
+
+void Options::addDependency(uint8_t opcode, const char* path) const
 {
 	if ( !this->dumpDependencyInfo() ) 
 		return;
-
-	// one time open() of -dependency_info file
-	if ( fDependencyFileDescriptor == -1 ) {
-		fDependencyFileDescriptor = open(this->dependencyInfoPath(), O_WRONLY | O_TRUNC | O_CREAT, 0666);
-		if ( fDependencyFileDescriptor == -1 )
-			throwf("Could not open or create -dependency_info file: %s", this->dependencyInfoPath());
-
-		// write header
-		uint8_t version = depLinkerVersion;
-		if ( write(fDependencyFileDescriptor, &version, 1) == -1 )
-			throwf("write() to -dependency_info failed, errno=%d", errno);
-		extern const char ldVersionString[];
-		if ( write(fDependencyFileDescriptor, ldVersionString, strlen(ldVersionString)+1) == -1 )
-			throwf("write() to -dependency_info failed, errno=%d", errno);
-	}
 
 	char realPath[PATH_MAX];
 	if ( path[0] != '/' ) {
@@ -5968,12 +6084,10 @@ void Options::dumpDependency(uint8_t opcode, const char* path) const
 		}
 	}
 
-	if ( write(fDependencyFileDescriptor, &opcode, 1) == -1 )
-		throwf("write() to -dependency_info failed, errno=%d", errno);
-	if ( write(fDependencyFileDescriptor, path, strlen(path)+1) == -1 )
-		throwf("write() to -dependency_info failed, errno=%d", errno);
-
-	//fprintf(stderr, "0x%02X %s\n", opcode, path);
+	DependencyEntry entry;
+	entry.opcode = opcode;
+	entry.path   = path;
+	fDependencies.push_back(entry);
 }
 
 
