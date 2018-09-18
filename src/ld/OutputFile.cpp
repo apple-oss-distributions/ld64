@@ -1708,7 +1708,7 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 						if ( islandfit->kind == ld::Fixup::kindIslandTarget ) {
 							const ld::Atom* islandTarget = NULL;
 							uint64_t islandTargetAddress = addressOf(state, islandfit, &islandTarget);
-							delta = islandTargetAddress - (atom->finalAddress() + fit->offsetInAtom + 4);
+							delta = islandTargetAddress - (atom->finalAddress() + fit->offsetInAtom + 8);
 							if ( checkArmBranch24Displacement(delta) ) {
 								toTarget = islandTarget;
 								accumulator = islandTargetAddress;

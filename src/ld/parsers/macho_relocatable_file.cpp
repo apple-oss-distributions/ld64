@@ -1554,6 +1554,7 @@ template <typename A>
 bool Parser<A>::LabelAndCFIBreakIterator::next(Parser<A>& parser, const Section<A>& sect, uint32_t sectNum, pint_t startAddr, pint_t endAddr, 
 												pint_t* addr, pint_t* size, const macho_nlist<P>** symbol)
 {
+	bool cfiApplicable = (sect.machoSection()->flags() & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS));
 	// may not be a label on start of section, but need atom demarcation there
 	if ( newSection ) {
 		newSection = false;
@@ -1613,7 +1614,7 @@ bool Parser<A>::LabelAndCFIBreakIterator::next(Parser<A>& parser, const Section<
 			return true;
 		}
 		// no symbols in section, check CFI
-		if ( cfiIndex < cfiStartsCount ) {
+		if ( cfiApplicable && (cfiIndex < cfiStartsCount) ) {
 			pint_t nextCfiAddr = cfiStartsArray[cfiIndex];
 			if ( nextCfiAddr < endAddr ) {
 				// use cfi
@@ -2184,13 +2185,18 @@ bool Parser<A>::parseLoadCommands(Options::Platform platform, uint32_t linkMinOS
 	}
 
 
-	// record range of sections
+	// validate just one segment
 	if ( segment == NULL ) 
 		throw "missing LC_SEGMENT";
+	if ( segment->filesize() > _fileLength )
+		throw "LC_SEGMENT filesize too large";
+
+	// record and validate sections
 	_sectionsStart = (macho_section<P>*)((char*)segment + sizeof(macho_segment_command<P>));
 	_machOSectionsCount = segment->nsects();
 	if ( (sizeof(macho_segment_command<P>) + _machOSectionsCount * sizeof(macho_section<P>)) > segment->cmdsize() )
 		throw "too many sections for size of LC_SEGMENT command";
+
 	return true;
 }
 
@@ -6279,6 +6285,8 @@ bool Section<x86_64>::addRelocFixup(class Parser<x86_64>& parser, const macho_re
 	Parser<x86_64>::TargetDesc		target;
 	Parser<x86_64>::TargetDesc		toTarget;
 	src.atom = this->findAtomByAddress(srcAddr);
+	if ( src.atom == NULL )
+		throwf("malformed mach-o, reloc addr 0x%llX not in any atom", srcAddr);
 	src.offsetInAtom = srcAddr - src.atom->_objAddress;
 	const uint8_t* fixUpPtr = file().fileContent() + sect->offset() + reloc->r_address();
 	uint64_t contentValue = 0;
