@@ -157,7 +157,7 @@ public:
 	virtual uint32_t					cpuSubType() const		{ return 0; }
 	virtual uint32_t					subFileCount() const	{ return 1; }
 	virtual uint32_t					minOSVersion() const	{ return 0; }
-	virtual uint32_t					platformLoadCommand() const		{ return 0; }
+	virtual uint32_t					platform() const		{ return 0; }
     bool								fileExists() const     { return _modTime != 0; }
 	Type								type() const { return _type; }
 	virtual Bitcode*					getBitcode() const		{ return NULL; }
@@ -213,6 +213,7 @@ namespace relocatable {
 			const char*			string;
 		};
 		typedef const std::vector< std::vector<const char*> > LinkerOptionsList;
+		typedef std::vector<std::pair<uint32_t,uint32_t>> ToolVersionList;
 
 											File(const char* pth, time_t modTime, Ordinal ord)
 												: ld::File(pth, modTime, ord, Reloc) { }
@@ -224,6 +225,7 @@ namespace relocatable {
 		virtual bool						canScatterAtoms() const = 0;
 		virtual bool						hasLongBranchStubs()		{ return false; }
 		virtual LinkerOptionsList*			linkerOptions() const = 0;
+		virtual const ToolVersionList&		toolVersions() const = 0;
 		virtual SourceKind					sourceKind() const { return kSourceUnknown; }
 		virtual const uint8_t*				fileContent() const { return nullptr; }
 	};
@@ -919,6 +921,7 @@ public:
 	std::vector<const ld::relocatable::File*>	filesFromCompilerRT;
 	std::vector<const ld::Atom*>				deadAtoms;
 	std::unordered_set<const char*>				allUndefProxies;
+	std::unordered_set<uint64_t>				toolsVersions;
 	const ld::dylib::File*						bundleLoader;
 	const Atom*									entryPoint;
 	const Atom*									classicBindingHelper;
@@ -929,7 +932,7 @@ public:
 	uint8_t										swiftVersion;
 	uint32_t									cpuSubType;
 	uint32_t									minOSVersion;
-	uint32_t									derivedPlatformLoadCommand;
+	uint32_t									derivedPlatform;
 	bool										objectFileFoundWithNoVersion;
 	bool										allObjectFilesScatterable;
 	bool										someObjectFileHasDwarf;

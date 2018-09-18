@@ -507,6 +507,53 @@
 #define DYLD_CACHE_ADJ_V2_IMAGE_OFF_32			0x0C
 
 
+#ifndef LC_BUILD_VERSION
+	#define LC_BUILD_VERSION 0x32 /* build for platform min OS version */
+
+	/*
+	 * The build_version_command contains the min OS version on which this 
+	 * binary was built to run for its platform.  The list of known platforms and
+	 * tool values following it.
+	 */
+	struct build_version_command {
+		uint32_t	cmd;		/* LC_BUILD_VERSION */
+		uint32_t	cmdsize;	/* sizeof(struct build_version_command) plus */
+								/* ntools * sizeof(struct build_tool_version) */
+		uint32_t	platform;	/* platform */
+		uint32_t	minos;		/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
+		uint32_t	sdk;		/* X.Y.Z is encoded in nibbles xxxx.yy.zz */
+		uint32_t	ntools;		/* number of tool entries following this */
+	};
+
+	struct build_tool_version {
+		uint32_t	tool;		/* enum for the tool */
+		uint32_t	version;	/* version number of the tool */
+	};
+
+	/* Known values for the platform field above. */
+	#define PLATFORM_MACOS		1
+	#define PLATFORM_IOS		2
+	#define PLATFORM_TVOS		3
+	#define PLATFORM_WATCHOS	4
+	#define PLATFORM_BRIDGEOS	5
+
+	/* Known values for the tool field above. */
+	#define TOOL_CLANG	1
+	#define TOOL_SWIFT	2
+	#define TOOL_LD		3
+#endif
+
+#ifndef LC_NOTE
+	#define LC_NOTE 0x31
+	struct note_command {
+		uint32_t    cmd;        /* LC_NOTE */
+		uint32_t    cmdsize;    /* sizeof(struct note_command) */
+		char        data_owner[16];    /* owner name for this LC_NOTE */
+		uint64_t    offset;        /* file offset of this data */
+		uint64_t    size;        /* length of data region */
+	};
+#endif
+
 
 // kind target-address fixup-addr [adj] 
 
@@ -577,7 +624,7 @@ static const ArchInfo archInfoArray[] = {
 	#define SUPPORT_ARCH_arm_any 1
 #endif
 #if SUPPORT_ARCH_arm64
-	{ "arm64", CPU_TYPE_ARM64,   CPU_SUBTYPE_ARM64_ALL,  "arm64-",  "aarch64-",  false,  false },
+	{ "arm64", CPU_TYPE_ARM64,   CPU_SUBTYPE_ARM64_ALL,  "arm64-",  "aarch64-",  true,  false },
 #endif
 #if SUPPORT_ARCH_arm64v8
 	{ "arm64v8", CPU_TYPE_ARM64, CPU_SUBTYPE_ARM64_V8,   "arm64v8-",  "aarch64-",   true,  false },
@@ -1660,6 +1707,58 @@ public:
 private:
 	version_min_command	fields;
 };
+
+
+
+//
+// mach-o build version load command
+//
+template <typename P>
+class macho_build_version_command {
+public:
+	uint32_t		cmd() const								INLINE { return E::get32(fields.cmd); }
+	void			set_cmd(uint32_t value)					INLINE { E::set32(fields.cmd, value); }
+
+	uint32_t		cmdsize() const							INLINE { return E::get32(fields.cmdsize); }
+	void			set_cmdsize(uint32_t value)				INLINE { E::set32(fields.cmdsize, value); }
+
+	uint32_t		platform() const						INLINE { return fields.platform; }
+	void			set_platform(uint32_t value)			INLINE { E::set32(fields.platform, value); }
+
+	uint32_t		minos() const							INLINE { return fields.minos; }
+	void			set_minos(uint32_t value)				INLINE { E::set32(fields.minos, value); }
+
+	uint32_t		sdk() const								INLINE { return fields.sdk; }
+	void			set_sdk(uint32_t value)					INLINE { E::set32(fields.sdk, value); }
+
+	uint32_t		ntools() const							INLINE { return fields.ntools; }
+	void			set_ntools(uint32_t value)				INLINE { E::set32(fields.ntools, value); }
+
+
+	typedef typename P::E		E;
+private:
+	build_version_command	fields;
+};
+
+
+//
+// mach-o build version load command
+//
+template <typename P>
+class macho_build_tool_version {
+public:
+	uint32_t		tool() const							INLINE { return E::get32(fields.tool); }
+	void			set_tool(uint32_t value)				INLINE { E::set32(fields.tool, value); }
+
+	uint32_t		version() const							INLINE { return E::get32(fields.version); }
+	void			set_version(uint32_t value)				INLINE { E::set32(fields.version, value); }
+
+	typedef typename P::E		E;
+private:
+	build_tool_version	fields;
+};
+
+
 
 
 //

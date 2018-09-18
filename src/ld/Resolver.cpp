@@ -51,7 +51,6 @@
 #include <AvailabilityMacros.h>
 
 #include "Options.h"
-
 #include "ld.hpp"
 #include "Bitcode.hpp"
 #include "InputFiles.h"
@@ -59,6 +58,10 @@
 #include "Resolver.h"
 #include "parsers/lto_file.h"
 
+#include "configure.h"
+
+#define VAL(x) #x
+#define STRINGIFY(x) VAL(x)
 
 namespace ld {
 namespace tool {
@@ -284,7 +287,7 @@ void Resolver::initializeState()
 	
 	_internal.cpuSubType = _options.subArchitecture();
 	_internal.minOSVersion = _options.minOSversion();
-	_internal.derivedPlatformLoadCommand = 0;
+	_internal.derivedPlatform = 0;
 	
 	// In -r mode, look for -linker_option additions
 	if ( _options.outputKind() == Options::kObjectFile ) {
@@ -293,6 +296,11 @@ void Resolver::initializeState()
 			doLinkerOption(*it, "command line");
 		}
 	}
+#ifdef LD64_VERSION_NUM
+	uint32_t packedNum = Options::parseVersionNumber32(STRINGIFY(LD64_VERSION_NUM));
+	uint64_t combined = (uint64_t)TOOL_LD << 32 | packedNum;
+	_internal.toolsVersions.insert(combined);
+#endif
 }
 
 void Resolver::buildAtomList()
@@ -366,6 +374,7 @@ void Resolver::doFile(const ld::File& file)
 					// No bitcode section, figure out if the object file comes from LTO/compiler static library
 					switch ( _options.platform() ) {
 					case Options::kPlatformOSX:
+					case Options::kPlatform_bridgeOS:
 					case Options::kPlatformUnknown:
 						warning("all bitcode will be dropped because '%s' was built without bitcode. "
 								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target. ", file.path());
@@ -475,13 +484,18 @@ void Resolver::doFile(const ld::File& file)
 		uint32_t objMinOS = objFile->minOSVersion();
 		if ( !objMinOS )
 			_internal.objectFileFoundWithNoVersion = true;
-
-		uint32_t objPlatformLC = objFile->platformLoadCommand();
-		if ( (objPlatformLC != 0) && (_internal.derivedPlatformLoadCommand == 0) && (_options.outputKind() == Options::kObjectFile) )
-			_internal.derivedPlatformLoadCommand = objPlatformLC;
-
 		if ( (_options.outputKind() == Options::kObjectFile) && (objMinOS > _internal.minOSVersion) )
 			_internal.minOSVersion = objMinOS;
+
+		uint32_t objPlatform = objFile->platform();
+		if ( (objPlatform != 0) && (_options.outputKind() == Options::kObjectFile) && (_internal.derivedPlatform == 0)  )
+			_internal.derivedPlatform = objPlatform;
+
+		// update set of known tools used
+		for (const std::pair<uint32_t,uint32_t>& entry : objFile->toolVersions()) {
+			uint64_t combined = (uint64_t)entry.first << 32 | entry.second;
+			_internal.toolsVersions.insert(combined);
+		}
 
 		// update cpu-sub-type
 		cpu_subtype_t nextObjectSubType = file.cpuSubType();
@@ -505,6 +519,19 @@ void Resolver::doFile(const ld::File& file)
 				}
 				break;
 			
+			case CPU_TYPE_ARM64:
+				if ( _options.subArchitecture() != nextObjectSubType ) {
+					if ( _options.allowSubArchitectureMismatches() ) {
+						warning("object file %s was built for different arm64 sub-type (%d) than link command line (%d)",
+							file.path(), nextObjectSubType, _options.subArchitecture());
+					}
+					else {
+						throwf("object file %s was built for different arm64 sub-type (%d) than link command line (%d)",
+							file.path(), nextObjectSubType, _options.subArchitecture());
+					}
+				}
+				break;
+
 			case CPU_TYPE_I386:
 				_internal.cpuSubType = CPU_SUBTYPE_I386_ALL;
 				break;
@@ -547,6 +574,7 @@ void Resolver::doFile(const ld::File& file)
 					 strncmp(tcLibPath, tempPath, strlen(tcLibPath)) != 0 ) {
 					switch ( _options.platform() ) {
 					case Options::kPlatformOSX:
+					case Options::kPlatform_bridgeOS:
 					case Options::kPlatformUnknown:
 						warning("all bitcode will be dropped because '%s' was built without bitcode. "
 								"You must rebuild it with bitcode enabled (Xcode setting ENABLE_BITCODE), obtain an updated library from the vendor, or disable bitcode for this target.", file.path());
@@ -765,6 +793,11 @@ void Resolver::doAtom(const ld::Atom& atom)
 	// remember if any atoms are aliases
 	if ( atom.section().type() == ld::Section::typeTempAlias )
 		_haveAliases = true;
+	
+	// prevent initializers if -no_inits used
+	if ( (atom.section().type() == ld::Section::typeInitializerPointers) && _options.noInitializers() ) {
+		throw "-no_inits specified, but initializer found";
+	}
 	
 	if ( _options.deadCodeStrip() ) {
 		// add to set of dead-strip-roots, all symbols that the compiler marks as don't strip

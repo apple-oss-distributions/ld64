@@ -1232,8 +1232,15 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 			}
 				break;
 		}
-		file->forEachAtom(handler);
+		try {
+			file->forEachAtom(handler);
+		}
+		catch (const char* msg) {
+			asprintf((char**)&_exception, "%s file '%s'", msg, file->path());
+		}
 	}
+	if (_exception)
+		throw _exception;
 
 	markExplicitlyLinkedDylibs();
 	addLinkerOptionLibraries(state, handler);

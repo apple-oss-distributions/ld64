@@ -84,7 +84,7 @@ public:
 												_swiftVersion(0),
 												_cpuSubType(0),
 												_minOSVersion(0),
-												_platform(0),
+												_platform(Options::kPlatformUnknown),
 												_canScatterAtoms(false),
 												_objcHasCategoryClassPropertiesField(false),
 												_srcKind(kSourceUnknown) { }
@@ -95,7 +95,7 @@ public:
 	virtual bool										justInTimeforEachAtom(const char* name, ld::File::AtomHandler&) const
 																					{ return false; }
 	virtual uint32_t									minOSVersion() const		{ return _minOSVersion; }
-	virtual uint32_t									platformLoadCommand() const	{ return _platform; }
+	virtual uint32_t									platform() const			{ return _platform; }
 
 	// overrides of ld::relocatable::File 
 	virtual ObjcConstraint								objCConstraint() const			{ return _objConstraint; }
@@ -107,6 +107,7 @@ public:
 	virtual bool										canScatterAtoms() const			{ return _canScatterAtoms; }
 	virtual const char*									translationUnitSource() const;
 	virtual LinkerOptionsList*							linkerOptions() const			{ return &_linkerOptions; }
+	virtual const ToolVersionList&						toolVersions() const			{ return _toolVersions; }
 	virtual uint8_t										swiftVersion() const			{ return _swiftVersion; }
 	virtual ld::Bitcode*								getBitcode() const				{ return _bitcode.get(); }
 	virtual SourceKind									sourceKind() const				{ return _srcKind; }
@@ -141,12 +142,13 @@ private:
 	uint8_t									_swiftVersion;
 	uint32_t								_cpuSubType;
 	uint32_t								_minOSVersion;
-	uint32_t								_platform;
+	Options::Platform						_platform;
 	bool									_canScatterAtoms;
 	bool									_objcHasCategoryClassPropertiesField;
 	std::vector<std::vector<const char*> >	_linkerOptions;
 	std::unique_ptr<ld::Bitcode>			_bitcode;
 	SourceKind								_srcKind;
+	ToolVersionList							_toolVersions;
 };
 
 
@@ -2092,9 +2094,24 @@ bool Parser<A>::parseLoadCommands(Options::Platform platform, uint32_t linkMinOS
 	#endif
 				if ( ignoreMismatchPlatform )
 					break;
-				_file->_platform = cmd->cmd();
 				lcPlatform = Options::platformForLoadCommand(cmd->cmd());
+				_file->_platform = lcPlatform;
 				_file->_minOSVersion = ((macho_version_min_command<P>*)cmd)->version();
+				break;
+			case LC_BUILD_VERSION:
+				{
+					const macho_build_version_command<P>* buildVersCmd = (macho_build_version_command<P>*)cmd;
+					if ( ignoreMismatchPlatform )
+						break;
+					lcPlatform = (Options::Platform)buildVersCmd->platform();
+					_file->_platform = lcPlatform;
+					_file->_minOSVersion = buildVersCmd->minos();
+					const macho_build_tool_version<P>* entry = (macho_build_tool_version<P>*)((uint8_t*)cmd + sizeof(macho_build_version_command<P>));
+					for (uint32_t t=0; t < buildVersCmd->ntools(); ++t) {
+						_file->_toolVersions.push_back(std::make_pair(entry->tool(), entry->version()));
+						++entry;
+					}
+				}
 				break;
 			case macho_segment_command<P>::CMD:
 				if ( segment != NULL )
@@ -2124,6 +2141,7 @@ bool Parser<A>::parseLoadCommands(Options::Platform platform, uint32_t linkMinOS
 					if ( lcPlatform == Options::kPlatformUnknown )
 						break;
 					// fall through if the Platform is not Unknown
+				case Options::kPlatform_bridgeOS:
 				case Options::kPlatformWatchOS:
 					// Error when using bitcocde, warning otherwise.
 					if (_usingBitcode)
@@ -2197,6 +2215,14 @@ Options::Platform Parser<A>::findPlatform(const macho_header<P>* header)
 				return Options::kPlatformOSX;
 			case LC_VERSION_MIN_IPHONEOS:
 				return Options::kPlatformiOS;
+			case LC_VERSION_MIN_WATCHOS:
+				return Options::kPlatformWatchOS;
+	#if SUPPORT_APPLE_TV
+			case LC_VERSION_MIN_TVOS:
+				return Options::kPlatform_tvOS;
+	#endif
+			case LC_BUILD_VERSION:
+				return (Options::Platform)((macho_build_version_command<P>*)cmd)->platform();
 		}
 		cmd = (const macho_load_command<P>*)(((char*)cmd)+cmd->cmdsize());
 		if ( cmd > cmdsEnd )
@@ -7897,7 +7923,7 @@ bool isObjectFile(const uint8_t* fileContent, cpu_type_t* result, cpu_subtype_t*
 	if ( mach_o::relocatable::Parser<arm64>::validFile(fileContent, false, 0) ) {
 		const macho_header<Pointer64<LittleEndian> >* header = (const macho_header<Pointer64<LittleEndian> >*)fileContent;
 		*result = CPU_TYPE_ARM64;
-		*subResult = CPU_SUBTYPE_ARM64_ALL;
+		*subResult = header->cpusubtype();
 		*platform = Parser<arm64>::findPlatform(header);
 		return true;
 	}

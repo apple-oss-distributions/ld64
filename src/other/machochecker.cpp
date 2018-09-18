@@ -462,6 +462,8 @@ void MachOChecker<A>::checkLoadCommands()
 			case LC_DATA_IN_CODE:
 			case LC_DYLIB_CODE_SIGN_DRS:
 			case LC_SOURCE_VERSION:
+			case LC_NOTE:
+			case LC_BUILD_VERSION:
 				break;
 			case LC_RPATH:
 				fHasLC_RPATH = true;
@@ -739,7 +741,7 @@ void MachOChecker<A>::checkLoadCommands()
 					if ( fIndirectTableCount != 0  ) {
 						if ( fDynamicSymbolTable->indirectsymoff() < linkEditSegment->fileoff() )
 							throw "indirect symbol table not in __LINKEDIT";
-						if ( (fDynamicSymbolTable->indirectsymoff()+fIndirectTableCount*8) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
+						if ( (fDynamicSymbolTable->indirectsymoff()+fIndirectTableCount*4) > (linkEditSegment->fileoff()+linkEditSegment->filesize()) )
 							throw "indirect symbol table not in __LINKEDIT";
 						if ( (fDynamicSymbolTable->indirectsymoff() % sizeof(pint_t)) != 0 )
 							throw "indirect symbol table not pointer aligned";
@@ -1544,13 +1546,11 @@ bool MachOChecker<A>::addressIsBindingSite(pint_t targetAddr)
 		uint64_t segOffset = 0;
 		uint32_t count;
 		uint32_t skip;
-		uint8_t flags;
 		const char* symbolName = NULL;
 		int libraryOrdinal = 0;
 		int segIndex;
 		int64_t addend = 0;
 		pint_t segStartAddr = 0;
-		pint_t addr;
 		bool done = false;
 		while ( !done && (p < end) ) {
 			uint8_t immediate = *p & BIND_IMMEDIATE_MASK;

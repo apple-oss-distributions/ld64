@@ -133,7 +133,7 @@ public:
 	virtual ld::File::ObjcConstraint		objCConstraint() const override final { return _objcConstraint; }
 	virtual uint8_t							swiftVersion() const override final { return _swiftVersion; }
 	virtual uint32_t						minOSVersion() const override final { return _minVersionInDylib; }
-	virtual uint32_t						platformLoadCommand() const	override final { return _platformInDylib; }
+	virtual uint32_t						platform() const	override final { return _platformInDylib; }
 	virtual ld::Bitcode*					getBitcode() const override final { return _bitcode.get(); }
 
 

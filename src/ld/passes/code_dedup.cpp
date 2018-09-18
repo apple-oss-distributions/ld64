@@ -328,6 +328,7 @@ void doPass(const Options& opts, ld::Internal& state)
                 textAtoms.insert(pos, aliasAtom);
                 state.atomToSection[aliasAtom] = textSection;
                 replacementMap[dupAtom] = aliasAtom;
+                (const_cast<ld::Atom*>(dupAtom))->setCoalescedAway();
             }
         }
     }

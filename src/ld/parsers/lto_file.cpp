@@ -46,9 +46,6 @@
 #include "macho_relocatable_file.h"
 #include "lto_file.h"
 
-// #defines are a work around for <rdar://problem/8760268>
-#define __STDC_LIMIT_MACROS 1
-#define __STDC_CONSTANT_MACROS 1
 #include "llvm-c/lto.h"
 
 namespace lto {
@@ -109,6 +106,7 @@ public:
 	const std::vector<ld::relocatable::File::Stab>*	stabs()	const override			{ return NULL; }
 	bool										canScatterAtoms() const override		{ return true; }
 	LinkerOptionsList*							linkerOptions() const override		{ return NULL; }
+	const ToolVersionList&						toolVersions() const override		{ return _toolVersions; }
 	bool												isThinLTO() const			{ return _isThinLTO; }
 	void												setIsThinLTO(bool ThinLTO) 	{ _isThinLTO = ThinLTO; }
 	// fixme rdar://24734472 objCConstraint() and objcHasCategoryClassProperties()
@@ -148,6 +146,7 @@ private:
 	ld::Fixup								_fixupToInternal;
 	ld::relocatable::File::DebugInfoKind	_debugInfo; 
 	uint32_t								_cpuSubType;
+	ToolVersionList							_toolVersions;  // unused, may some day contain version of clang the created bitcode
 };
 
 //
@@ -550,7 +549,7 @@ void File::addToThinGenerator(thinlto_code_gen_t generator, int id) {
 	assert(!_module && "Expected module to be disposed");
 	std::string pathWithID = _path;
 	pathWithID += std::to_string(id);
-	::thinlto_codegen_add_module(generator, pathWithID.c_str(), (const char *)_content, _contentLength);
+	::thinlto_codegen_add_module(generator, strdup(pathWithID.c_str()), (const char *)_content, _contentLength);
 }
 #endif
 
@@ -1146,7 +1145,7 @@ thinlto_code_gen_t Parser::init_thinlto_codegen(const std::vector<File*>&       
 				const char* name = llvmAtom->name();
 				if ( deadllvmAtoms.find(name) == deadllvmAtoms.end() ) {
 					if ( logMustPreserve )
-						fprintf(stderr, "lto_codegen_add_must_preserve_symbol(%s) because linker coalesce away and replace with a mach-o atom\n", name);
+						fprintf(stderr, "thinlto_codegen_add_must_preserve_symbol(%s) because linker coalesce away and replace with a mach-o atom\n", name);
 					::thinlto_codegen_add_must_preserve_symbol(thingenerator, name, strlen(name));
 					deadllvmAtoms[name] = (Atom*)llvmAtom;
 				}
@@ -1167,15 +1166,15 @@ thinlto_code_gen_t Parser::init_thinlto_codegen(const std::vector<File*>&       
 		// 2 - included in nonLLVMRefs set.
 		// If a symbol is not listed in exportList then LTO is free to optimize it away.
 		if ( (atom->scope() == ld::Atom::scopeGlobal) && options.preserveAllGlobals ) {
-			if ( logMustPreserve ) fprintf(stderr, "lto_codegen_add_must_preserve_symbol(%s) because global symbol\n", name);
+			if ( logMustPreserve ) fprintf(stderr, "thinlto_codegen_add_must_preserve_symbol(%s) because global symbol\n", name);
 			::thinlto_codegen_add_must_preserve_symbol(thingenerator, name, strlen(name));
 		}
 		else if ( nonLLVMRefs.find(name) != nonLLVMRefs.end() ) {
-			if ( logMustPreserve ) fprintf(stderr, "lto_codegen_add_must_preserve_symbol(%s) because referenced from outside of ThinLTO\n", name);
+			if ( logMustPreserve ) fprintf(stderr, "thinlto_codegen_add_must_preserve_symbol(%s) because referenced from outside of ThinLTO\n", name);
 			::thinlto_codegen_add_must_preserve_symbol(thingenerator, name, strlen(name));
 		}
 		else if ( LLVMRefs.find(name) != LLVMRefs.end() ) {
-			if ( logMustPreserve ) fprintf(stderr, "lto_codegen_add_must_preserve_symbol(%s) because referenced from another file\n", name);
+			if ( logMustPreserve ) fprintf(stderr, "thinlto_codegen_add_cross_referenced_symbol(%s) because referenced from another file\n", name);
 			::thinlto_codegen_add_cross_referenced_symbol(thingenerator, name, strlen(name));
 		} else {
 			if ( logMustPreserve ) fprintf(stderr, "NOT preserving(%s)\n", name);
@@ -1264,7 +1263,7 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 			}
 
 			// Add the optimized bitcode to the codegen generator now.
-			::thinlto_codegen_add_module(thingenerator, tempMachoPath.c_str(), (const char *)machOFile.Buffer, machOFile.Size);
+			::thinlto_codegen_add_module(thingenerator, strdup(tempMachoPath.c_str()), (const char *)machOFile.Buffer, machOFile.Size);
 		}
 	}
 
@@ -1295,10 +1294,34 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 	if ( numObjects == 0 )
 		throwf("could not do ThinLTO codegen (thinlto_codegen_process didn't produce any object): '%s', using libLTO version '%s'", ::lto_get_error_message(), ::lto_get_version());
 
+	auto get_thinlto_buffer_or_load_file = [&] (unsigned ID) {
+#if LTO_API_VERSION >= 21
+		if ( useFileBasedAPI ) {
+			const char* path = thinlto_module_get_object_file(thingenerator, ID);
+			// map in whole file
+			struct stat stat_buf;
+			int fd = ::open(path, O_RDONLY, 0);
+			if ( fd == -1 )
+				throwf("can't open thinlto file '%s', errno=%d", path, errno);
+			if ( ::fstat(fd, &stat_buf) != 0 )
+				throwf("fstat thinlto file '%s' failed, errno=%d\n", path, errno);
+			size_t len = stat_buf.st_size;
+			if ( len < 20 )
+				throwf("ThinLTO file '%s' too small (length=%zu)", path, len);
+			const char* p = (const char*)::mmap(NULL, len, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, 0);
+			if ( p == (const char*)(-1) )
+				throwf("can't map file, errno=%d", errno);
+			::close(fd);
+			return LTOObjectBuffer{ p, len };
+		}
+#endif
+		return thinlto_module_get_object(thingenerator, ID);
+	};
+
 	// if requested, save off objects files
 	if ( options.saveTemps ) {
 		for (unsigned bufID = 0; bufID < numObjects; ++bufID) {
-			auto machOFile = thinlto_module_get_object(thingenerator, bufID);
+			auto machOFile = get_thinlto_buffer_or_load_file(bufID);
 			std::string tempMachoPath = options.outputFilePath;
 			tempMachoPath += ".";
 			tempMachoPath += std::to_string(bufID);
@@ -1326,30 +1349,6 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 			}
 		}
 	}
-
-	auto get_thinlto_buffer_or_load_file = [&] (unsigned ID) {
-#if LTO_API_VERSION >= 21
-		if ( useFileBasedAPI ) {
-			const char* path = thinlto_module_get_object_file(thingenerator, ID);
-			// map in whole file
-			struct stat stat_buf;
-			int fd = ::open(path, O_RDONLY, 0);
-			if ( fd == -1 )
-				throwf("can't open thinlto file '%s', errno=%d", path, errno);
-			if ( ::fstat(fd, &stat_buf) != 0 )
-				throwf("fstat thinlto file '%s' failed, errno=%d\n", path, errno);
-			size_t len = stat_buf.st_size;
-			if ( len < 20 )
-				throwf("ThinLTO file '%s' too small (length=%zu)", path, len);
-			const char* p = (const char*)::mmap(NULL, len, PROT_READ, MAP_FILE | MAP_PRIVATE, fd, 0);
-			if ( p == (const char*)(-1) )
-				throwf("can't map file, errno=%d", errno);
-			::close(fd);
-			return LTOObjectBuffer{ p, len };
-		}
-#endif
-		return thinlto_module_get_object(thingenerator, ID);
-	};
 
 	auto ordinal = ld::File::Ordinal::LTOOrdinal().nextFileListOrdinal();
 	for (unsigned bufID = 0; bufID < numObjects; ++bufID) {
@@ -1642,6 +1641,22 @@ const char* version()
 {
 	Mutex lock;
 	return ::lto_get_version();
+}
+
+//
+// used by "ld -v" to report static version of libLTO.dylib API being compiled
+//
+unsigned int static_api_version()
+{
+	return LTO_API_VERSION;
+}
+
+//
+// used by "ld -v" to report version of libLTO.dylib being used
+//
+unsigned int runtime_api_version()
+{
+	return ::lto_api_version();
 }
 
 

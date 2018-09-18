@@ -88,8 +88,9 @@ public:
 	enum LocalSymbolHandling { kLocalSymbolsAll, kLocalSymbolsNone, kLocalSymbolsSelectiveInclude, kLocalSymbolsSelectiveExclude };
 	enum BitcodeMode { kBitcodeProcess, kBitcodeAsData, kBitcodeMarker, kBitcodeStrip };
 	enum DebugInfoStripping { kDebugInfoNone, kDebugInfoMinimal, kDebugInfoFull };
+	enum UnalignedPointerTreatment { kUnalignedPointerError, kUnalignedPointerWarning, kUnalignedPointerIgnore };
 #if SUPPORT_APPLE_TV
-	enum Platform { kPlatformUnknown, kPlatformOSX, kPlatformiOS, kPlatformWatchOS, kPlatform_tvOS };
+	enum Platform { kPlatformUnknown, kPlatformOSX=1, kPlatformiOS=2, kPlatformWatchOS=3, kPlatform_tvOS=4, kPlatform_bridgeOS=5 };
 #else
 	enum Platform { kPlatformUnknown, kPlatformOSX, kPlatformiOS, kPlatformWatchOS };
 #endif
@@ -123,6 +124,8 @@ public:
 			case kPlatform_tvOS:
 				return "tvOS";
 		#endif
+			case kPlatform_bridgeOS:
+				return "bridgeOS";
 			case kPlatformUnknown:
 			default:
 				return "(unknown)";
@@ -143,6 +146,9 @@ public:
 				break;
 			case 4:
 				strcpy(versionString, "3.0");
+				break;
+			case 5:
+				strcpy(versionString, "4.0");
 				break;
 			default:
 				sprintf(versionString, "unknown ABI version 0x%02X", value);
@@ -428,6 +434,7 @@ public:
 	bool						objcGcOnly() const { return fObjCGcOnly; }
 	bool						canUseThreadLocalVariables() const { return fTLVSupport; }
 	bool						addVersionLoadCommand() const { return fVersionLoadCommand && (fPlatform != kPlatformUnknown); }
+	bool						addBuildVersionLoadCommand() const { return fBuildVersionLoadCommand; }
 	bool						addFunctionStarts() const { return fFunctionStartsLoadCommand; }
 	bool						addDataInCodeInfo() const { return fDataInCodeInfoLoadCommand; }
 	bool						canReExportSymbols() const { return fCanReExportSymbols; }
@@ -461,6 +468,7 @@ public:
 	bool						ignoreAutoLink() const { return fIgnoreAutoLink; }
 	bool						allowDeadDuplicates() const { return fAllowDeadDups; }
 	bool						allowWeakImports() const { return fAllowWeakImports; }
+	bool						noInitializers() const { return fNoInitializers; }
 	BitcodeMode					bitcodeKind() const { return fBitcodeKind; }
 	bool						sharedRegionEncodingV2() const { return fSharedRegionEncodingV2; }
 	bool						useDataConstSegment() const { return fUseDataConstSegment; }
@@ -504,6 +512,7 @@ public:
 	bool						hasDataSymbolMoves() const { return !fSymbolsMovesData.empty(); }
 	bool						hasCodeSymbolMoves() const { return !fSymbolsMovesCode.empty(); }
 	void						writeToTraceFile(const char* buffer, size_t len) const;
+	UnalignedPointerTreatment	unalignedPointerTreatment() const { return fUnalignedPointerTreatment; }
 
 	static uint32_t				parseVersionNumber32(const char*);
 
@@ -730,6 +739,7 @@ private:
 	bool								fVersionLoadCommand;
 	bool								fVersionLoadCommandForcedOn;
 	bool								fVersionLoadCommandForcedOff;
+	bool								fBuildVersionLoadCommand;
 	bool								fFunctionStartsLoadCommand;
 	bool								fFunctionStartsForcedOn;
 	bool								fFunctionStartsForcedOff;
@@ -778,6 +788,7 @@ private:
 	bool								fIgnoreAutoLink;
 	bool								fAllowDeadDups;
 	bool								fAllowWeakImports;
+	bool								fNoInitializers;
 	BitcodeMode							fBitcodeKind;
 	Platform							fPlatform;
 	DebugInfoStripping					fDebugInfoStripping;
@@ -817,6 +828,7 @@ private:
 	mutable int							fDependencyFileDescriptor;
 	mutable int							fTraceFileDescriptor;
 	uint8_t								fMaxDefaultCommonAlign;
+	UnalignedPointerTreatment			fUnalignedPointerTreatment;
 };
 
 

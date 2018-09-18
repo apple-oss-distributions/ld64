@@ -53,6 +53,8 @@ extern "C" size_t fnd_get_demangled_name(const char *mangledName, char *outputBu
 // upward dependency on lto::version()
 namespace lto {
 	extern const char* version();
+	extern unsigned static_api_version();
+	extern unsigned runtime_api_version();
 }
 
 // magic to place command line in crash reports
@@ -171,7 +173,7 @@ Options::Options(int argc, const char* argv[])
 	  fObjcGcCompaction(false), fObjCGc(false), fObjCGcOnly(false), 
 	  fDemangle(false), fTLVSupport(false), 
 	  fVersionLoadCommand(false), fVersionLoadCommandForcedOn(false), 
-	  fVersionLoadCommandForcedOff(false), fFunctionStartsLoadCommand(false),
+	  fVersionLoadCommandForcedOff(false), fBuildVersionLoadCommand(false), fFunctionStartsLoadCommand(false),
 	  fFunctionStartsForcedOn(false), fFunctionStartsForcedOff(false),
 	  fDataInCodeInfoLoadCommand(false), fDataInCodeInfoLoadCommandForcedOn(false), fDataInCodeInfoLoadCommandForcedOff(false),
 	  fCanReExportSymbols(false), fObjcCategoryMerging(true), fPageAlignDataAtoms(false), 
@@ -190,11 +192,12 @@ Options::Options(int argc, const char* argv[])
 	  fBundleBitcode(false), fHideSymbols(false), fVerifyBitcode(false),
 	  fReverseMapUUIDRename(false), fDeDupe(true), fVerboseDeDupe(false),
 	  fReverseMapPath(NULL), fLTOCodegenOnly(false),
-	  fIgnoreAutoLink(false), fAllowDeadDups(false), fAllowWeakImports(true), fBitcodeKind(kBitcodeProcess),
+	  fIgnoreAutoLink(false), fAllowDeadDups(false), fAllowWeakImports(true), fNoInitializers(false), fBitcodeKind(kBitcodeProcess),
 	  fPlatform(kPlatformUnknown), fDebugInfoStripping(kDebugInfoMinimal), fTraceOutputFile(NULL),
 	  fMacVersionMin(ld::macVersionUnset), fIOSVersionMin(ld::iOSVersionUnset), fWatchOSVersionMin(ld::wOSVersionUnset),
 	  fSaveTempFiles(false), fSnapshotRequested(false), fPipelineFifo(NULL),
-	  fDependencyInfoPath(NULL), fDependencyFileDescriptor(-1), fTraceFileDescriptor(-1), fMaxDefaultCommonAlign(0)
+	  fDependencyInfoPath(NULL), fDependencyFileDescriptor(-1), fTraceFileDescriptor(-1), fMaxDefaultCommonAlign(0),
+	  fUnalignedPointerTreatment(kUnalignedPointerIgnore)
 {
 	this->checkForClassic(argc, argv);
 	this->parsePreCommandLineEnvironmentSettings();
@@ -598,8 +601,10 @@ uint32_t Options::minOSversion() const
 		case Options::kPlatform_tvOS:
 			return iOSVersionMin();
 #endif
-		default:
-			break;
+		case kPlatform_bridgeOS:
+			return iOSVersionMin();
+		case kPlatformUnknown:
+			return 0;
 	}
 	return 0;
 }
@@ -613,7 +618,8 @@ void Options::setArchitecture(cpu_type_t type, cpu_subtype_t subtype, Options::P
 			fArchitectureName = t->archName;
 			fHasPreferredSubType = t->isSubType;
 			fArchSupportsThumb2 = t->supportsThumb2;
-			fPlatform = platform;
+			if ( fPlatform == kPlatformUnknown)
+				fPlatform = platform;
 			switch ( type ) {
 				case CPU_TYPE_I386:
 				case CPU_TYPE_X86_64:
@@ -1501,12 +1507,8 @@ bool Options::minOS(ld::MacVersionMin requiredMacMin, ld::IOSVersionMin required
 	if ( fMacVersionMin != ld::macVersionUnset ) {
 		return ( fMacVersionMin >= requiredMacMin );
 	}
-	else if ( fWatchOSVersionMin != ld::wOSVersionUnset ) {
-		// Hack until we fully track watch and ios versions seperately
-		return ( (fWatchOSVersionMin + 0x00070000) >= requirediPhoneOSMin);
-	}
 	else {
-		return ( fIOSVersionMin >= requirediPhoneOSMin );
+		return min_iOS(requirediPhoneOSMin);
 	}
 }
 
@@ -1515,6 +1517,10 @@ bool Options::min_iOS(ld::IOSVersionMin requirediOSMin)
 	 if ( fWatchOSVersionMin != ld::wOSVersionUnset ) {
 		// Hack until we fully track watch and ios versions seperately
 		return ( (fWatchOSVersionMin + 0x00070000) >= requirediOSMin);
+	}
+	else if ( fPlatform == Options::kPlatform_bridgeOS ) {
+		// Hack until we fully track bridge and ios versions seperately
+		return ( (fIOSVersionMin + 0x00090000) >= requirediOSMin);
 	}
 	else {
 		return ( fIOSVersionMin >= requirediOSMin );
@@ -2180,6 +2186,8 @@ std::string Options::getPlatformStr() const
 				return "AppleTVOS";
 			break;
 #endif
+		case Options::kPlatform_bridgeOS:
+			return "bridgeOS";
 		case Options::kPlatformUnknown:
 			return "Unknown";
 	}
@@ -2247,6 +2255,10 @@ std::vector<std::string> Options::writeBitcodeLinkOptions() const
 			linkCommand.push_back(getVersionString32((unsigned)fIOSVersionMin));
 			break;
 #endif
+		case Options::kPlatform_bridgeOS:
+			linkCommand.push_back("-bridgeos_version_min");
+			linkCommand.push_back(getVersionString32((unsigned)fIOSVersionMin));
+			break;
 		case Options::kPlatformUnknown:
 			if ( fOutputKind != Options::kObjectFile ) {
 				throwf("platform is unknown for final bitcode bundle,"
@@ -2991,6 +3003,13 @@ void Options::parse(int argc, const char* argv[])
 				fTargetIOSSimulator = true;
 			}
 	#endif
+			else if ( strcmp(arg, "-bridgeos_version_min") == 0 ) {
+				const char* vers = argv[++i];
+				if ( vers == NULL )
+					throw "-bridgeos_version_min missing version argument";
+				setIOSVersionMin(vers);
+				fPlatform = kPlatform_bridgeOS;
+			}
 			else if ( strcmp(arg, "-multiply_defined") == 0 ) {
 				//warnObsolete(arg);
 				++i;
@@ -3252,8 +3271,8 @@ void Options::parse(int argc, const char* argv[])
 				if ( fReverseMapPath == NULL )
 					throw "missing argument to -bitcode_symbol_map";
 				struct stat statbuf;
-				::stat(fReverseMapPath, &statbuf);
-				if (S_ISDIR(statbuf.st_mode)) {
+				int ret = ::stat(fReverseMapPath, &statbuf);
+				if ( ret == 0 && S_ISDIR(statbuf.st_mode)) {
 					char tempPath[PATH_MAX];
 					sprintf(tempPath, "%s/XXXXXX", fReverseMapPath);
 					int tempFile = ::mkstemp(tempPath);
@@ -3845,6 +3864,9 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(argv[i], "-no_weak_imports") == 0 ) {
 				fAllowWeakImports = false;
 			}
+			else if ( strcmp(argv[i], "-no_inits") == 0 ) {
+				fNoInitializers = true;
+			}
 			// put this last so that it does not interfer with other options starting with 'i'
 			else if ( strncmp(arg, "-i", 2) == 0 ) {
 				const char* colon = strchr(arg, ':');
@@ -3946,7 +3968,8 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 			 if ( argc == 2 ) {
 				const char* ltoVers = lto::version();
 				if ( ltoVers != NULL )
-					fprintf(stderr, "LTO support using: %s\n", ltoVers);
+					fprintf(stderr, "LTO support using: %s (static support for %d, runtime is %d)\n",
+							ltoVers, lto::static_api_version(), lto::runtime_api_version());
 				fprintf(stderr, "TAPI support using: %s\n", tapi::Version::getFullVersionAsString().c_str());
 				exit(0);
 			}
@@ -4238,6 +4261,12 @@ void Options::parsePostCommandLineEnvironmentSettings()
 			fSourceVersion = parseVersionNumber64(vers);
 	}
 		
+}
+
+
+static bool sharedCacheEligiblePath(const char* path)
+{
+	return ( (strncmp(path, "/usr/lib/", 9) == 0) || (strncmp(path, "/System/Library/", 16) == 0) );
 }
 
 void Options::reconfigureDefaults()
@@ -4569,10 +4598,9 @@ void Options::reconfigureDefaults()
 
 	// determine if info for shared region should be added
 	if ( fOutputKind == Options::kDynamicLibrary ) {
-		if ( minOS(ld::mac10_5, ld::iOS_3_1) && !fTargetIOSSimulator )
+		if ( minOS(ld::mac10_5, ld::iOS_3_1) )
 			if ( !fPrebind && !fSharedRegionEligibleForceOff )
-				if ( (strncmp(this->installPath(), "/usr/lib/", 9) == 0)
-					|| (strncmp(this->installPath(), "/System/Library/", 16) == 0) )
+				if ( sharedCacheEligiblePath(this->installPath()) )
 					fSharedRegionEligible = true;
 	}
 	else if ( fOutputKind == Options::kDyld ) {
@@ -4580,12 +4608,8 @@ void Options::reconfigureDefaults()
         fSharedRegionEligible = true;
 	}
 
-	// <rdar://problem/18719327> warn if -rpath is used with OS dylibs
-	if ( fSharedRegionEligible && !fRPaths.empty() ) 
-		warning("-rpath cannot be used with dylibs that will be in the dyld shared cache");
-
 	// automatically use __DATA_CONST in iOS dylibs
-	if ( fSharedRegionEligible && minOS(ld::mac10_Future, ld::iOS_9_0) && !fUseDataConstSegmentForceOff ) {
+	if ( fSharedRegionEligible && minOS(ld::mac10_Future, ld::iOS_9_0) && !fUseDataConstSegmentForceOff && !fTargetIOSSimulator) {
 		fUseDataConstSegment = true;
 	}
 	if ( fUseDataConstSegmentForceOn ) {
@@ -4621,9 +4645,19 @@ void Options::reconfigureDefaults()
 	// Use V2 shared cache info when targetting newer OSs
 	if ( fSharedRegionEligible && minOS(ld::mac10_12, ld::iOS_9_0)) {
 		fSharedRegionEncodingV2 = true;
-		// <rdar://problem/24772435> only use v2 for Swift dylibs on Mac OS X
-		if ( (fPlatform == kPlatformOSX) && (strncmp(this->installPath(), "/System/Library/PrivateFrameworks/Swift/", 40) != 0) )
+		if ( fPlatform == kPlatformOSX ) {
 			fSharedRegionEncodingV2 = false;
+			// <rdar://problem/24772435> only use v2 for Swift dylibs on Mac OS X
+			if ( strncmp(this->installPath(), "/System/Library/PrivateFrameworks/Swift/", 40) == 0 )
+				fSharedRegionEncodingV2 = true;
+			// <rdar://problem/31428120> an other OS frameworks that use swift need v2
+			for (const char* searchPath  : fLibrarySearchPaths ) {
+				if ( strstr(searchPath, "xctoolchain/usr/lib/swift/macos") != NULL ) {
+					fSharedRegionEncodingV2 = true;
+					break;
+				}
+			}
+		}
 		fIgnoreOptimizationHints = true;
 	}
 
@@ -5142,6 +5176,19 @@ void Options::reconfigureDefaults()
 		}
 	}
 
+
+	// <rdar://problem/32138080> Automatically use OrderFiles found in the AppleInternal SDK
+	if ( (fFinalName != NULL) && fOrderedSymbols.empty() && !fSDKPaths.empty() ) {
+		char path[PATH_MAX];
+		strlcpy(path , fSDKPaths.front(), sizeof(path));
+		strlcat(path , "/AppleInternal/OrderFiles/", sizeof(path));
+		strlcat(path , fFinalName, sizeof(path));
+		strlcat(path , ".order", sizeof(path));
+		FileInfo info;
+		if ( info.checkFileExists(*this, path) )
+			parseOrderFile(path, false);
+	}
+
 	// <rdar://problem/20503811> Reduce the default alignment of structures/arrays to save memory in embedded systems
 	if ( fMaxDefaultCommonAlign == 0 ) {
 		if ( fOutputKind == Options::kPreload )
@@ -5149,6 +5196,56 @@ void Options::reconfigureDefaults()
 		else
 			fMaxDefaultCommonAlign = 15;
 	}
+
+	// Add warnings for issues likely to cause OS verification issues
+	if ( fSharedRegionEligible && !fRPaths.empty() ) {
+		// <rdar://problem/18719327> warn if -rpath is used with OS dylibs
+		warning("OS dylibs should not add rpaths (linker option: -rpath) (Xcode build setting: LD_RUNPATH_SEARCH_PATHS)");
+	}
+	if ( (fOutputKind == Options::kDynamicLibrary) && (fDylibInstallName != NULL) && (fFinalName != NULL) && sharedCacheEligiblePath(fFinalName) ) {
+		if ( strncmp(fDylibInstallName, "@rpath", 6) == 0 )
+			warning("OS dylibs should not use @rpath for -install_name.  Use absolute path instead");
+		if ( strcmp(fDylibInstallName, fFinalName) != 0 ) {
+			bool different = true;
+			// some projects end up with double slash in -final_output path
+			if ( strstr(fFinalName, "//") != NULL ) {
+				char fixedPath[strlen(fFinalName)+1];
+				char* t = fixedPath;
+				bool lastWasSlash = false;
+				for (const char* s=fFinalName; *s != '\0'; ++s) {
+					if ( *s == '/' ) {
+						if ( !lastWasSlash )
+							*t++ = *s;
+						lastWasSlash = true;
+					}
+					else {
+						*t++ = *s;
+						lastWasSlash = false;
+					}
+				}
+				*t = '\0';
+				different = (strcmp(fDylibInstallName, fixedPath) != 0);
+			}
+			if ( different )
+				warning("OS dylibs -install_name should match its real absolute path");
+		}
+	}
+
+	// set if unaligned pointers are warnings or errors
+	if ( fMacVersionMin >= ld::mac10_12 ) {
+		// ignore unaligned pointers when targeting older macOS versions
+		if ( fSharedRegionEligible )
+			fUnalignedPointerTreatment = Options::kUnalignedPointerWarning;
+		else
+			fUnalignedPointerTreatment = Options::kUnalignedPointerIgnore;
+	}
+	else if ( min_iOS(ld::iOS_10_0) ) {
+		fUnalignedPointerTreatment = Options::kUnalignedPointerWarning;
+	}
+	else {
+		fUnalignedPointerTreatment = Options::kUnalignedPointerIgnore;
+	}
+
 }
 
 void Options::checkIllegalOptionCombinations()
@@ -5164,6 +5261,7 @@ void Options::checkIllegalOptionCombinations()
 					break;
 				case kPlatformiOS:
 				case kPlatformWatchOS:
+				case kPlatform_bridgeOS:
 		#if SUPPORT_APPLE_TV
 				case kPlatform_tvOS:
 		#endif
@@ -5237,6 +5335,7 @@ void Options::checkIllegalOptionCombinations()
 				break;
 			case kPlatformiOS:
 			case kPlatformWatchOS:
+			case kPlatform_bridgeOS:
 	#if SUPPORT_APPLE_TV
 			case Options::kPlatform_tvOS:
 	#endif
@@ -5666,6 +5765,10 @@ void Options::checkIllegalOptionCombinations()
 			warning("embedded dylibs/frameworks only run on iOS 8 or later");
 	}
 
+	// bridgeOS always generates new load command
+	if ( fVersionLoadCommand && (fPlatform == kPlatform_bridgeOS) ) {
+		fBuildVersionLoadCommand = true;
+	}
 
 	// produce nicer error when no input
 	if ( fInputFiles.empty() ) {

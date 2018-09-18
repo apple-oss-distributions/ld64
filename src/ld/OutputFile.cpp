@@ -684,7 +684,7 @@ void OutputFile::rangeCheckRIP32(int64_t displacement, ld::Internal& state, cons
 		printSectionLayout(state);
 		
 		const ld::Atom* target;	
-		throwf("32-bit RIP relative reference out of range (%lld max is +/-4GB): from %s (0x%08llX) to %s (0x%08llX)", 
+		throwf("32-bit RIP relative reference out of range (%lld max is +/-2GB): from %s (0x%08llX) to %s (0x%08llX)",
 				displacement, atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fixup), 
 				addressOf(state, fixup, &target));
 	}
@@ -2948,7 +2948,7 @@ void OutputFile::buildSymbolTable(ld::Internal& state)
 			++machoSectionIndex;
 		for (std::vector<const ld::Atom*>::iterator ait = sect->atoms.begin(); ait != sect->atoms.end(); ++ait) {
 			const ld::Atom* atom = *ait;
-			if ( setMachoSectionIndex ) 
+			if ( setMachoSectionIndex )
 				(const_cast<ld::Atom*>(atom))->setMachoSection(machoSectionIndex);
 			else if ( sect->type() == ld::Section::typeMachHeader )
 				(const_cast<ld::Atom*>(atom))->setMachoSection(1); // __mh_execute_header is not in any section by needs n_sect==1
@@ -4275,12 +4275,18 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			}
 		}
 		if ( ((address & (pointerSize-1)) != 0) && (rebaseType == REBASE_TYPE_POINTER) ) {
-			if ( (pointerSize == 8) && ((address & 7) == 4) ) {
-				// for now, don't warning about 8-byte pointers only 4-byte aligned
-			}
-			else {
-				warning("pointer not aligned at address 0x%llX (%s + %lld from %s)",
-						address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
+			switch ( _options.unalignedPointerTreatment() ) {
+				case Options::kUnalignedPointerError:
+					throwf("pointer not aligned at address 0x%llX (%s + %lld from %s)",
+							address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
+					break;
+				case Options::kUnalignedPointerWarning:
+					warning("pointer not aligned at address 0x%llX (%s + %lld from %s)",
+							address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
+					break;
+				case Options::kUnalignedPointerIgnore:
+					// do nothing
+					break;
 			}
 		}
 		_rebaseInfo.push_back(RebaseInfo(rebaseType, address));
@@ -4291,12 +4297,18 @@ void OutputFile::addDyldInfo(ld::Internal& state,  ld::Internal::FinalSection* s
 			sect->hasExternalRelocs = true; // so dyld knows to change permissions on __TEXT segment
 		}
 		if ( ((address & (pointerSize-1)) != 0) && (type == BIND_TYPE_POINTER) ) {
-			if ( (pointerSize == 8) && ((address & 7) == 4) ) {
-				// for now, don't warning about 8-byte pointers only 4-byte aligned
-			}
-			else {
-				warning("pointer not aligned at address 0x%llX (%s + %lld from %s)",
-						address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
+			switch ( _options.unalignedPointerTreatment() ) {
+				case Options::kUnalignedPointerError:
+					throwf("pointer not aligned at address 0x%llX (%s + %lld from %s)",
+							address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
+					break;
+				case Options::kUnalignedPointerWarning:
+					warning("pointer not aligned at address 0x%llX (%s + %lld from %s)",
+							address, atom->name(), (address - atom->finalAddress()), atom->safeFilePath());
+					break;
+				case Options::kUnalignedPointerIgnore:
+					// do nothing
+					break;
 			}
 		}
 		_bindingInfo.push_back(BindingInfo(type, this->compressedOrdinalForAtom(target), target->name(), weak_import, address, addend));
@@ -5236,6 +5248,7 @@ void OutputFile::synthesizeDebugNotes(ld::Internal& state)
 	// make a vector of atoms that come from files compiled with dwarf debug info
 	std::vector<const ld::Atom*> atomsNeedingDebugNotes;
 	std::set<const ld::Atom*> atomsWithStabs;
+	std::set<const ld::relocatable::File*> filesSeenWithStabs;
 	atomsNeedingDebugNotes.reserve(1024);
 	const ld::relocatable::File* objFile = NULL;
 	bool objFileHasDwarf = false;
@@ -5285,8 +5298,11 @@ void OutputFile::synthesizeDebugNotes(ld::Internal& state)
 				}
 				if ( objFileHasDwarf )
 					atomsNeedingDebugNotes.push_back(atom);
-				if ( objFileHasStabs )
+				if ( objFileHasStabs ) {
 					atomsWithStabs.insert(atom);
+					if ( objFile != NULL )
+						filesSeenWithStabs.insert(objFile);
+				}
 			}
 		}
 	}
@@ -5480,33 +5496,44 @@ void OutputFile::synthesizeDebugNotes(ld::Internal& state)
 		endFileStab.string		= "";
 		state.stabs.push_back(endFileStab);
 	}
-	
-	// copy any stabs from .o file 
-	std::set<const ld::File*> filesSeenWithStabs;
-	for (std::set<const ld::Atom*>::iterator it=atomsWithStabs.begin(); it != atomsWithStabs.end(); it++) {
-		const ld::Atom* atom = *it;
-		objFile = dynamic_cast<const ld::relocatable::File*>(atom->file());
-		if ( objFile != NULL ) {
-			if ( filesSeenWithStabs.count(objFile) == 0 ) {
-				filesSeenWithStabs.insert(objFile);
-				const std::vector<ld::relocatable::File::Stab>* stabs = objFile->stabs();
-				if ( stabs != NULL ) {
-					for(std::vector<ld::relocatable::File::Stab>::const_iterator sit = stabs->begin(); sit != stabs->end(); ++sit) {
-						ld::relocatable::File::Stab stab = *sit;
-						// ignore stabs associated with atoms that were dead stripped or coalesced away
-						if ( (sit->atom != NULL) && (atomsWithStabs.count(sit->atom) == 0) )
+
+	// copy any stabs from .o files
+	bool deadStripping = _options.deadCodeStrip();
+	for (const ld::relocatable::File* obj : filesSeenWithStabs) {
+		const std::vector<ld::relocatable::File::Stab>* filesStabs = obj->stabs();
+		if ( filesStabs != NULL ) {
+			for (const ld::relocatable::File::Stab& stab : *filesStabs ) {
+				// ignore stabs associated with atoms that were dead stripped or coalesced away
+				if ( (stab.atom != NULL) && (atomsWithStabs.count(stab.atom) == 0) )
+					continue;
+				// <rdar://problem/8284718> Value of N_SO stabs should be address of first atom from translation unit
+				if ( (stab.type == N_SO) && (stab.string != NULL) && (stab.string[0] != '\0') ) {
+					uint64_t lowestAtomAddress = 0;
+					const ld::Atom* lowestAddressAtom = NULL;
+					for (const ld::relocatable::File::Stab& stab2 : *filesStabs ) {
+						if ( stab2.atom == NULL )
 							continue;
-						// <rdar://problem/8284718> Value of N_SO stabs should be address of first atom from translation unit
-						if ( (stab.type == N_SO) && (stab.string != NULL) && (stab.string[0] != '\0') ) {
-							stab.atom = atom;
+						// skip over atoms that were dead stripped
+						if ( deadStripping && !stab2.atom->live() )
+							continue;
+						if ( stab2.atom->coalescedAway() )
+							continue;
+						uint64_t atomAddr = stab2.atom->objectAddress();
+						if ( (lowestAddressAtom == NULL) || (atomAddr < lowestAtomAddress) ) {
+							lowestAddressAtom = stab2.atom;
+							lowestAtomAddress = atomAddr;
 						}
-						state.stabs.push_back(stab);
 					}
+					ld::relocatable::File::Stab altStab = stab;
+					altStab.atom = lowestAddressAtom;
+					state.stabs.push_back(altStab);
+				}
+				else {
+					state.stabs.push_back(stab);
 				}
 			}
 		}
 	}
-
 }
 
 

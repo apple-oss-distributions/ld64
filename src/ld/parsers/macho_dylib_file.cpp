@@ -200,6 +200,14 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* path,
 				this->_platformInDylib = cmd->cmd();
 				lcPlatform = Options::platformForLoadCommand(this->_platformInDylib);
 				break;
+			case LC_BUILD_VERSION:
+				{
+					const macho_build_version_command<P>* buildVersCmd = (macho_build_version_command<P>*)cmd;
+					this->_platformInDylib   = buildVersCmd->platform();
+					this->_minVersionInDylib = buildVersCmd->minos();
+					lcPlatform = (Options::Platform)this->_platformInDylib;
+				}
+				break;
 			case LC_CODE_SIGNATURE:
 				break;
 			case macho_segment_command<P>::CMD:
@@ -266,6 +274,7 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* path,
 				if ( !this->_allowSimToMacOSXLinking ) {
 					switch (platform) {
 						case Options::kPlatformOSX:
+						case Options::kPlatform_bridgeOS:
 						case Options::kPlatformiOS:
 							if ( lcPlatform == Options::kPlatformUnknown )
 								break;
@@ -305,6 +314,7 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* path,
 			else {
 				switch (platform) {
 					case Options::kPlatformOSX:
+					case Options::kPlatform_bridgeOS:
 					case Options::kPlatformiOS:
 						if ( lcPlatform == Options::kPlatformUnknown )
 							break;
@@ -557,7 +567,7 @@ void File<A>::addSymbol(const char* name, bool weakDef, bool tlv, pint_t address
 							this->_ignoreExports.insert(strdup(symName));
 					}
 					else if ( strncmp(symAction, "install_name$", 13) == 0 ) {
-						this->_dylibInstallPath = symName;
+						this->_dylibInstallPath = strdup(symName);
 						this->_installPathOverride = true;
 						// <rdar://problem/14448206> CoreGraphics redirects to ApplicationServices, but with wrong compat version
 						if ( strcmp(this->_dylibInstallPath, "/System/Library/Frameworks/ApplicationServices.framework/Versions/A/ApplicationServices") == 0 )
@@ -764,7 +774,8 @@ bool isDylibFile(const uint8_t* fileContent, cpu_type_t* result, cpu_subtype_t* 
 	}
 	if ( Parser<arm64>::validFile(fileContent, false) ) {
 		*result = CPU_TYPE_ARM64;
-		*subResult = CPU_SUBTYPE_ARM64_ALL;
+		const auto* header = reinterpret_cast<const macho_header<Pointer32<LittleEndian>>*>(fileContent);
+		*subResult = header->cpusubtype();
 		return true;
 	}
 	return false;

@@ -31,6 +31,10 @@ namespace lto {
 
 extern const char* version();
 
+extern unsigned int runtime_api_version();
+
+extern unsigned int static_api_version();
+
 extern bool libLTOisLoaded();
 
 extern const char* archName(const uint8_t* fileContent, uint64_t fileLength);

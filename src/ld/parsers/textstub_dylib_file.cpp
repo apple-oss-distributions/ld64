@@ -92,6 +92,10 @@ static Options::Platform mapPlatform(tapi::Platform platform) {
 		return Options::kPlatformWatchOS;
 	case tapi::Platform::tvOS:
 		return Options::kPlatform_tvOS;
+	#if ((TAPI_API_VERSION_MAJOR == 1 &&  TAPI_API_VERSION_MINOR >= 2) || (TAPI_API_VERSION_MAJOR > 1))
+	case tapi::Platform::bridgeOS:
+		return Options::kPlatform_bridgeOS;
+	#endif
 	}
 
 	return Options::kPlatformUnknown;

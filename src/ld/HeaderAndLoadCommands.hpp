@@ -106,6 +106,7 @@ private:
 	uint8_t*					copyRoutinesLoadCommand(uint8_t* p) const;
 	uint8_t*					copyUUIDLoadCommand(uint8_t* p) const;
 	uint8_t*					copyVersionLoadCommand(uint8_t* p) const;
+	uint8_t*					copyBuildVersionLoadCommand(uint8_t* p) const;
 	uint8_t*					copySourceVersionLoadCommand(uint8_t* p) const;
 	uint8_t*					copyThreadsLoadCommand(uint8_t* p) const;
 	uint8_t*					copyEntryPointLoadCommand(uint8_t* p) const;
@@ -145,10 +146,12 @@ private:
 	bool						_hasRPathLoadCommands;
 	bool						_hasSubFrameworkLoadCommand;
 	bool						_hasVersionLoadCommand;
+	bool						_hasBuildVersionLoadCommand;
 	bool						_hasFunctionStartsLoadCommand;
 	bool						_hasDataInCodeLoadCommand;
 	bool						_hasSourceVersionLoadCommand;
 	bool						_hasOptimizationHints;
+	Options::Platform			_platform;
 	uint32_t					_dylibLoadCommmandsCount;
 	uint32_t					_allowableClientLoadCommmandsCount;
 	uint32_t					_dyldEnvironExrasCount;
@@ -159,6 +162,7 @@ private:
 	mutable uint32_t			_linkeditCmdOffset;
 	mutable uint32_t			_symboltableCmdOffset;
 	std::vector< std::vector<const char*> >	 _linkerOptions;
+	std::unordered_set<uint64_t>&	_toolsVersions;
 	
 	static ld::Section			_s_section;
 	static ld::Section			_s_preload_section;
@@ -177,7 +181,8 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 				ld::Atom::scopeTranslationUnit, ld::Atom::typeUnclassified, 
 				ld::Atom::symbolTableNotIn, false, false, false, 
 				(opts.outputKind() == Options::kPreload) ? ld::Atom::Alignment(0) : ld::Atom::Alignment(log2(opts.segmentAlignment())) ),
-		_options(opts), _state(state), _writer(writer), _address(0), _uuidCmdInOutputBuffer(NULL), _linkeditCmdOffset(0), _symboltableCmdOffset(0)
+		_options(opts), _state(state), _writer(writer), _address(0), _uuidCmdInOutputBuffer(NULL), _linkeditCmdOffset(0), _symboltableCmdOffset(0),
+		_toolsVersions(state.toolsVersions)
 {
 	bzero(_uuid, 16);
 	_hasDyldInfoLoadCommand = opts.makeCompressedDyldInfo();
@@ -233,9 +238,21 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	}
 	_hasRPathLoadCommands = (_options.rpaths().size() != 0);
 	_hasSubFrameworkLoadCommand = (_options.umbrellaName() != NULL);
-	_hasVersionLoadCommand = _options.addVersionLoadCommand() ||
-							 (!state.objectFileFoundWithNoVersion && (_options.outputKind() == Options::kObjectFile)
-							 && ((_options.platform() != Options::kPlatformUnknown) || (state.derivedPlatformLoadCommand != 0)) );
+	_platform = _options.platform();
+	if ( (_platform == Options::kPlatformUnknown) && (_state.derivedPlatform != 0) )
+		_platform = (Options::Platform)_state.derivedPlatform;
+	if ( _options.addVersionLoadCommand() ) {
+		_hasBuildVersionLoadCommand = _options.addBuildVersionLoadCommand();
+		_hasVersionLoadCommand = !_hasBuildVersionLoadCommand;
+	}
+	else if (((_options.outputKind() == Options::kObjectFile) && (_platform != Options::kPlatformUnknown) && !state.objectFileFoundWithNoVersion) ) {
+		_hasBuildVersionLoadCommand = (_platform == Options::kPlatform_bridgeOS);
+		_hasVersionLoadCommand = !_hasBuildVersionLoadCommand;
+	}
+	else {
+		_hasVersionLoadCommand = false;
+		_hasBuildVersionLoadCommand = false;
+	}
 	_hasFunctionStartsLoadCommand = _options.addFunctionStarts();
 	_hasDataInCodeLoadCommand = _options.addDataInCodeInfo();
 	_hasSourceVersionLoadCommand = _options.needsSourceVersionLoadCommand();
@@ -410,6 +427,9 @@ uint64_t HeaderAndLoadCommandsAtom<A>::size() const
 	if ( _hasVersionLoadCommand )
 		sz += sizeof(macho_version_min_command<P>);
 	
+	if ( _hasBuildVersionLoadCommand )
+		sz += alignedSize(sizeof(macho_build_version_command<P>) + sizeof(macho_build_tool_version<P>)*_toolsVersions.size());
+	
 	if ( _hasSourceVersionLoadCommand )
 		sz += sizeof(macho_source_version_command<P>);
 		
@@ -513,6 +533,9 @@ uint32_t HeaderAndLoadCommandsAtom<A>::commandsCount() const
 	if ( _hasVersionLoadCommand )
 		++count;
 
+	if ( _hasBuildVersionLoadCommand )
+		++count;
+	
 	if ( _hasSourceVersionLoadCommand )
 		++count;
 		
@@ -680,7 +703,7 @@ uint32_t HeaderAndLoadCommandsAtom<arm>::cpuSubType() const
 template <>
 uint32_t HeaderAndLoadCommandsAtom<arm64>::cpuSubType() const
 {
-	return CPU_SUBTYPE_ARM64_ALL;
+	return _state.cpuSubType;
 }
 
 
@@ -1159,14 +1182,7 @@ template <typename A>
 uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p) const
 {
 	macho_version_min_command<P>* cmd = (macho_version_min_command<P>*)p;
-	switch (_options.platform()) {
-		case Options::kPlatformUnknown:
-			assert(_state.derivedPlatformLoadCommand != 0 && "unknown platform");
-			cmd->set_cmd(_state.derivedPlatformLoadCommand);
-			cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
-			cmd->set_version(_state.minOSVersion);
-			cmd->set_sdk(0);
-			break;
+	switch (_platform) {
 		case Options::kPlatformOSX:
 			cmd->set_cmd(LC_VERSION_MIN_MACOSX);
 			cmd->set_cmdsize(sizeof(macho_version_min_command<P>));
@@ -1193,9 +1209,39 @@ uint8_t* HeaderAndLoadCommandsAtom<A>::copyVersionLoadCommand(uint8_t* p) const
 			cmd->set_sdk(_options.sdkVersion());
 			break;
 #endif
+		case Options::kPlatformUnknown:
+			assert(0 && "unknown platform");
+			break;
+		case Options::kPlatform_bridgeOS:
+			assert(0 && "bridgeOS uses LC_BUILD_VERSION");
+			break;
 	}
 	return p + sizeof(macho_version_min_command<P>);
 }
+
+
+
+template <typename A>
+uint8_t* HeaderAndLoadCommandsAtom<A>::copyBuildVersionLoadCommand(uint8_t* p) const
+{
+	macho_build_version_command<P>* cmd = (macho_build_version_command<P>*)p;
+	
+	cmd->set_cmd(LC_BUILD_VERSION);
+	cmd->set_cmdsize(alignedSize(sizeof(macho_build_version_command<P>) + sizeof(macho_build_tool_version<P>)*_toolsVersions.size()));
+	cmd->set_platform(_options.platform());
+	cmd->set_minos(_state.minOSVersion);
+	cmd->set_sdk(_options.sdkVersion());
+	cmd->set_ntools(_toolsVersions.size());
+	macho_build_tool_version<P>* tools = (macho_build_tool_version<P>*)(p + sizeof(macho_build_version_command<P>));
+	for (uint64_t tool : _toolsVersions) {
+		tools->set_tool((uint64_t)tool >> 32);
+		tools->set_version(tool & 0xFFFFFFFF);
+		++tools;
+	}
+
+	return p + cmd->cmdsize();
+}
+
 
 template <typename A>
 uint8_t* HeaderAndLoadCommandsAtom<A>::copySourceVersionLoadCommand(uint8_t* p) const
@@ -1552,6 +1598,9 @@ void HeaderAndLoadCommandsAtom<A>::copyRawContent(uint8_t buffer[]) const
 	
 	if ( _hasVersionLoadCommand )
 		p = this->copyVersionLoadCommand(p);
+
+	if ( _hasBuildVersionLoadCommand )
+		p = this->copyBuildVersionLoadCommand(p);
 
 	if ( _hasSourceVersionLoadCommand )
 		p = this->copySourceVersionLoadCommand(p);
