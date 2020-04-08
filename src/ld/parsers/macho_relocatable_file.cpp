@@ -2177,7 +2177,9 @@ bool Parser<A>::parseLoadCommands(const ld::VersionSet& cmdLinePlatforms, bool i
 	// validate just one segment
 	if ( segment == NULL ) 
 		throw "missing LC_SEGMENT";
-	if ( segment->filesize() > _fileLength )
+	if ( segment->fileoff() > _fileLength )
+		throw "LC_SEGMENT fileoff too large";
+	if ( (segment->fileoff()+segment->filesize()) > _fileLength )
 		throw "LC_SEGMENT filesize too large";
 
 	// record and validate sections
@@ -5903,7 +5905,13 @@ void TLVPointerSection<arm>::makeFixups(class Parser<arm>& parser, const struct 
 		target.weakImport = false;
 		target.addend = 0;
 		if ( symIndex == INDIRECT_SYMBOL_LOCAL ) {
-			throwf("unexpected INDIRECT_SYMBOL_LOCAL in section %s", this->sectionName());
+			// use direct reference for local symbols
+			const pint_t* nlpContent = (pint_t*)(this->file().fileContent() + sect->offset() + addr - sect->addr());
+			pint_t targetAddr = P::getP(*nlpContent);
+			target.atom = parser.findAtomByAddress(targetAddr);
+			target.weakImport = false;
+			target.addend = 0;
+			assert(target.atom->contentType() == ld::Atom::ContentType::typeTLV);
 		}
 		else {
 			const macho_nlist<P>& sym = parser.symbolFromIndex(symIndex);
