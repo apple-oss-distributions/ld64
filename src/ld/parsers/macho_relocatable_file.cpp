@@ -7832,23 +7832,32 @@ void Section<A>::makeFixups(class Parser<A>& parser, const struct Parser<A>::CFI
 			}
 		}
 	}
-	if ( !this->_altEntries.empty() && !this->addFollowOnFixups() ) {
-		if ( _altEntries.count(_beginAtoms) != 0 ) 
-			warning("N_ALT_ENTRY bit set on first atom in section %s/%s", sect->segname(), Section<A>::makeSectionName(sect));
 
-		Atom<A>* end = &_endAtoms[-1];
-		for(Atom<A>* p = _beginAtoms; p < end; ++p) {
-			Atom<A>* nextAtom = &p[1];
+	// <rdar://problem/55562820> all alt_entries need to be chained together from start atom (with kindNoneFollowOn),
+	// and each alt_entry has a kindNoneGroupSubordinate pointing to start atom
+	if ( !this->_altEntries.empty() && !this->addFollowOnFixups() ) {
+		if ( _altEntries.count(_beginAtoms) != 0 )
+			throwf("N_ALT_ENTRY bit set on first atom in section %s/%s", sect->segname(), Section<A>::makeSectionName(sect));
+		Atom<A>* nonAltAtom = nullptr;
+		for (Atom<A>* p = _beginAtoms; p < _endAtoms; ++p) {
 			// <rdar://problem/22960070> support alt_entry aliases (alias process already added followOn, don't repeat)
-			if ( (_altEntries.count(nextAtom) != 0) && (p->_objAddress != nextAtom->_objAddress) ) {
-				typename Parser<A>::SourceLocation src(p, 0);
-				parser.addFixup(src, ld::Fixup::k1of1, ld::Fixup::kindNoneFollowOn, nextAtom);
-				typename Parser<A>::SourceLocation src2(nextAtom, 0);
-				parser.addFixup(src2, ld::Fixup::k1of1, ld::Fixup::kindNoneGroupSubordinate, p);
+			if ( _altEntries.count(p) == 0 ) {
+				nonAltAtom = p;
+			}
+			else {
+				// set this atom as follow-on of previous atom
+				Atom<A>* prevAtom = &p[-1];
+				if ( !prevAtom->isAlias() ) {
+					typename Parser<A>::SourceLocation src(prevAtom, 0);
+					parser.addFixup(src, ld::Fixup::k1of1, ld::Fixup::kindNoneFollowOn, p);
+				}
+				//	make this add a member of group of atoms started with non-alt atom
+				typename Parser<A>::SourceLocation src2(p, 0);
+				parser.addFixup(src2, ld::Fixup::k1of1, ld::Fixup::kindNoneGroupSubordinate, nonAltAtom);
 			}
 		}
 	}
-	
+
 	// <rdar://problem/9218847> track data-in-code
 	if ( parser.hasDataInCodeLabels() && (this->type() == ld::Section::typeCode) ) {
 		for (uint32_t i=0; i < parser.symbolCount(); ++i) {
