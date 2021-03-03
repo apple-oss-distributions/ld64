@@ -6,7 +6,7 @@ SHELL = /bin/sh
 ARCH ?= $(shell arch)
 
 # set default to be all
-VALID_ARCHS ?= "i386 x86_64 armv6"
+VALID_ARCHS ?= "x86_64 arm64"
 
 
 MYDIR=$(shell cd ../../bin;pwd)
@@ -61,8 +61,8 @@ ifeq ($(ARCH),ppc)
 	OSX_SDK = /Developer/SDKs/MacOSX10.6.sdk
 endif
 
-CC		= $(shell xcrun -find clang) -arch ${ARCH} -mmacosx-version-min=10.8 -isysroot $(OSX_SDK)
-AS		= $(shell xcrun -f as) -arch ${ARCH} -mmacosx-version-min=10.8
+CC		= $(shell xcrun -find clang) -arch ${ARCH} -mmacosx-version-min=11.0 -isysroot $(OSX_SDK)
+AS		= $(shell xcrun -f as) -arch ${ARCH} -mmacosx-version-min=11.0
 CCFLAGS = -Wall 
 LDFLAGS = -syslibroot $(OSX_SDK)
 ASMFLAGS =
@@ -70,7 +70,7 @@ VERSION_NEW_LINKEDIT = -mmacosx-version-min=10.6
 VERSION_OLD_LINKEDIT = -mmacosx-version-min=10.4
 LD_NEW_LINKEDIT = -macosx_version_min 10.6
 
-CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} -mmacosx-version-min=10.9 -isysroot $(OSX_SDK)
+CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} -mmacosx-version-min=11.0 -isysroot $(OSX_SDK)
 CXXFLAGS = -Wall -stdlib=libc++ 
 
 ifeq ($(ARCH),armv6)

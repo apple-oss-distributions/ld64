@@ -44,24 +44,24 @@ all-opt:
 	# check optimization can be turned off
 	${CC} ${CCFLAGS} ${OPTIONS} -dynamiclib foo.m cat1.m cat2.m -framework Foundation -Wl,-no_objc_category_merging -o libno.dylib
 	size -m -l libno.dylib | grep "__objc_catlist: 0" | ${FAIL_IF_STDIN}
-	otool -ov libno.dylib | grep -A17 __objc_classlist | grep -A16 '_OBJC_CLASS_$$_Foo' | grep "count 1" | ${FAIL_IF_EMPTY}
+	otool -ov libno.dylib | grep -A17 __objc_classlist | grep -A16 '_OBJC_CLASS_$$_Foo' | grep "count   1" | ${FAIL_IF_EMPTY}
 	# check optimization of category methods
 	${CC} ${CCFLAGS} ${OPTIONS} -dynamiclib foo.m cat1.m cat2.m -framework Foundation -o libfoo.dylib
 	size -m -l libfoo.dylib | grep "__objc_catlist: 0" | ${FAIL_IF_EMPTY}
-	otool -ov libfoo.dylib | grep -A20 __objc_classlist | grep -A20 '_OBJC_CLASS_$$_Foo' | grep "count 4" | ${FAIL_IF_EMPTY}
+	otool -ov libfoo.dylib | grep -A20 __objc_classlist | grep -A20 '_OBJC_CLASS_$$_Foo' | grep "count   4" | ${FAIL_IF_EMPTY}
 	# check optimization of protocol and category methods
 	${CC} ${CCFLAGS} ${OPTIONS} -dynamiclib foo.m cat1.m cat2.m -DPROTOCOLS -framework Foundation -o libfoo2.dylib
 	size -m -l libfoo2.dylib | grep "__objc_catlist: 0" | ${FAIL_IF_EMPTY}
-	otool -ov libfoo2.dylib | grep -A20 __objc_classlist | grep -A20 '_OBJC_CLASS_$$_Foo' | grep "count 6" | ${FAIL_IF_EMPTY}
+	otool -ov libfoo2.dylib | grep -A20 __objc_classlist | grep -A20 '_OBJC_CLASS_$$_Foo' | grep "count   6" | ${FAIL_IF_EMPTY}
 	# check optimization of properties and category methods
 	${CC} ${CCFLAGS} ${OPTIONS} -dynamiclib foo.m cat1.m cat2.m -DPROPERTIES -framework Foundation -o libfoo3.dylib
 	size -m -l libfoo3.dylib | grep "__objc_catlist: 0" | ${FAIL_IF_EMPTY}
-	otool -ov libfoo3.dylib | grep -A20 __objc_classlist | grep -A20 '_OBJC_CLASS_$$_Foo' | grep "count 6" | ${FAIL_IF_EMPTY}
+	otool -ov libfoo3.dylib | grep -A20 __objc_classlist | grep -A20 '_OBJC_CLASS_$$_Foo' | grep "count   6" | ${FAIL_IF_EMPTY}
 	# check optimization of category methods and no base methods
 	${CC} ${CCFLAGS} ${OPTIONS} -dynamiclib foo.m cat1.m cat2.m -DNO_BASE_METHODS -framework Foundation -o libfoo4.dylib
 	size -m -l libfoo4.dylib | grep "__objc_catlist: 0" | ${FAIL_IF_EMPTY}
-	otool -ov libfoo4.dylib | grep -A20 __objc_classlist | grep -A20 '_OBJC_CLASS_$$_Foo' | grep "count 3" | ${FAIL_IF_EMPTY}
-	otool -ov libfoo4.dylib | grep -A20 "Meta Class" | grep "count 2" | ${FAIL_IF_EMPTY}
+	otool -ov libfoo4.dylib | grep -A20 __objc_classlist | grep -A20 '_OBJC_CLASS_$$_Foo' | grep "count   3" | ${FAIL_IF_EMPTY}
+	otool -ov libfoo4.dylib | grep -A20 "Meta Class" | grep "count   2" | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} libfoo3.dylib
 
 clean:

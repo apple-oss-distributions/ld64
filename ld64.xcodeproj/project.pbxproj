@@ -42,13 +42,17 @@
 /* End PBXAggregateTarget section */
 
 /* Begin PBXBuildFile section */
+		37D7995423A4666000B314BC /* generic_dylib_file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 37D7995323A4666000B314BC /* generic_dylib_file.cpp */; };
 		83046A851C8FF2F700024A7E /* objcimageinfo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 83046A841C8FF2D000024A7E /* objcimageinfo.cpp */; };
 		B028FCF21A9E7C3F00E3584B /* bitcode_bundle.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B028FCF11A9E7C3F00E3584B /* bitcode_bundle.cpp */; };
 		B3B672421406D42800A376BB /* Snapshot.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B3B672411406D42800A376BB /* Snapshot.cpp */; };
 		C1E27B581F6B1B68003B8FA6 /* thread_starts.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C1E27B571F6B1B67003B8FA6 /* thread_starts.cpp */; };
+		C1ED154823C934E800748423 /* objc_constants.cpp in Sources */ = {isa = PBXBuildFile; fileRef = C1ED154623C934E800748423 /* objc_constants.cpp */; };
+		DE3EC65E240ECBE4008CD445 /* ResponseFiles.cpp in Sources */ = {isa = PBXBuildFile; fileRef = DE3EC65C240ECBE4008CD445 /* ResponseFiles.cpp */; };
 		F9023C4E06D5A272001BBF46 /* ld.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9023C3F06D5A254001BBF46 /* ld.cpp */; };
 		F933E3D9092E855B0083EAC8 /* ObjectDump.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F971EED706D5AD240041D381 /* ObjectDump.cpp */; };
 		F93CB248116E69EB003233B8 /* tlvp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F93CB246116E69EB003233B8 /* tlvp.cpp */; };
+		F9463C64244E774B009BAA3F /* libcodedirectory.c in Sources */ = {isa = PBXBuildFile; fileRef = F9463C63244E774A009BAA3F /* libcodedirectory.c */; };
 		F97F5029070D0BB200B9FCD7 /* ld.1 in copy man page */ = {isa = PBXBuildFile; fileRef = F97F5028070D0BB200B9FCD7 /* ld.1 */; };
 		F98498A310AE2159009E9878 /* compact_unwind.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9BA963310A2545C0097A440 /* compact_unwind.cpp */; };
 		F98498A410AE2159009E9878 /* got.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9AB1063107D380700E54C9E /* got.cpp */; };
@@ -241,6 +245,7 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		37D7995323A4666000B314BC /* generic_dylib_file.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = generic_dylib_file.cpp; sourceTree = "<group>"; };
 		83046A831C8FF23E00024A7E /* objcimageinfo */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = objcimageinfo; sourceTree = BUILT_PRODUCTS_DIR; };
 		83046A841C8FF2D000024A7E /* objcimageinfo.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = objcimageinfo.cpp; path = src/other/objcimageinfo.cpp; sourceTree = "<group>"; };
 		B028FCF01A9E7B4A00E3584B /* bitcode_bundle.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bitcode_bundle.h; sourceTree = "<group>"; };
@@ -251,6 +256,10 @@
 		B3C7A09914295B9C005FC714 /* compile_stubs */ = {isa = PBXFileReference; lastKnownFileType = text.script.csh; path = compile_stubs; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		C1E27B571F6B1B67003B8FA6 /* thread_starts.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = thread_starts.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		C1E27B591F6B1B70003B8FA6 /* thread_starts.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = thread_starts.h; sourceTree = "<group>"; };
+		C1ED154623C934E800748423 /* objc_constants.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = objc_constants.cpp; sourceTree = "<group>"; };
+		C1ED154723C934E800748423 /* objc_constants.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = objc_constants.h; sourceTree = "<group>"; };
+		DE3EC65C240ECBE4008CD445 /* ResponseFiles.cpp */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.cpp.cpp; name = ResponseFiles.cpp; path = src/ld/ResponseFiles.cpp; sourceTree = "<group>"; };
+		DE3EC65D240ECBE4008CD445 /* ResponseFiles.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = ResponseFiles.h; path = src/ld/ResponseFiles.h; sourceTree = "<group>"; };
 		F9023C3906D5A23E001BBF46 /* ld */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ld; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9023C3F06D5A254001BBF46 /* ld.cpp */ = {isa = PBXFileReference; fileEncoding = 30; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ld.cpp; path = src/ld/ld.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F91B7B0318987D5F0099486F /* AddressSpace.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = AddressSpace.hpp; sourceTree = "<group>"; };
@@ -265,6 +274,8 @@
 		F93A9BEC12C2E51900BAA11D /* stub_arm64.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; path = stub_arm64.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F93CB246116E69EB003233B8 /* tlvp.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = tlvp.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F93CB247116E69EB003233B8 /* tlvp.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = tlvp.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F9463C62244E774A009BAA3F /* libcodedirectory.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = libcodedirectory.h; path = src/ld/libcodedirectory.h; sourceTree = "<group>"; };
+		F9463C63244E774A009BAA3F /* libcodedirectory.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = libcodedirectory.c; path = src/ld/libcodedirectory.c; sourceTree = "<group>"; };
 		F971EED306D5ACF60041D381 /* ObjectDump */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ObjectDump; sourceTree = BUILT_PRODUCTS_DIR; };
 		F971EED706D5AD240041D381 /* ObjectDump.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ObjectDump.cpp; path = src/other/ObjectDump.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F97F5028070D0BB200B9FCD7 /* ld.1 */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text.man; name = ld.1; path = doc/man/man1/ld.1; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
@@ -463,6 +474,8 @@
 				F9AE20FE1107D1440007ED5D /* dylibs.h */,
 				F9A4DB8F10F816FF00BD8423 /* objc.cpp */,
 				F9A4DB9010F816FF00BD8423 /* objc.h */,
+				C1ED154623C934E800748423 /* objc_constants.cpp */,
+				C1ED154723C934E800748423 /* objc_constants.h */,
 				C1E27B571F6B1B67003B8FA6 /* thread_starts.cpp */,
 				C1E27B591F6B1B70003B8FA6 /* thread_starts.h */,
 				F9AA650C1051BD2B003E3539 /* stubs */,
@@ -499,6 +512,7 @@
 				F9AA65D81051EC4A003E3539 /* archive_file.h */,
 				F9AA65D91051EC4A003E3539 /* lto_file.cpp */,
 				F9AA65DA1051EC4A003E3539 /* lto_file.h */,
+				37D7995323A4666000B314BC /* generic_dylib_file.cpp */,
 				FA4843BE1B7279ED001C8025 /* generic_dylib_file.hpp */,
 				F9AA65DB1051EC4A003E3539 /* macho_dylib_file.cpp */,
 				F9AA65DC1051EC4A003E3539 /* macho_dylib_file.h */,
@@ -551,6 +565,8 @@
 				F989D7E91072DEC20014B60C /* HeaderAndLoadCommands.hpp */,
 				F989D3AA10684F5B0014B60C /* LinkEdit.hpp */,
 				F989D44B10694F2E0014B60C /* LinkEditClassic.hpp */,
+				F9463C63244E774A009BAA3F /* libcodedirectory.c */,
+				F9463C62244E774A009BAA3F /* libcodedirectory.h */,
 				F9CC24131461FB4300A92174 /* code-sign-blobs */,
 				F9AA650B1051BD2B003E3539 /* passes */,
 				F9AA65861051E750003E3539 /* parsers */,
@@ -561,6 +577,8 @@
 				F98565241E98090F00528B1C /* dwarf2.h */,
 				B3B672411406D42800A376BB /* Snapshot.cpp */,
 				B3B672441406D44300A376BB /* Snapshot.h */,
+				DE3EC65D240ECBE4008CD445 /* ResponseFiles.h */,
+				DE3EC65C240ECBE4008CD445 /* ResponseFiles.cpp */,
 			);
 			name = ld;
 			sourceTree = "<group>";
@@ -730,18 +748,19 @@
 			isa = PBXProject;
 			attributes = {
 				DefaultBuildSystemTypeForWorkspace = Latest;
-				LastUpgradeCheck = 0900;
+				LastUpgradeCheck = 1200;
 				ORGANIZATIONNAME = "Apple Inc.";
 			};
 			buildConfigurationList = F933D92309291AC90083EAC8 /* Build configuration list for PBXProject "ld64" */;
 			compatibilityVersion = "Xcode 3.2";
-			developmentRegion = English;
+			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				English,
-				Japanese,
-				French,
-				German,
+				en,
+				Base,
+				fr,
+				ja,
+				de,
 			);
 			mainGroup = F9023C2C06D5A227001BBF46;
 			productRefGroup = F9023C3A06D5A23E001BBF46 /* Products */;
@@ -940,6 +959,8 @@
 				C1E27B581F6B1B68003B8FA6 /* thread_starts.cpp in Sources */,
 				FA95D6141AB25CF400395811 /* textstub_dylib_file.cpp in Sources */,
 				F9C0D4BD06DD28D2001C7193 /* Options.cpp in Sources */,
+				DE3EC65E240ECBE4008CD445 /* ResponseFiles.cpp in Sources */,
+				F9463C64244E774B009BAA3F /* libcodedirectory.c in Sources */,
 				F9C12F3721B770500031CED8 /* PlatformSupport.cpp in Sources */,
 				F9023C4E06D5A272001BBF46 /* ld.cpp in Sources */,
 				F9AA65891051E750003E3539 /* macho_relocatable_file.cpp in Sources */,
@@ -958,10 +979,12 @@
 				F98498A410AE2159009E9878 /* got.cpp in Sources */,
 				F9BA955E10A233000097A440 /* huge.cpp in Sources */,
 				F9C2BC2D1F43B875000046CD /* inits.cpp in Sources */,
+				37D7995423A4666000B314BC /* generic_dylib_file.cpp in Sources */,
 				F9849E3610B38EF5009E9878 /* order.cpp in Sources */,
 				F984A38210BB4B0D009E9878 /* branch_island.cpp in Sources */,
 				F9A4DB9110F816FF00BD8423 /* objc.cpp in Sources */,
 				F9AE20FF1107D1440007ED5D /* dylibs.cpp in Sources */,
+				C1ED154823C934E800748423 /* objc_constants.cpp in Sources */,
 				F93CB248116E69EB003233B8 /* tlvp.cpp in Sources */,
 				F9AA44DC1294885F00CB8390 /* branch_shim.cpp in Sources */,
 				B3B672421406D42800A376BB /* Snapshot.cpp in Sources */,
@@ -1080,6 +1103,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1113,6 +1138,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1139,6 +1166,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1165,6 +1194,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
@@ -1221,7 +1252,6 @@
 					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-stack_size,0x10000000",
 				);
-				PREBINDING = NO;
 				PRODUCT_NAME = ld;
 				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
@@ -1239,6 +1269,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
@@ -1297,14 +1329,12 @@
 					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-stack_size,0x01000000",
 				);
-				PREBINDING = NO;
 				PRODUCT_NAME = ld;
 				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
 				TOOLCHAINS = osx;
-				VALID_ARCHS = "x86_64 i386 ppc";
 				VERSIONING_SYSTEM = "apple-generic";
 				WARNING_CFLAGS = (
 					"-Wall",
@@ -1318,6 +1348,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1345,7 +1377,6 @@
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				OTHER_REZFLAGS = "";
-				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
 				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
@@ -1362,6 +1393,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1380,7 +1413,6 @@
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				OTHER_REZFLAGS = "";
-				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
 				SDKROOT = macosx.internal;
 				WARNING_CFLAGS = (
@@ -1395,18 +1427,28 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
 				EXCLUDED_INSTALLSRC_SUBDIRECTORY_PATTERNS = "$(inherited) build DerivedData";
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -1428,14 +1470,23 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
@@ -1459,6 +1510,7 @@
 		F96D536E094A2773008E9EE8 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COPY_PHASE_STRIP = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
 				PRODUCT_NAME = "unit-tests";
@@ -1468,6 +1520,7 @@
 		F96D536F094A2773008E9EE8 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COPY_PHASE_STRIP = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
 				PRODUCT_NAME = "unit-tests";
@@ -1478,14 +1531,23 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
 				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
 				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
 				CLANG_WARN_EMPTY_BODY = YES;
 				CLANG_WARN_ENUM_CONVERSION = YES;
 				CLANG_WARN_INFINITE_RECURSION = YES;
 				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
 				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
 				CLANG_WARN_SUSPICIOUS_MOVE = YES;
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
@@ -1509,8 +1571,8 @@
 		F9849FF910B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COPY_PHASE_STRIP = YES;
-				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
 				PRODUCT_NAME = all;
 				ZERO_LINK = NO;
@@ -1522,6 +1584,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				CURRENT_PROJECT_VERSION = "$(RC_ProjectSourceVersion)";
 				DEAD_CODE_STRIPPING = YES;
@@ -1577,15 +1641,14 @@
 					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
 					"-ltapi",
 					"@$(DERIVED_FILE_DIR)/linkExtras",
+					"-Wl,-stack_size,0x01000000",
 				);
-				PREBINDING = NO;
 				PRODUCT_NAME = ld;
 				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
 				TOOLCHAINS = osx;
-				VALID_ARCHS = "x86_64 i386 ppc";
 				VERSIONING_SYSTEM = "apple-generic";
 				WARNING_CFLAGS = (
 					"-Wall",
@@ -1598,6 +1661,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1614,7 +1679,6 @@
 					"-stdlib=libc++",
 					"-Wl,-exported_symbol,__mh_execute_header",
 				);
-				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
 				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
@@ -1627,6 +1691,8 @@
 			buildSettings = {
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1646,7 +1712,6 @@
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
 				OTHER_REZFLAGS = "";
-				PREBINDING = NO;
 				PRODUCT_NAME = ObjectDump;
 				SDKROOT = macosx.internal;
 				WARNING_CFLAGS = (
@@ -1661,6 +1726,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1672,7 +1739,6 @@
 					"$(OTHER_CFLAGS)",
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
-				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
 				SDKROOT = macosx.internal;
 			};
@@ -1684,9 +1750,10 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
 				OTHER_CPLUSPLUSFLAGS = (
@@ -1694,7 +1761,6 @@
 					"$(OTHER_CFLAGS)",
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
-				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
 				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
@@ -1707,10 +1773,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/lib";
@@ -1718,7 +1784,6 @@
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
 				);
-				PREBINDING = NO;
 				PRODUCT_NAME = prunetrie;
 			};
 			name = "Release-assert";
@@ -1726,6 +1791,7 @@
 		F984A00110B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COPY_PHASE_STRIP = YES;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
 				PRODUCT_NAME = "unit-tests";
@@ -1736,6 +1802,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
@@ -1748,7 +1815,6 @@
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
 				);
-				PREBINDING = NO;
 				PRODUCT_NAME = prunetrie;
 			};
 			name = Debug;
@@ -1757,10 +1823,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/lib";
@@ -1768,7 +1834,6 @@
 					"-stdlib=libc++",
 					"$(OTHER_CFLAGS)",
 				);
-				PREBINDING = NO;
 				PRODUCT_NAME = prunetrie;
 			};
 			name = Release;
@@ -1776,6 +1841,7 @@
 		F9B1A26D0A3A568700DA8FAB /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COPY_PHASE_STRIP = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1787,8 +1853,8 @@
 		F9B1A26E0A3A568700DA8FAB /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = YES;
 				COPY_PHASE_STRIP = YES;
-				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = NO;
 				PRODUCT_NAME = all;
 				ZERO_LINK = NO;
@@ -1799,6 +1865,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1812,7 +1880,6 @@
 					"$(OTHER_CFLAGS)",
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
-				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
 				SDKROOT = macosx.internal;
 			};
@@ -1822,6 +1889,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1835,7 +1904,6 @@
 					"$(OTHER_CFLAGS)",
 				);
 				OTHER_LDFLAGS = "-Wl,-exported_symbol,__mh_execute_header";
-				PREBINDING = NO;
 				PRODUCT_NAME = unwinddump;
 				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
@@ -1849,9 +1917,10 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				GCC_OPTIMIZATION_LEVEL = 0;
 				GCC_WARN_ABOUT_MISSING_PROTOTYPES = YES;
@@ -1870,7 +1939,6 @@
 					"$(OTHER_CFLAGS)",
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
-				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
 				SDKROOT = macosx.internal;
 				WARNING_CFLAGS = "-Wall";
@@ -1883,9 +1951,10 @@
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				CLANG_CXX_LANGUAGE_STANDARD = "c++0x";
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				GCC_ENABLE_FIX_AND_CONTINUE = NO;
 				GCC_MODEL_TUNING = G5;
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
 				OTHER_CPLUSPLUSFLAGS = (
@@ -1893,7 +1962,6 @@
 					"$(OTHER_CFLAGS)",
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
-				PREBINDING = NO;
 				PRODUCT_NAME = dyldinfo;
 				SDKROOT = macosx.internal;
 				STRIP_INSTALLED_PRODUCT = YES;
@@ -1906,6 +1974,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = NO;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1917,7 +1987,6 @@
 					"$(OTHER_CFLAGS)",
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
-				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
 				SDKROOT = macosx.internal;
 			};
@@ -1927,6 +1996,8 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CODE_SIGN_IDENTITY = "-";
 				COPY_PHASE_STRIP = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				GCC_GENERATE_DEBUGGING_SYMBOLS = YES;
@@ -1938,7 +2009,6 @@
 					"$(OTHER_CFLAGS)",
 				);
 				OTHER_LDFLAGS = "-stdlib=libc++";
-				PREBINDING = NO;
 				PRODUCT_NAME = machocheck;
 				SDKROOT = macosx.internal;
 			};
