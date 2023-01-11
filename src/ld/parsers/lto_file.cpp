@@ -47,6 +47,7 @@
 #include "ld.hpp"
 #include "macho_relocatable_file.h"
 #include "lto_file.h"
+#include "SymbolTable.h"
 
 #include "llvm-c/lto.h"
 
@@ -619,6 +620,13 @@ Atom::Atom(File& f, const char* nm, ld::Atom::Scope s, ld::Atom::Definition d, l
 
 void Atom::setCompiledAtom(const ld::Atom& atom)
 {
+	// rdar://78595842 (thinLTO may generated multiple weak-def implementations, we need just one)
+	if ( _compiledAtom != NULL ) {
+		if ( (_compiledAtom->combine() == ld::Atom::combineByName) && (atom.combine() == ld::Atom::combineByName) ) {
+			ld::tool::SymbolTable::markCoalescedAway(_compiledAtom);
+		}
+	}
+
 	// set delegate so virtual methods go to it
 	_compiledAtom = &atom;
 	
@@ -915,7 +923,7 @@ std::tuple<uint8_t *, size_t> Parser::codegen(const OptimizeOptions& options,
 		strcat(tempMachoPath, ".lto.o");
 		int fd = ::open(tempMachoPath, O_CREAT | O_WRONLY | O_TRUNC, 0666);
 		if ( fd != -1) {
-			::write(fd, machOFile, machOFileLen);
+			ld::utils::write64(fd, machOFile, machOFileLen);
 			::close(fd);
 		}
 	}
@@ -924,7 +932,7 @@ std::tuple<uint8_t *, size_t> Parser::codegen(const OptimizeOptions& options,
 	if ( !object_path.empty() ) {
 		int fd = ::open(object_path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
 		if ( fd != -1) {
-			::write(fd, machOFile, machOFileLen);
+			ld::utils::write64(fd, machOFile, machOFileLen);
 			::close(fd);
 		}
 		else {
@@ -1311,7 +1319,7 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 			state.ltoBitcodePath.push_back(tempMachoPath);
 			int fd = ::open(tempMachoPath.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
 			if ( fd != -1 ) {
-				::write(fd, machOFile.Buffer, machOFile.Size);
+				ld::utils::write64(fd, machOFile.Buffer, machOFile.Size);
 				::close(fd);
 			} else {
 				throwf("unable to write temporary ThinLTO output: %s", tempMachoPath.c_str());
@@ -1383,7 +1391,7 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 			tempMachoPath += ".thinlto.o";
 			int fd = ::open(tempMachoPath.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
 			if ( fd != -1 ) {
-				::write(fd, machOFile.Buffer, machOFile.Size);
+				ld::utils::write64(fd, machOFile.Buffer, machOFile.Size);
 				::close(fd);
 			}
 			else {
@@ -1426,7 +1434,7 @@ bool Parser::optimizeThinLTO(const std::vector<File*>&              files,
 			// if needed, save temp mach-o file to specific location
 			int fd = ::open(tmp_path.c_str(), O_CREAT | O_WRONLY | O_TRUNC, 0666);
 			if ( fd != -1) {
-				::write(fd, (const uint8_t *)machOFile.Buffer, machOFile.Size);
+				ld::utils::write64(fd, (const uint8_t *)machOFile.Buffer, machOFile.Size);
 				::close(fd);
 			}
 			else {

@@ -536,7 +536,7 @@ bool SymbolTable::add(const ld::Atom& atom, Options::Treatment duplicates)
 void SymbolTable::markCoalescedAway(const ld::Atom* atom)
 {
 	// remove this from list of all atoms used
-	//fprintf(stderr, "markCoalescedAway(%p) from %s\n", atom, atom->safeFilePath());
+	//fprintf(stderr, "markCoalescedAway(%p) %s from %s\n", atom, atom->name(), atom->safeFilePath());
 	(const_cast<ld::Atom*>(atom))->setCoalescedAway();
 	
 	//
@@ -551,7 +551,7 @@ void SymbolTable::markCoalescedAway(const ld::Atom* atom)
 			case ld::Fixup::kindNoneGroupSubordinateFDE:
 			case ld::Fixup::kindNoneGroupSubordinateLSDA:
 				assert(fit->binding == ld::Fixup::bindingDirectlyBound);
-				this->markCoalescedAway(fit->u.target);
+				markCoalescedAway(fit->u.target);
 				break;
 			default:
 				break;

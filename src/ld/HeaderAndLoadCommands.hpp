@@ -667,7 +667,7 @@ uint32_t HeaderAndLoadCommandsAtom<A>::flags() const
 					bits |= MH_FORCE_FLAT;
 					break;
 			}
-			if ( _state.hasWeakExternalSymbols || _writer.overridesWeakExternalSymbols )
+			if ( _state.hasWeakExternalSymbols || _writer.overridesWeakExternalSymbols || _writer.reExportsWeakDefSymbols )
 				bits |= MH_WEAK_DEFINES;
 			if ( _writer.usesWeakExternalSymbols || _state.hasWeakExternalSymbols )
 				bits |= MH_BINDS_TO_WEAK;
@@ -915,9 +915,13 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 			else
 				return S_SYMBOL_STUBS | S_ATTR_SOME_INSTRUCTIONS | S_ATTR_PURE_INSTRUCTIONS;
 		case ld::Section::typeNonLazyPointer:
-			if ( _options.outputKind() == Options::kKextBundle  )
+			if ( _options.outputKind() == Options::kKextBundle  ) {
+#if SUPPORT_ARCH_arm64e
+				if ( _options.useAuthenticatedStubs() )
+					return S_NON_LAZY_SYMBOL_POINTERS;
+#endif
 				return S_REGULAR;
-			else if ( (_options.outputKind() == Options::kStaticExecutable) && _options.positionIndependentExecutable() )
+			} else if ( (_options.outputKind() == Options::kStaticExecutable) && _options.positionIndependentExecutable() )
 				return S_REGULAR;
 			else
 				return S_NON_LAZY_SYMBOL_POINTERS;
@@ -962,6 +966,8 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 			return S_REGULAR;
 		case ld::Section::typeInitOffsets:
 			return S_INIT_FUNC_OFFSETS;
+		case ld::Section::typeInterposing:
+			return S_INTERPOSING;
 	}
 	return S_REGULAR;
 }

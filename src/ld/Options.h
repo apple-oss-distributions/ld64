@@ -208,6 +208,7 @@ public:
 	struct SectionAlignment {
 		const char*				segmentName;
 		const char*				sectionName;
+		const char*				alignmentStr;
 		uint8_t					alignment;
 	};
 
@@ -286,7 +287,8 @@ public:
 	const char*					architectureName() const { return fArchitectureName; }
 	void						setInferredArch(cpu_type_t, cpu_subtype_t subtype);
 	void						setInferredPlatform(ld::Platform platform, uint32_t minOsVers);
-	bool						archSupportsThumb2() const { return fArchSupportsThumb2; }
+	Thumb2Support				archThumb2Support() const { return fArchThumb2Support; }
+	bool						archSupportsThumb2() const { return archThumb2Support() == Thumb2Support::all; }
 	OutputKind					outputKind() const { return fOutputKind; }
 	bool						dyldLoadsOutput() const;
 	bool						dyldOrKernelLoadsOutput() const;
@@ -400,7 +402,6 @@ public:
 	bool						makeThreadedStartsSection() const { return fMakeThreadedStartsSection; }
 	bool						hasExportedSymbolOrder();
 	bool						exportedSymbolOrder(const char* sym, unsigned int* order) const;
-	bool						orderData() { return fOrderData; }
 	bool						errorOnOtherArchFiles() const { return fErrorOnOtherArchFiles; }
 	bool						markAutoDeadStripDylib() const { return fMarkDeadStrippableDylib; }
 	bool						removeEHLabels() const { return fNoEHLabels; }
@@ -467,6 +468,8 @@ public:
 	bool						makeInitializersIntoOffsets() const { return fMakeInitializersIntoOffsets; }
 	bool						useLinkedListBinding() const { return fUseLinkedListBinding; }
 	bool						makeChainedFixups() const { return fMakeChainedFixups; }
+	bool					    chainedFixupsSectionUseVMOffsets() const { return fChainedFixupsSectionUseVMOffsets; }
+	bool						stealPointersFixupChains() const { return fFixupChainsStealPointers; }
 #if SUPPORT_ARCH_arm64e
 	bool						useAuthenticatedStubs() const { return fUseAuthenticatedStubs; }
 	bool						supportsAuthenticatedPointers() const { return fSupportsAuthenticatedPointers; }
@@ -512,6 +515,7 @@ public:
 								linkerOptions() const { return fLinkerOptions; }
 	FileInfo					findFramework(const char* frameworkName) const;
 	FileInfo					findLibrary(const char* rootName, bool dylibsOnly=false) const;
+	bool						armFirmwareVariant() const;
 	bool						armUsesZeroCostExceptions() const;
 	const std::vector<SectionRename>& sectionRenames() const { return fSectionRenames; }
 	const std::vector<SegmentRename>& segmentRenames() const { return fSegmentRenames; }
@@ -589,9 +593,11 @@ private:
 	void						buildSearchPaths(int argc, const char* argv[]);
 	void						parseArch(const char* architecture);
 	void						selectFallbackArch(const char *architecture);
-	FileInfo					findFramework(const char* rootName, const char* suffix) const;
+	FileInfo					findFramework(const char* rootName, const char* suffix, bool useCurrentVersion=false) const;
 	bool						checkForFile(const char* format, const char* dir, const char* rootName,
 											 FileInfo& result) const;
+	bool						checkForFileWithSuffix(const char* possiblePath, FileInfo& result) const;
+	bool						findFileWithSuffix(const std::string &path, const std::vector<std::string> &tbdExtensions, FileInfo& result) const;
 	uint64_t					parseVersionNumber64(const char*);
 	std::string					getVersionString32(uint32_t ver) const;
 	std::string					getVersionString64(uint64_t ver) const;
@@ -638,7 +644,7 @@ private:
 	const char*							fArchitectureName;
 	OutputKind							fOutputKind;
 	bool								fHasPreferredSubType;
-	bool								fArchSupportsThumb2;
+	Thumb2Support						fArchThumb2Support;
 	bool								fBindAtLoad;
 	bool								fKeepPrivateExterns;
 	bool								fIgnoreOtherArchFiles;
@@ -704,6 +710,7 @@ private:
 	bool								fDisableNonExecutableHeap;
 	uint32_t							fMinimumHeaderPad;
 	uint64_t							fSegmentAlignment;
+	bool								fForceAlignment;
 	CommonsMode							fCommonsMode;
 	enum UUIDMode						fUUIDMode;
 	SetWithWildcards					fLocalSymbolsIncluded;
@@ -732,13 +739,13 @@ private:
 	bool								fEncryptable;
 	bool								fEncryptableForceOn;
 	bool								fEncryptableForceOff;
-	bool								fOrderData;
 	bool								fMarkDeadStrippableDylib;
 	bool								fMakeCompressedDyldInfo;
 	bool								fMakeCompressedDyldInfoForceOff;
 	bool								fMakeThreadedStartsSection;
 	bool								fNoEHLabels;
 	bool								fAllowCpuSubtypeMismatches;
+	bool								fAllowCpuSubtypeMismatchesForceOn;
 	bool								fEnforceDylibSubtypesMatch;
 	bool								fWarnOnSwiftABIVersionMismatches;
 	bool								fUseSimplifiedDylibReExports;
@@ -756,6 +763,7 @@ private:
 	bool								fWhyLoad;
 	bool								fRootSafe;
 	bool								fSetuidSafe;
+	bool								fSearchInSparseFrameworks;
 	bool								fImplicitlyLinkPublicDylibs;
 	bool								fAddCompactUnwindEncoding;
 	bool								fWarnCompactUnwind;
@@ -763,7 +771,6 @@ private:
 	bool								fAutoOrderInitializers;
 	bool								fOptimizeZeroFill;
 	bool								fMergeZeroFill;
-	bool								fLogObjectFiles;
 	bool								fLogAllFiles;
 	bool								fTraceDylibs;
 	bool								fTraceIndirectDylibs;
@@ -823,8 +830,12 @@ private:
 	bool								fVerboseDeDupe;
 	bool								fMakeInitializersIntoOffsets;
 	bool								fUseLinkedListBinding;
+	bool								fMakeChainedFixupsForceOn;
+	bool								fMakeChainedFixupsForceOff;
 	bool								fMakeChainedFixups;
 	bool								fMakeChainedFixupsSection;
+	bool								fChainedFixupsSectionUseVMOffsets = false;
+	bool								fFixupChainsStealPointers		= false;
 #if SUPPORT_ARCH_arm64e
 	bool								fUseAuthenticatedStubs 			= false;
 	bool								fSupportsAuthenticatedPointers 	= false;
@@ -853,6 +864,8 @@ private:
 	bool								fWarnUnusedDylibsForceOn;
 	bool								fWarnUnusedDylibsForceOff;
 	bool								fAdHocSign;
+	bool								fAdHocSignForceOn;
+	bool								fAdHocSignForceOff;
 	bool								fPlatformMismatchesAreWarning;
 	bool								fForceObjCRelativeMethodListsOn;
 	bool								fForceObjCRelativeMethodListsOff;
@@ -895,6 +908,7 @@ private:
 	mutable std::vector<Options::TAPIInterface> fTAPIFiles;
 	bool								fPreferTAPIFile;
 	const char*							fOSOPrefixPath;
+	const char*							fImageSuffix;
 };
 
 
