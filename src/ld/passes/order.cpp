@@ -26,9 +26,10 @@
 #include <stdint.h>
 #include <math.h>
 #include <unistd.h>
-#include <dlfcn.h>
 #include <mach/machine.h>
+#include <dispatch/dispatch.h>
 
+#include <algorithm>
 #include <vector>
 #include <map>
 #include <set>
@@ -591,10 +592,6 @@ void Layout::buildOrdinalOverrideMap()
 						break;
 				}
 			}
-			// update atom-to-section map
-			for (std::set<const ld::Atom*>::iterator it=moveToData.begin(); it != moveToData.end(); ++it) {
-				_state.atomToSection[*it] = dataSect;
-			}
 		}
 	}
 
@@ -621,8 +618,8 @@ void Layout::doPass()
 	this->buildOrdinalOverrideMap();
 
 	// sort atoms in each section
-	for (std::vector<ld::Internal::FinalSection*>::iterator sit=_state.sections.begin(); sit != _state.sections.end(); ++sit) {
-		ld::Internal::FinalSection* sect = *sit;
+	dispatch_apply(_state.sections.size(), DISPATCH_APPLY_AUTO, ^(size_t index) {
+		ld::Internal::FinalSection* sect = _state.sections[index];
 		switch ( sect->type() ) {
 			case ld::Section::typeTempAlias:
 			case ld::Section::typeStub:
@@ -632,12 +629,17 @@ void Layout::doPass()
 			case ld::Section::typeNonLazyPointer:
 				// these sections are already sorted by pass that created them
 				break;
+			case ld::Section::typeCStringPointer:
+				// sel ref section already sorted by name by objc pass
+				if ( strcmp(sect->sectionName(), "__objc_selrefs") == 0 )
+					break;
+				[[clang::fallthrough]];
 			default:
 				if ( log ) fprintf(stderr, "sorting section %s\n", sect->sectionName());
 				std::sort(sect->atoms.begin(), sect->atoms.end(), _comparer);
 				break;
 		}
-	}
+	});
 
 	if ( log ) {
 		fprintf(stderr, "Sorted atoms:\n");

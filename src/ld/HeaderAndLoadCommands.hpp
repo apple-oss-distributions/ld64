@@ -29,6 +29,7 @@
 #include <limits.h>
 #include <unistd.h>
 #include <mach-o/loader.h>
+#include <string_view>
 
 #include <vector>
 
@@ -205,7 +206,7 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	_hasOptimizationHints = (_state.someObjectHasOptimizationHints && (opts.outputKind() == Options::kObjectFile));
 	_hasExportsTrieLoadCommand = opts.makeChainedFixups() && !state.cantUseChainedFixups && opts.dyldLoadsOutput();
 	_hasCodeSignature = opts.adHocSign();
-	_hasChainedFixupsLoadCommand = opts.makeChainedFixups() && !state.cantUseChainedFixups && opts.dyldOrKernelLoadsOutput();
+	_hasChainedFixupsLoadCommand = opts.makeChainedFixups() && !state.cantUseChainedFixups && opts.dyldOrKernelLoadsOutput() && opts.outputSlidable();
 
 	switch ( opts.outputKind() ) {
 		case Options::kDynamicExecutable:
@@ -226,24 +227,23 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 				}
 			}
 			for (const char* frameworkName : _state.unprocessedLinkerOptionFrameworks) {
-				std::vector<const char*>* lo = new std::vector<const char*>();
+				std::vector<const char*> lo;
 				if ( _state.linkerOptionNeededFrameworks.count(frameworkName) )
-					lo->push_back("-needed_framework");
+					lo.push_back("-needed_framework");
 				else
-					lo->push_back("-framework");
-				lo->push_back(frameworkName);
-				_linkerOptions.push_back(*lo);
+					lo.push_back("-framework");
+				lo.push_back(frameworkName);
+				_linkerOptions.push_back(std::move(lo));
 			};
 			for (const char* libName : _state.unprocessedLinkerOptionLibraries) {
-				std::vector<const char*>* lo = new std::vector<const char*>();
-				char * s = new char[strlen(libName)+3];
-				if ( _state.linkerOptionNeededLibraries.count(libName) )
-					strcpy(s, "-needed-l");
-				else
-					strcpy(s, "-l");
+				std::vector<const char*> lo;
+				const std::string_view option = _state.linkerOptionNeededLibraries.count(libName) ? "-needed-l" : "-l";
+
+				char * s = new char[strlen(libName)+option.size()+1];
+				strcpy(s, option.data());
 				strcat(s, libName);
-				lo->push_back(s);
-				_linkerOptions.push_back(*lo);
+				lo.push_back(s);
+				_linkerOptions.push_back(std::move(lo));
 			};
 			break;
 		case Options::kStaticExecutable:
@@ -702,6 +702,7 @@ template <> uint32_t HeaderAndLoadCommandsAtom<arm64>::magic() const		{ return M
 #if SUPPORT_ARCH_arm64_32
 template <> uint32_t HeaderAndLoadCommandsAtom<arm64_32>::magic() const		{ return MH_MAGIC; }
 #endif
+template <> uint32_t HeaderAndLoadCommandsAtom<riscv32>::magic() const	{ return MH_MAGIC; }
 
 template <> uint32_t HeaderAndLoadCommandsAtom<x86>::cpuType() const	{ return CPU_TYPE_I386; }
 template <> uint32_t HeaderAndLoadCommandsAtom<x86_64>::cpuType() const	{ return CPU_TYPE_X86_64; }
@@ -710,7 +711,7 @@ template <> uint32_t HeaderAndLoadCommandsAtom<arm64>::cpuType() const	{ return 
 #if SUPPORT_ARCH_arm64_32
 template <> uint32_t HeaderAndLoadCommandsAtom<arm64_32>::cpuType() const	{ return CPU_TYPE_ARM64_32; }
 #endif
-
+template <> uint32_t HeaderAndLoadCommandsAtom<riscv32>::cpuType() const { return CPU_TYPE_RISCV32; }
 
 template <>
 uint32_t HeaderAndLoadCommandsAtom<x86>::cpuSubType() const
@@ -746,6 +747,12 @@ uint32_t HeaderAndLoadCommandsAtom<arm64_32>::cpuSubType() const
 	return CPU_SUBTYPE_ARM64_32_V8;
 }
 #endif
+
+template <>
+uint32_t HeaderAndLoadCommandsAtom<riscv32>::cpuSubType() const
+{
+	return _state.cpuSubType;
+}
 
 
 template <typename A>
@@ -838,6 +845,7 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 			else
 				return S_REGULAR;
 		case ld::Section::typeCode:
+		case ld::Section::typeStubObjC:
 			bits = S_REGULAR | S_ATTR_SOME_INSTRUCTIONS | S_ATTR_PURE_INSTRUCTIONS;
 			if ( sect->hasLocalRelocs && ! _writer.pieDisabled )
 				bits |= S_ATTR_LOC_RELOC;
@@ -892,6 +900,7 @@ uint32_t HeaderAndLoadCommandsAtom<A>::sectionFlags(ld::Internal::FinalSection* 
 			return S_REGULAR;
 		case ld::Section::typeThreadStarts:
 		case ld::Section::typeChainStarts:
+		case ld::Section::typeRebaseRLE:
 			return S_REGULAR;
 		case ld::Section::typeObjCClassRefs:
 		case ld::Section::typeObjC2CategoryList:
@@ -1185,6 +1194,7 @@ template <typename A>
 uint8_t* HeaderAndLoadCommandsAtom<A>::copyChainedFixupsLoadCommand(uint8_t* p) const
 {
 	// build LC_DYLD_CHAINED_FIXUPS command
+	assert(_writer.chainInfoSection != nullptr);
 	linkedit_data_command*  cmd = (linkedit_data_command*)p;
 
 	cmd->cmd 		= LC_DYLD_CHAINED_FIXUPS;
@@ -1382,7 +1392,6 @@ uint8_t* HeaderAndLoadCommandsAtom<arm>::copyThreadsLoadCommand(uint8_t* p) cons
 	return p + threadLoadCommandSize();
 }
 
-
 template <>
 uint32_t HeaderAndLoadCommandsAtom<arm64>::threadLoadCommandSize() const
 {
@@ -1428,6 +1437,30 @@ uint8_t* HeaderAndLoadCommandsAtom<arm64_32>::copyThreadsLoadCommand(uint8_t* p)
 	return p + threadLoadCommandSize();
 }
 #endif
+
+
+template <>
+uint32_t HeaderAndLoadCommandsAtom<riscv32>::threadLoadCommandSize() const
+{
+	return this->alignedSize(16 + 16*4);	// base size + i386_THREAD_STATE_COUNT * 4
+}
+
+template <>
+uint8_t* HeaderAndLoadCommandsAtom<riscv32>::copyThreadsLoadCommand(uint8_t* p) const
+{
+	// FIXME: need thread state info for risc-v 32
+	assert(_state.entryPoint != NULL);
+	pint_t start = _state.entryPoint->finalAddress();
+	macho_thread_command<P>* cmd = (macho_thread_command<P>*)p;
+	cmd->set_cmd(LC_UNIXTHREAD);
+	cmd->set_cmdsize(threadLoadCommandSize());
+	cmd->set_flavor(6);	 // ARM_THREAD_STATE64
+	cmd->set_count(68);	 // ARM_EXCEPTION_STATE64_COUNT
+	cmd->set_thread_register(64, start);		// pc
+	if ( _options.hasCustomStack() )
+		cmd->set_thread_register(62, _options.customStackAddr());	// sp
+	return p + threadLoadCommandSize();
+}
 
 template <typename A>
 uint8_t* HeaderAndLoadCommandsAtom<A>::copyEntryPointLoadCommand(uint8_t* p) const

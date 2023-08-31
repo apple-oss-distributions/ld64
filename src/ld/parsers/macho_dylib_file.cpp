@@ -298,14 +298,16 @@ File<A>::File(const uint8_t* fileContent, uint64_t fileLength, const char* path,
 					// with new linkedit format only care about LC_REEXPORT_DYLIB
 					if ( compressedLinkEdit && !linkingFlatNamespace ) 
 						break;
+					[[clang::fallthrough]];
 				case LC_REEXPORT_DYLIB:
-					++reExportDylibCount;
 					if ( dylibCmd->name_offset() > cmdLength )
 						throwf("malformed mach-o: LC_*_DYLIB load command has offset (%u) outside its size (%u)", dylibCmd->name_offset(), cmdLength);
 					if ( (dylibCmd->name_offset() + strlen(dylibCmd->name()) + 1) > cmdLength )
 						throwf("malformed mach-o: LC_*_DYLIB load command string extends beyond end of load command");
 					const char *path = strdup(dylibCmd->name());
 					bool reExport = (cmd->cmd() == LC_REEXPORT_DYLIB);
+					if (reExport)
+						++reExportDylibCount;
 					if ( (targetInstallPath == nullptr) || (strcmp(targetInstallPath, path) != 0) )
 						this->_dependentDylibs.emplace_back(path, reExport);
 					break;

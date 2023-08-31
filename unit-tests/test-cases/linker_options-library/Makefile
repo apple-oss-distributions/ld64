@@ -36,7 +36,7 @@ all:
 	${CC} ${CCFLAGS} main.c -c -o main.o
 	${LD} -r main.o -add_linker_option -lfoo -add_linker_option -lbar -o main2.o 
 	${CC} ${CCFLAGS} main2.o -o main -L.
-	${DYLDINFO} -lazy_bind main | grep _foo | grep libfoo | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -lazy_bind -bind main | grep _foo | grep libfoo | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:

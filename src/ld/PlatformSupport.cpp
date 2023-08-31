@@ -62,7 +62,7 @@ static const PlatformInfo sAllSupportedPlatforms[] = {
     { Platform::watchOS_simulator, Platform::watchOS,      "watchOS Simulator", "-watchos_simulator_version_min", NULL,                         0x00060000, 0x00020000, LC_VERSION_MIN_WATCHOS,  false, true,  PlatEnforce::warnInternalErrorExternal, PlatEnforce::error },
     { Platform::driverKit,         Platform::driverKit,    "DriverKit",         "-driverkit_version_min",         NULL,                         0x00130000, 0x00130000, 0,                       false, true,  PlatEnforce::error,                     PlatEnforce::error },
     { Platform::sepOS,             Platform::sepOS,        "sepOS",             "",                               NULL,                         0x00010000, 0x00010000, 0,                       false, true,  PlatEnforce::warning,                   PlatEnforce::warning },
-    { Platform::freestanding,     Platform::freestanding,  "free standing",     "-preload",                       NULL,                         0x00000000, 0,          0,                       false, false, PlatEnforce::allow,                     PlatEnforce::allow },
+    { Platform::freestanding,      Platform::freestanding, "free standing",     "-preload",                       NULL,                         0x00000000, 0x00000000, 0,                       false, false,  PlatEnforce::allow,                    PlatEnforce::allow },
 };
 
 static void versionToString(uint32_t value, char buffer[32])
@@ -114,6 +114,7 @@ void VersionSet::checkObjectCrosslink(const VersionSet& objectPlatforms, const s
                         // only warn during B&I builds
                         if ( (getenv("RC_XBS") != NULL) && (getenv("RC_BUILDIT") == NULL) )
                             break;
+                        [[clang::fallthrough]];
                     case PlatEnforce::warning: {
                         if ( !warned ) {
                             warning("building for %s, but linking in object file (%s) built for %s",

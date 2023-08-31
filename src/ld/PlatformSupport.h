@@ -48,6 +48,8 @@ enum class Platform
     watchOS_simulator   = 9,    // PLATFORM_WATCHOSSIMULATOR
     driverKit           = 10,   // PLATFORM_DRIVERKIT
     sepOS               = 14,   // PLATFORM_SEPOS
+
+
     freestanding        = 100   // this never shows up in mach-o files, it is for internal tracking in ld64
 };
 

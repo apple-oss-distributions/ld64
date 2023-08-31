@@ -10,9 +10,9 @@ cd `echo "$0" | sed 's/run-all-unit-tests/test-cases/'`
 
 [ "$PROCTORRUN" ] && exec ../proctor-run
 
-all_archs="x86_64  i386"
+all_archs="x86_64 i386"
 valid_archs="x86_64 i386"
-ios_sdk_directory="/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs"
+ios_sdk_directory="$(xcode-select -p)/Platforms/iPhoneOS.platform/Developer/SDKs"
 # only test arm code if iOS platform tools installed
 min_available_ios_sdk_version()
 {
@@ -33,10 +33,19 @@ then
 	then
 		arm_arch="arm64"
 	fi
-    all_archs="${all_archs}  ${arm_arch}"
+    all_archs="${all_archs} ${arm_arch}"
     valid_archs="${valid_archs} ${arm_arch}"
 fi
 
+if ! [ -z "$ARCH" ]
+then
+	if [[ "$valid_archs" == *"$ARCH"* ]]
+	then
+		all_archs="$ARCH"
+	else
+		echo "invalid arch string: $ARCH, valid archs: $valid_archs"
+	fi
+fi
 
 # clean first
 ../bin/make-recursive.pl clean > /dev/null

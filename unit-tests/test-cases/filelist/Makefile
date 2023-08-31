@@ -42,8 +42,10 @@ all:
 	cd /tmp && ${CC} ${CCFLAGS} -filelist "${PWD}/filelist2,${PWD}" -o "${PWD}/hello"
 	${FAIL_IF_BAD_MACHO} hello
 	echo "${PWD}/hello.o" > "${PWD}/filelist,withComma"
-	cd /tmp && ${CC} ${CCFLAGS} -filelist "${PWD}/filelist,withComma"  -o "${PWD}/hello"
-	${PASS_IFF_GOOD_MACHO} hello
+	cd /tmp && ${CC} ${CCFLAGS} -filelist "${PWD}/filelist,withComma" -o "${PWD}/hello" \
+		-Xlinker -dependency_info -Xlinker "${PWD}/dep_info"
+	${FAIL_IF_BAD_MACHO} hello
+	${PASS_IFF_SUCCESS} grep "filelist,withComma" dep_info
 
 clean:
-	rm -f hello.o hello filelist1 filelist2 filelist,withComma
+	rm -f hello.o hello filelist1 filelist2 filelist,withComma dep_info

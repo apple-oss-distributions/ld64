@@ -23,6 +23,7 @@
  */
  
 // start temp HACK for cross builds
+#include "Containers.h"
 extern "C" double log2 ( double );
 //#define __MATH__
 // end temp HACK for cross builds
@@ -46,6 +47,7 @@ extern "C" double log2 ( double );
 #include <mach-o/dyld.h>
 #include <dlfcn.h>
 #include <AvailabilityMacros.h>
+#include <os/lock_private.h>
 
 #include <string>
 #include <map>
@@ -84,6 +86,7 @@ extern "C" double log2 ( double );
 #include "passes/dylibs.h"
 #include "passes/bitcode_bundle.h"
 #include "passes/code_dedup.h"
+#include "passes/objc_stubs.h"
 
 #include "parsers/archive_file.h"
 #include "parsers/macho_relocatable_file.h"
@@ -186,8 +189,8 @@ std::vector<const char*> InternalState::FinalSection::_s_segmentsSeen;
 
 size_t InternalState::SectionHash::operator()(const ld::Section* sect) const
 {
-	size_t hash = 0;	
-	ld::CStringHash temp;
+	size_t hash = 0;
+	ld::container_details::CStringHash temp;
 	hash += temp.operator()(sect->segmentName());
 	hash += temp.operator()(sect->sectionName());
 	return hash;
@@ -372,33 +375,38 @@ uint32_t InternalState::FinalSection::sectionOrder(const ld::Section& sect, uint
 				return 12;
 			case ld::Section::typeStubHelper:
 				return 13;
+			case ld::Section::typeStubObjC:
+				if ( options.sharedRegionEligible() )
+					return INT_MAX;
+				else
+					return 14;
 			case ld::Section::typeInitOffsets:
-				return 14;
+				return 15;
 			case ld::Section::typeThreadStarts:
-				return INT_MAX-8;
+				return INT_MAX-9;
 			case ld::Section::typeLSDA:
-				return INT_MAX-7;
+				return INT_MAX-8;
 			case ld::Section::typeUnwindInfo:
-				return INT_MAX-6;
+				return INT_MAX-7;
 			case ld::Section::typeCFI:
-				return INT_MAX-5;
+				return INT_MAX-6;
 			case ld::Section::typeStubClose:
-				return INT_MAX - 3;
+				return INT_MAX - 4;
 			case ld::Section::typeNonStdCString:
 				if ( (strcmp(sect.sectionName(), "__oslogstring") == 0) && options.makeEncryptable() )
-					return INT_MAX-4;
+					return INT_MAX-5;
 				if ( options.sharedRegionEligible() ) {
 					if ( (strcmp(sect.sectionName(), "__objc_classname") == 0) )
-						return INT_MAX - 2;
+						return INT_MAX - 3;
 					if ( (strcmp(sect.sectionName(), "__objc_methname") == 0) )
-						return INT_MAX - 1;
+						return INT_MAX - 2;
 					if ( (strcmp(sect.sectionName(), "__objc_methtype") == 0) )
-						return INT_MAX;
+						return INT_MAX - 1;
 				}
 				return sectionsSeen+20;
 			default:
 				if ( (strcmp(sect.sectionName(), "__objc_methlist") == 0) )
-					return 15;
+					return 16;
 				return sectionsSeen+20;
 		}
 	}
@@ -623,7 +631,11 @@ bool InternalState::inMoveRWChain(const ld::Atom& atom, const char* filePath, bo
 		dstSeg = pos->second;
 		return true;
 	}
-	
+
+	// rdar://93876735 (if atom is code, then it won't be in a rw chain)
+	if ( atom.section().type() == ld::Section::typeCode )
+		return false;
+
 	bool result = false;
 	if ( _options.moveRwSymbol(atom.getUserVisibleName(), filePath, dstSeg, wildCardMatch) )
 		result = true;
@@ -774,7 +786,8 @@ ld::Internal::FinalSection* InternalState::addAtom(const ld::Atom& atom)
 	}
 
 	// Support for -move_to_r._segment
-	if ( atom.symbolTableInclusion() == ld::Atom::symbolTableIn ) {
+	// rdar://87716075 normally only visibile symbols can be moved, but some firmware projects want to move temp symbols
+	if ( (atom.symbolTableInclusion() == ld::Atom::symbolTableIn) || ((atom.symbolTableInclusion() == ld::Atom::symbolTableNotInFinalLinkedImages) && (_options.outputKind() == Options::kPreload)) ) {
 		const char* dstSeg;
 		bool wildCardMatch;
 		if ( inMoveRWChain(atom, path, false, dstSeg, wildCardMatch) ) {
@@ -971,7 +984,6 @@ ld::Internal::FinalSection* InternalState::addAtom(const ld::Atom& atom)
 		// normal case
 		fs->atoms.push_back(&atom);
 	}
-	this->atomToSection[&atom] = fs;
 	return fs;
 }
 
@@ -1514,12 +1526,16 @@ int main(int argc, const char* argv[])
 	const char* archName = NULL;
 	bool showArch = false;
 	try {
-		PerformanceStatistics statistics;
+		// All objects here are allocated on the heap and leaked, due to the following:
+		// <rdar://problem/55031993> don't run terminators until all we can guarantee all threads are stopped
+		// <rdar://problem/56200095> don't run C++ destructors of stack objects to gain 5% linking perf win
+
+		PerformanceStatistics& statistics = *(new PerformanceStatistics());
 		statistics.startTool = mach_absolute_time();
 		
 		// create object to track command line arguments
-		Options options(argc, argv);
-		InternalState state(options);
+		Options& options = *(new Options(argc, argv));
+		InternalState& state = *(new InternalState(options));
 		
 		// allow libLTO to be overridden by command line -lto_library
 		if (const char *dylib = options.overridePathlibLTO())
@@ -1535,11 +1551,11 @@ int main(int argc, const char* argv[])
 		
 		// open and parse input files
 		statistics.startInputFileProcessing = mach_absolute_time();
-		ld::tool::InputFiles inputFiles(options);
+		ld::tool::InputFiles& inputFiles = *(new ld::tool::InputFiles(options));
 		
 		// load and resolve all references
 		statistics.startResolver = mach_absolute_time();
-		ld::tool::Resolver resolver(options, inputFiles, state);
+		ld::tool::Resolver& resolver = *(new ld::tool::Resolver(options, inputFiles, state));
 		resolver.resolve();
         
 		// add dylibs used
@@ -1551,6 +1567,7 @@ int main(int argc, const char* argv[])
 
 		// run passes
 		statistics.startPasses = mach_absolute_time();
+		ld::passes::objc_stubs::doPass(options, state);
 		ld::passes::objc::doPass(options, state);
 		ld::passes::stubs::doPass(options, state);
 		ld::passes::inits::doPass(options, state);
@@ -1579,10 +1596,10 @@ int main(int argc, const char* argv[])
 
 		// write output file
 		statistics.startOutput = mach_absolute_time();
-		ld::tool::OutputFile out(options, state);
+		ld::tool::OutputFile& out = *(new ld::tool::OutputFile(options, state));
 		out.write(state);
 		statistics.startDone = mach_absolute_time();
-		
+
 		// print statistics
 		//mach_o::relocatable::printCounts();
 		if ( options.printStatistics() ) {
@@ -1599,6 +1616,7 @@ int main(int argc, const char* argv[])
 								statistics.vmEnd.pageins-statistics.vmStart.pageins,
 								statistics.vmEnd.pageouts-statistics.vmStart.pageouts, 
 								statistics.vmEnd.faults-statistics.vmStart.faults);
+			fprintf(stderr, "memory active: %lu, wired: %lu\n", statistics.vmEnd.active_count * vm_page_size, statistics.vmEnd.wire_count * vm_page_size);
 			char temp[40];
 			fprintf(stderr, "processed %3u object files,  totaling %15s bytes\n", inputFiles._totalObjectLoaded, commatize(inputFiles._totalObjectSize, temp));
 			fprintf(stderr, "processed %3u archive files, totaling %15s bytes\n", inputFiles._totalArchivesLoaded, commatize(inputFiles._totalArchiveSize, temp));
@@ -1613,9 +1631,7 @@ int main(int argc, const char* argv[])
 		// <rdar://problem/61228255> need to flush stdout since we skipping some clean up in calling _exit()
 		fflush(stdout);
 
-		// <rdar://problem/55031993> don't run terminators until all we can guarantee all threads are stopped
-		// <rdar://problem/56200095> don't run C++ destructors of stack objects to gain 5% linking perf win
-		_exit(0);
+		exit(0);
 	}
 	catch (const char* msg) {
 		if ( strstr(msg, "malformed") != NULL )
@@ -1625,15 +1641,21 @@ int main(int argc, const char* argv[])
 		else
 			fprintf(stderr, "ld: %s\n", msg);
 		// <rdar://50510752> exit but don't run termination routines
-		_exit(1);
+		exit(1);
 	}
 }
 
 
 #ifndef NDEBUG
+
+//  now that the linker is multi-threaded, only allow one assert() to be processed 
+static os_lock_unfair_s  sAssertLock = OS_LOCK_UNFAIR_INIT;
+
 // implement assert() function to print out a backtrace before aborting
 void __assert_rtn(const char* func, const char* file, int line, const char* failedexpr)
 {
+	os_lock_lock(&sAssertLock);
+
     Snapshot *snapshot = Snapshot::globalSnapshot;
     
     snapshot->setSnapshotMode(Snapshot::SNAPSHOT_DEBUG);
@@ -1660,8 +1682,14 @@ void __assert_rtn(const char* func, const char* file, int line, const char* fail
 	}
     fprintf(stderr, "A linker snapshot was created at:\n\t%s\n", snapshot->rootDir());
 	fprintf(stderr, "ld: Assertion failed: (%s), function %s, file %s, line %d.\n", failedexpr, func, file, line);
-	_exit(1);
+	exit(1);
 }
 #endif
 
-
+// Override atexit() so that destructors don't get registered and we can call the
+// regular exit() instead of _exit()
+extern "C" int __cxa_atexit(void (*func) (void *), void * arg, void * dso_handle);
+int __cxa_atexit(void (*func) (void *), void * arg, void * dso_handle)
+{
+	return 0;
+}

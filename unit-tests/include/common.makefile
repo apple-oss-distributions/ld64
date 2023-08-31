@@ -15,9 +15,12 @@ OBJECTDUMP		= ObjectDump
 OBJCIMAGEINFO		= objcimageinfo
 MACHOCHECK		= machocheck
 OTOOL 			= xcrun otool
+OBJDUMP 		= xcrun objdump
+SIZE 			= xcrun size
 MTOC			= xcrun mtoc
 REBASE			= rebase
 DYLDINFO		= dyldinfo
+DYLD_INFO		= dyld_info
 
 ifdef BUILT_PRODUCTS_DIR
 	# if run within Xcode, add the just built tools to the command path
@@ -69,6 +72,7 @@ ASMFLAGS =
 VERSION_NEW_LINKEDIT = -mmacosx-version-min=10.6
 VERSION_OLD_LINKEDIT = -mmacosx-version-min=10.4
 LD_NEW_LINKEDIT = -macosx_version_min 10.6
+PLATFORM = macos
 
 CXX		  = $(shell xcrun -find clang++) -arch ${ARCH} -mmacosx-version-min=11.0 -isysroot $(OSX_SDK)
 CXXFLAGS = -Wall -stdlib=libc++ 
@@ -83,6 +87,7 @@ ifeq ($(ARCH),armv6)
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)
   LD_NEW_LINKEDIT = -ios_version_min 4.0
+  PLATFORM = ios
 else
   FILEARCH = $(ARCH)
 endif
@@ -97,6 +102,7 @@ ifeq ($(ARCH),armv7)
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)
   LD_NEW_LINKEDIT = -ios_version_min 4.0
+  PLATFORM = ios
 else
   FILEARCH = $(ARCH)
 endif
@@ -114,6 +120,7 @@ ifeq ($(ARCH),thumb)
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)
   LD_NEW_LINKEDIT = -ios_version_min 4.0
+  PLATFORM = ios
 else
   FILEARCH = $(ARCH)
 endif
@@ -131,6 +138,7 @@ ifeq ($(ARCH),thumb2)
   VERSION_OLD_LINKEDIT = -miphoneos-version-min=3.0
   LD_SYSROOT = -syslibroot $(IOS_SDK)
   LD_NEW_LINKEDIT = -ios_version_min 4.0
+  PLATFORM = ios
 else
   FILEARCH = $(ARCH)
 endif
@@ -145,8 +153,22 @@ ifeq ($(ARCH),arm64)
   LD_SYSROOT = -syslibroot $(IOS_SDK)
   LD_NEW_LINKEDIT = -ios_version_min 7.0
   OTOOL =  $(shell xcrun --sdk iphoneos.internal -find otool)
+  OBJDUMP = $(shell xcrun --sdk iphoneos.internal -find objdump)
+  SIZE =  $(shell xcrun --sdk iphoneos.internal -find size)
+  PLATFORM = ios
 else
   FILEARCH = $(ARCH)
+endif
+
+PLATFORM_VERSION = $(shell xcrun --sdk $(SDK) --show-sdk-platform-version)
+SDK_VERSION = $(shell xcrun --sdk $(SDK) --show-sdk-version)
+
+ifeq ($(PLATFORM),ios)
+  SDK = iphoneos.internal
+  VERSION_2022FALL = 16.0
+else
+  SDK = macosx.internal
+  VERSION_2022FALL = 13.0
 endif
 
 RM      = rm

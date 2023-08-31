@@ -28,8 +28,7 @@
 #include "ld.hpp"
 #include "Bitcode.hpp"
 #include "Options.h"
-#include <unordered_map>
-#include <unordered_set>
+#include "Containers.h"
 
 namespace generic {
 namespace dylib {
@@ -139,15 +138,6 @@ private:
 	friend class ExportAtom;
 	friend class ImportAtom;
 
-	struct CStringHash {
-		std::size_t operator()(const char* __s) const {
-			unsigned long __h = 0;
-			for ( ; *__s; ++__s)
-				__h = 5 * __h + *__s;
-			return size_t(__h);
-		};
-	};
-
 protected:
     struct AtomAndWeak { ld::Atom* atom; bool weakDef; bool tlv; uint64_t address; const char * installname; uint32_t compat_version; };
 	struct Dependent {
@@ -161,8 +151,8 @@ protected:
 	struct ReExportChain { ReExportChain* prev; const File* file; };
 
 private:
-	using NameToAtomMap = std::unordered_map<const char*, AtomAndWeak, ld::CStringHash, ld::CStringEquals>;
-	using NameSet = std::unordered_set<const char*, CStringHash, ld::CStringEquals>;
+	using NameToAtomMap = ld::CStringMap<AtomAndWeak>;
+	using NameSet = ld::CStringSet;
 
 	std::pair<bool, bool>		hasWeakDefinitionImpl(const char* name) const;
     bool                        hasDefinitionImpl(const char* name) const;

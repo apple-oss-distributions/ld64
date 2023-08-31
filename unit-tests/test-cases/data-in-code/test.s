@@ -8,12 +8,15 @@ _foo:
 	nop
 	nop
 	nop
+	.end_data_region
  .data_region jt8
 	nop
 	nop
+	.end_data_region
 .data_region jt16
 	nop
 	nop
+.end_data_region
 .data_region jt32
 	nop
 	nop

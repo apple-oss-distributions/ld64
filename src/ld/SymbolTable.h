@@ -26,6 +26,7 @@
 #define __SYMBOL_TABLE_H__
 
 #include <stdlib.h>
+#include <string>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <sys/mman.h>
@@ -43,9 +44,11 @@
 
 #include <vector>
 #include <unordered_map>
+#include <string_view>
 
 #include "Options.h"
 #include "ld.hpp"
+#include "Containers.h"
 
 namespace ld {
 namespace tool {
@@ -57,7 +60,7 @@ public:
 	typedef uint32_t IndirectBindingSlot;
 
 private:
-	typedef std::unordered_map<const char*, IndirectBindingSlot, CStringHash, CStringEquals> NameToSlot;
+	using NameToSlot = StringViewMap<IndirectBindingSlot>;
 
 	class ContentFuncs {
 	public:
@@ -87,8 +90,8 @@ private:
 	};
 	typedef std::unordered_map<const ld::Atom*, IndirectBindingSlot, UTF16StringHashFuncs, UTF16StringHashFuncs> UTF16StringToSlot;
 
-	typedef std::map<IndirectBindingSlot, const char*> SlotToName;
-	typedef std::unordered_map<const char*, CStringToSlot*, CStringHash, CStringEquals> NameToMap;
+	using SlotToName = Map<IndirectBindingSlot, std::string_view>;
+	using NameToMap = CStringMap<CStringToSlot*>;
     
     typedef std::vector<const ld::Atom *> DuplicatedSymbolAtomList;
     typedef std::map<const char *, DuplicatedSymbolAtomList * > DuplicateSymbols;
@@ -97,7 +100,9 @@ public:
 
 	class byNameIterator {
 	public:
-		byNameIterator&			operator++(int) { ++_nameTableIterator; return *this; }
+		byNameIterator&			operator++() { ++_nameTableIterator; return *this; }
+		byNameIterator			operator++(int) { auto cpy = *this; ++_nameTableIterator; return cpy; }
+
 		const ld::Atom*			operator*() { return _slotTable[_nameTableIterator->second]; }
 		bool					operator!=(const byNameIterator& lhs) { return _nameTableIterator != lhs._nameTableIterator; }
 
@@ -110,22 +115,25 @@ public:
 		std::vector<const ld::Atom*>&	_slotTable;
 	};
 	
-						SymbolTable(const Options& opts, std::vector<const ld::Atom*>& ibt);
+						SymbolTable(const Options& opts, std::vector<const ld::Atom*>& ibt, size_t inputFileCount);
 
 	bool				add(const ld::Atom& atom, Options::Treatment duplicates);
-	IndirectBindingSlot	findSlotForName(const char* name);
+	IndirectBindingSlot	findSlotForName(const std::string_view& name);
 	IndirectBindingSlot	findSlotForContent(const ld::Atom* atom, const ld::Atom** existingAtom);
 	IndirectBindingSlot	findSlotForReferences(const ld::Atom* atom, const ld::Atom** existingAtom);
 	const ld::Atom*		atomForSlot(IndirectBindingSlot s)	{ return _indirectBindingTable[s]; }
+	const ld::Atom*		atomForName(const std::string_view& name) const;
 	unsigned int		updateCount()						{ return _indirectBindingTable.size(); }
-	void				undefines(std::vector<const char*>& undefines);
-	void				tentativeDefs(std::vector<const char*>& undefines);
+	void				undefines(std::vector<std::string_view>& undefines);
+	void				tentativeDefs(std::vector<std::string_view>& undefines);
 	void				mustPreserveForBitcode(std::unordered_set<const char*>& syms);
 	void				removeDeadAtoms();
-	bool				hasName(const char* name);
-	bool				hasExternalTentativeDefinitions()	{ return _hasExternalTentativeDefinitions; }
+	bool				hasName(const std::string_view& name);
+	bool				hasTentativeDefinitions()	{ return _hasTentativeDefinitions; }
 	byNameIterator		begin()								{ return byNameIterator(_byNameTable.begin(),_indirectBindingTable); }
 	byNameIterator		end()								{ return byNameIterator(_byNameTable.end(),_indirectBindingTable); }
+	const std::vector<const ld::Atom*>& atoms() const { return _indirectBindingTable; }
+
 	void				printStatistics();
 	void				removeDeadUndefs(std::vector<const ld::Atom *>& allAtoms, const std::unordered_set<const ld::Atom*>& keep);
 
@@ -164,7 +172,7 @@ private:
 	ReferencesToSlot				_objc2ClassRefTable;
 	ReferencesToSlot				_pointerToCStringTable;
 	std::vector<const ld::Atom*>&	_indirectBindingTable;
-	bool							_hasExternalTentativeDefinitions;
+	bool							_hasTentativeDefinitions;
 	
     DuplicateSymbols                _duplicateSymbolErrors;
     DuplicateSymbols                _duplicateSymbolWarnings;

@@ -23,6 +23,7 @@
  * @APPLE_LICENSE_HEADER_END@
  */
  
+#define HAVE_LIBDISPATCH 1
 
 #include <stdlib.h>
 #include <sys/types.h>
@@ -42,6 +43,9 @@
 #include <mach-o/fat.h>
 #include <sys/sysctl.h>
 #include <libkern/OSAtomic.h>
+#if HAVE_LIBDISPATCH
+#include <dispatch/dispatch.h>
+#endif
 
 #include <string>
 #include <map>
@@ -63,6 +67,7 @@
 #include "lto_file.h"
 #include "opaque_section_file.h"
 #include "MachOFileAbstraction.hpp"
+#include "Containers.h"
 #include "Snapshot.h"
 #include "FatFile.h"
 
@@ -378,6 +383,7 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	objOpts.internalSDK 		= _options.internalSDK();
 	objOpts.forceHidden			= false;
 	objOpts.platformMismatchesAreWarning = _options.platformMismatchesAreWarning();
+	objOpts.avoidMisalignedPointers  = (_options.architecture() & CPU_ARCH_ABI64) && _options.makeChainedFixups() && _options.dyldLoadsOutput();
 
 	ld::relocatable::File* objResult = mach_o::relocatable::parse(p, len, info.path, info.modTime, info.ordinal, objOpts);
 	if ( objResult != NULL ) {
@@ -423,9 +429,7 @@ ld::File* InputFiles::makeFile(const Options::FileInfo& info, bool indirectDylib
 	::archive::ParserOptions archOpts;
 	archOpts.objOpts				= objOpts;
 	archOpts.objOpts.forceHidden	= info.options.fLoadHidden;
-	archOpts.forceLoadThisArchive	= info.options.fForceLoad;
-	archOpts.forceLoadAll			= _options.fullyLoadArchives();
-	archOpts.forceLoadObjC			= _options.loadAllObjcObjectsFromArchives();
+	archOpts.loadMode				= info.options.fStaticLibMode;
 	archOpts.objcABI2				= _options.objCABIVersion2POverride();
 	archOpts.verboseLoad			= _options.whyLoad();
 	archOpts.logAllFiles			= _options.logAllFiles();
@@ -686,7 +690,7 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 	while (! state.unprocessedLinkerOptionLibraries.empty() || ! state.unprocessedLinkerOptionFrameworks.empty()) {
 
 		// process frameworks specified in .o linker options
-		CStringSet newFrameworks = std::move(state.unprocessedLinkerOptionFrameworks);
+		CStringOrderedSet newFrameworks = std::move(state.unprocessedLinkerOptionFrameworks);
 		state.unprocessedLinkerOptionFrameworks.clear();
 		for (const char* frameworkName : newFrameworks) {
 			if ( state.linkerOptionFrameworks.count(frameworkName) )
@@ -696,6 +700,9 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 				if ( ! this->frameworkAlreadyLoaded(info.path, frameworkName) ) {
 					_linkerOptionOrdinal = _linkerOptionOrdinal.nextLinkerOptionOrdinal();
 					info.ordinal = _linkerOptionOrdinal;
+					//<rdar://problem/17787306> -force_load_swift_libs
+					if ( _options.forceLoadSwiftLibs() && isSwiftLib(info.path) )
+						info.options.fStaticLibMode = LibraryOptions::ArchiveLoadMode::forceLoad;
 					ld::File* reader = this->makeFile(info, true);
 					ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(reader);
 					ld::archive::File* archiveReader = dynamic_cast<ld::archive::File*>(reader);
@@ -714,7 +721,7 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 						_searchLibraries.push_back(LibraryInfo(archiveReader));
 						_options.addDependency(Options::depArchive, archiveReader->path());
 						//<rdar://problem/17787306> -force_load_swift_libs
-						if (info.options.fForceLoad) {
+						if ( info.options.fStaticLibMode == LibraryOptions::ArchiveLoadMode::forceLoad ) {
 							archiveReader->forEachAtom(handler);
 						}
 					}
@@ -734,7 +741,7 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 
 		// process libraries specified in .o linker options
 		// fixme optimize with std::move?
-		CStringSet newLibraries = std::move(state.unprocessedLinkerOptionLibraries);
+		CStringOrderedSet newLibraries = std::move(state.unprocessedLinkerOptionLibraries);
 		state.unprocessedLinkerOptionLibraries.clear();
 		for (const char* libName : newLibraries) {
 			if ( state.linkerOptionLibraries.count(libName) )
@@ -744,8 +751,9 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 				if ( ! this->libraryAlreadyLoaded(info.path) ) {
 					_linkerOptionOrdinal = _linkerOptionOrdinal.nextLinkerOptionOrdinal();
 					info.ordinal = _linkerOptionOrdinal;
- 					//<rdar://problem/17787306> -force_load_swift_libs
-					info.options.fForceLoad = _options.forceLoadSwiftLibs() && (strncmp(libName, "swift", 5) == 0);
+					//<rdar://problem/17787306> -force_load_swift_libs
+					if ( _options.forceLoadSwiftLibs() && isSwiftLib(info.path) )
+						info.options.fStaticLibMode = LibraryOptions::ArchiveLoadMode::forceLoad;
 					ld::File* reader = this->makeFile(info, true);
 					ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(reader);
 					ld::archive::File* archiveReader = dynamic_cast<ld::archive::File*>(reader);
@@ -762,7 +770,7 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 						_searchLibraries.push_back(LibraryInfo(archiveReader));
 						_options.addDependency(Options::depArchive, archiveReader->path());
 						//<rdar://problem/17787306> -force_load_swift_libs
-						if (info.options.fForceLoad) {
+						if ( info.options.fStaticLibMode == LibraryOptions::ArchiveLoadMode::forceLoad ) {
 							archiveReader->forEachAtom(handler);
 						}
 					}
@@ -962,6 +970,36 @@ InputFiles::InputFiles(Options& opts)
 		throw "no object files specified";
 
 	_inputFiles.reserve(files.size());
+#if HAVE_LIBDISPATCH
+	_inputFiles.resize(files.size(), nullptr);
+	__block const char* firstError = nullptr;
+	dispatch_apply(files.size(), DISPATCH_APPLY_AUTO, ^(size_t index) {
+		try {
+			_inputFiles[index] = makeFile(files[index], false);
+		}
+		catch (const char *msg) {
+			if ( ((strstr(msg, "architecture") != NULL)  || (strstr(msg, "attempting to link") != NULL)) && !_options.errorOnOtherArchFiles() ) {
+				if ( _options.ignoreOtherArchInputFiles() ) {
+					// ignore, because this is about an architecture not in use
+				}
+				else {
+					warning("ignoring file %s, %s", files[index].path, msg);
+				}
+			}
+			else if ( strstr(msg, "ignoring unexpected") != NULL ) {
+				warning("%s, %s", files[index].path, msg);
+			}
+			else {
+				if ( firstError == nullptr )
+					asprintf((char**)&firstError, "%s file '%s'", msg, files[index].path);
+			}
+			_inputFiles[index] = new IgnoredFile(files[index].path, files[index].modTime, files[index].ordinal, ld::File::Other);
+		}
+	});
+	if ( firstError != nullptr )
+		throw firstError;
+
+#else
 #if HAVE_PTHREADS
 	unsigned int inputFileSlot = 0;
 	_availableInputFiles = 0;
@@ -1012,6 +1050,7 @@ InputFiles::InputFiles(Options& opts)
 	if (_options.pipelineEnabled()) {
 		throwf("pipelined linking not supported on this platform");
 	}
+#endif
 #endif
 }
 
@@ -1144,8 +1183,14 @@ ld::File* InputFiles::addDylib(ld::dylib::File* reader, const Options::FileInfo&
 				}
 			}
 			// remove warning for <rdar://problem/10860629> Same install name for CoreServices and CFNetwork?
-			//if ( !dylibOnCommandLineTwice && !isSymlink )
-			//      warning("dylibs with same install name: %p %s and %p %s", pos->second, pos->second->path(), reader, reader->path());
+			ld::dylib::File* current = pos->second;
+			if ( current->installPathVersionSpecific() && !reader->installPathVersionSpecific() ) {
+				// found renamed dylib first, switch to use real dylib in map
+				_installPathToDylibs[strdup(installPath)] = reader;
+			}
+			else {
+				//warning("dylibs with same install name: %p %s and %p %s", other, other->path(), reader, reader->path());
+			}
 		}
 	}
 	else if ( info.options.fBundleLoader )
@@ -1280,11 +1325,12 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 			case ld::File::Archive:
 			{
 				ld::archive::File* archive = (ld::archive::File*)file;
+				bool forceLoad = info.options.fStaticLibMode == LibraryOptions::ArchiveLoadMode::forceLoad;
 				// <rdar://problem/9740166> force loaded archives should be in LD_TRACE
-				if ( (info.options.fForceLoad || _options.fullyLoadArchives()) && (_options.traceArchives() || _options.traceEmitJSON()) )
+				if ( forceLoad && (_options.traceArchives() || _options.traceEmitJSON()) )
 					logArchive(archive);
 
-				if ( isCompilerSupportLib(info.path) && (info.options.fForceLoad || _options.fullyLoadArchives()) )
+				if ( forceLoad && isCompilerSupportLib(info.path) )
 					state.forceLoadCompilerRT = true;
 
 				_searchLibraries.push_back(LibraryInfo(archive));
@@ -1444,20 +1490,6 @@ bool InputFiles::searchLibraries(const char* name, bool searchDylibs, bool searc
 }
 
 
-bool InputFiles::searchWeakDefInDylib(const char* name) const
-{
-	// search all relevant dylibs to see if any have a weak-def with this name
-	for (InstallNameToDylib::const_iterator it=_installPathToDylibs.begin(); it != _installPathToDylibs.end(); ++it) {
-		ld::dylib::File* dylibFile = it->second;
-		if ( dylibFile->implicitlyLinked() || dylibFile->explicitlyLinked() ) {
-			if ( dylibFile->hasWeakExternals() && dylibFile->hasWeakDefinition(name) ) {
-				return true;
-			}
-		}
-	}
-	return false;
-}
-	
 static bool vectorContains(const std::vector<ld::dylib::File*>& vec, ld::dylib::File* key)
 {
 	return std::find(vec.begin(), vec.end(), key) != vec.end();
@@ -1544,10 +1576,16 @@ void InputFiles::dylibs(ld::Internal& state)
 	
 	// and -bundle_loader
 	state.bundleLoader = _bundleLoader;
+
+	bool skipForPlatform = false;
+	skipForPlatform = _options.platforms().contains(ld::Platform::driverKit) ||
+					  _options.platforms().contains(ld::Platform::sepOS);
+
 	
 	// <rdar://problem/10807040> give an error when -nostdlib is used and libSystem is missing
+	if ( (state.dylibs.size() == 0) && shouldLinkLibSystem && !skipForPlatform
 	// <rdar://problem/75177082> (ld64 should enforce that dylibs and bundles link with libSystem.dylib)
-	if ( (state.dylibs.size() == 0) && shouldLinkLibSystem && !_options.platforms().contains(ld::Platform::driverKit))  {
+		&& !(_options.architecture() == CPU_TYPE_RISCV32))  {
 		// HACK until 39514191 is fixed
 		bool grandfather = false;
 		for (const File* inFile : _inputFiles) {
@@ -1571,7 +1609,7 @@ void InputFiles::dylibs(ld::Internal& state)
 		}
 
 		if ( !grandfather )
-			throw "dynamic main executables must link with libSystem.dylib";
+			throw "dynamic executables or dylibs must link with libSystem.dylib";
 	}
 }
 

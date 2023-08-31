@@ -42,7 +42,7 @@
 #include "Architectures.hpp"
 
 
- __attribute__((noreturn))
+ __attribute__((noreturn, format(printf, 1, 2)))
 void throwf(const char* format, ...) 
 {
 	va_list	list;

@@ -216,17 +216,17 @@ fourteen:
 	# llvm : a14.c b14.c
 	#
 	# echo "verify an used hidden symbol is removed from a dylib"
-	${CC} ${CXXFLAGS} -O4 -dynamiclib a14.c b14.c -o ab14.dylib
+	${CC} ${CXXFLAGS} -O3 -flto -dynamiclib a14.c b14.c -o ab14.dylib
 	${FAIL_IF_BAD_MACHO} ab14.dylib
 	nm -m ab14.dylib | grep _X | ${PASS_IFF_EMPTY}
 
 fifteen:
 	# echo "verify -dead_strip works with hidden symbols"
-	${CC} ${CXXFLAGS} -O4 -Wl,-dead_strip a15.c c15.c -o main15.exe
-	${CC} ${CXXFLAGS} -O4 a15.c c15.c -o main15.exe
+	${CC} ${CXXFLAGS} -O3 -flto -Wl,-dead_strip a15.c c15.c -o main15.exe
+	${CC} ${CXXFLAGS} -O3 -flto a15.c c15.c -o main15.exe
 	${FAIL_IF_BAD_MACHO} main15.exe
-	${CC} ${CXXFLAGS} -O4 -Wl,-dead_strip -dynamiclib a15.c b15.c -o a15.dylib
-	${CC} ${CXXFLAGS} -O4 a15.c b15.c -dynamiclib -o a15.dylib 
+	${CC} ${CXXFLAGS} -O3 -flto -Wl,-dead_strip -dynamiclib a15.c b15.c -o a15.dylib
+	${CC} ${CXXFLAGS} -O3 -flto a15.c b15.c -dynamiclib -o a15.dylib
 	${FAIL_IF_BAD_MACHO} a15.dylib
 	
 sixteen:
@@ -255,8 +255,17 @@ eighteen:
 	nm -nm a18-rkpe.o | grep _func_hidden2 | grep "private external" | ${FAIL_IF_EMPTY}
 	#echo verify ld -r makes hidden symbols internal (except for commons)
 	${LD} -arch ${ARCH} -r a18.o -o a18-r.o
-	#ObjectDump -nm a18-r.o | grep _common_hidden1 | grep " hidden" | ${FAIL_IF_EMPTY}
-	#ObjectDump -nm a18-r.o | grep _func_hidden2 | grep " internal" | ${FAIL_IF_EMPTY}
+	nm -nm a18-r.o | grep _common_hidden1 | grep "private external" | ${FAIL_IF_EMPTY}
+	nm -nm a18-r.o | grep _func_hidden2 | grep "non-external" | ${FAIL_IF_EMPTY}
+	# verify the -r -keep_private_externs behaviour is consistent when not using LTO
+	${CC} ${CCFLAGS} a18.c -c -o a18.o
+	${LD} -arch ${ARCH} -r -keep_private_externs a18.o -o a18-rkpe.o
+	nm -nm a18-rkpe.o | grep _common_hidden1 | grep "private external" | ${FAIL_IF_EMPTY}
+	nm -nm a18-rkpe.o | grep _func_hidden2 | grep "private external" | ${FAIL_IF_EMPTY}
+	# verify the -r behaviour is consistent when not using LTO
+	${LD} -arch ${ARCH} -r a18.o -o a18-r.o
+	nm -nm a18-r.o | grep _common_hidden1 | grep "private external" | ${FAIL_IF_EMPTY}
+	nm -nm a18-r.o | grep _func_hidden2 | grep "non-external" | ${FAIL_IF_EMPTY}
    
 nineteen:
 	#echo verify missing symbol error

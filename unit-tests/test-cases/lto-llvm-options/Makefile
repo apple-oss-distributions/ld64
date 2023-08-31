@@ -24,19 +24,32 @@ TESTROOT = ../..
 include ${TESTROOT}/include/common.makefile
 
 #
-# Check that -mllvm optiions work. Verify --disable-inlining
+# Check that -mllvm optiions work. Verify -O0 in LTO
 # results in foo() not being inlined
 #
-
 run: all
 
+ifeq (${ARCH},i386)
 all:
-	${CC} ${CCFLAGS} -flto main.c -c -o main.o -fvisibility=hidden
+	echo "unsupported arch\nPASS"
+	exit 0
+else
+all:
+	# Verify that foo is not inlined without LTO
+	${CC} ${CCFLAGS} -O1 main.c -c -o main.o -fvisibility=hidden
+	${CC} ${CCFLAGS} main.o -o main
+	nm main | grep  _foo | ${FAIL_IF_EMPTY}
+
+	# Verify foo is inlined with LTO
+	${CC} ${CCFLAGS} -O1 -flto main.c -c -o main.o -fvisibility=hidden
 	${CC} ${CCFLAGS} main.o -o main
 	nm main | grep  _foo | ${FAIL_IF_STDIN}
-	${CC} ${CCFLAGS} main.o -o main2 -fvisibility=hidden -Wl,-mllvm -Wl,--disable-inlining 
+
+	# Verify foo is not inlined with LTO and -O0
+	${CC} ${CCFLAGS} main.o -o main2 -fvisibility=hidden -Wl,-mllvm -Wl,-O0
 	nm main2 | grep  _foo | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
-	
+endif
+
 clean:
 	rm  main  main.o main2

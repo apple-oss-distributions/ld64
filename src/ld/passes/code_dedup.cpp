@@ -330,7 +330,6 @@ void doPass(const Options& opts, ld::Internal& state)
             auto pos = std::find(textAtoms.begin(), textAtoms.end(), masterAtom);
             if ( pos != textAtoms.end() ) {
                 textAtoms.insert(pos, aliasAtom);
-                state.atomToSection[aliasAtom] = textSection;
                 replacementMap[dupAtom] = aliasAtom;
                 (const_cast<ld::Atom*>(dupAtom))->setCoalescedAway();
             }
@@ -380,9 +379,6 @@ void doPass(const Options& opts, ld::Internal& state)
                     return (replacementMap.count(atom) != 0);
                 }),
                 textSection->atoms.end());
-
-   for (auto& entry : replacementMap)
-        state.atomToSection.erase(entry.first);
 
     if ( log ) {
         fprintf(stderr, "atoms after pruning:\n");

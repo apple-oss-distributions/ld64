@@ -46,22 +46,22 @@ all: ${ALL}
 all-mac:
 	${CC} ${CCFLAGS} main.c -o main -undefined dynamic_lookup
 	nm -m main | grep _foo | grep "dynamically looked up" | ${FAIL_IF_EMPTY}
-	${DYLDINFO} -lazy_bind -bind main | grep _foo | grep "flat-namespace" | ${FAIL_IF_EMPTY}
+	${OBJDUMP} --macho --lazy-bind --bind main | grep _foo | grep "flat-namespace" | ${FAIL_IF_EMPTY}
 	${FAIL_IF_BAD_MACHO} main
 
 	${CC} ${CCFLAGS} main.c -o main -Wl,-U,_foo 
 	nm -m main | grep _foo | grep "dynamically looked up" | ${FAIL_IF_EMPTY}
-	${DYLDINFO} -lazy_bind -bind main | grep _foo | grep "flat-namespace" | ${FAIL_IF_EMPTY}
+	${OBJDUMP} --macho --lazy-bind --bind main | grep _foo | grep "flat-namespace" | ${FAIL_IF_EMPTY}
 	${FAIL_IF_BAD_MACHO} main
 
 	${CC} ${CCFLAGS} main.c -o main -flat_namespace -Wl,-U,_foo
 	nm -m main | grep _foo | grep "dynamically looked up" | ${FAIL_IF_STDIN}
-	${DYLDINFO} -lazy_bind -bind main | grep _foo | grep "flat-namespace" | ${FAIL_IF_EMPTY}
+	${OBJDUMP} --macho --lazy-bind --bind main | grep _foo | grep "flat-namespace" | ${FAIL_IF_EMPTY}
 	${FAIL_IF_BAD_MACHO} main
 
-	${CC} ${CCFLAGS} main.c -bundle -o main.bundle -nodefaultlibs -undefined dynamic_lookup 
+	${CC} ${CCFLAGS} main.c -bundle -o main.bundle -nodefaultlibs -lSystem -undefined dynamic_lookup
 	nm -m main.bundle | grep _foo | grep "dynamically looked up" | ${FAIL_IF_EMPTY}
-	${DYLDINFO} -lazy_bind -bind main.bundle | grep _foo | grep "flat-namespace" | ${FAIL_IF_EMPTY}
+	${OBJDUMP} --macho --lazy-bind --bind main.bundle | grep _foo | grep "flat-namespace" | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main.bundle
 
 all-ios:

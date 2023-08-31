@@ -30,6 +30,11 @@ include ${TESTROOT}/include/common.makefile
 
 run: all
 
+# Skip ARM architectures, they don't support LC_UNIXTHREAD.
+ifneq (${ARCH},x86_64)
+all:
+	${PASS_IFF} true
+else
 all:
 	${CXX} ${CCFLAGS} main.cxx other.cxx -dead_strip -o main
 	${FAIL_IF_BAD_MACHO} main
@@ -42,6 +47,7 @@ all:
 	nm main-static | grep ctr | ${FAIL_IF_EMPTY}
 	nm main-static | grep dtr | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main-static
+endif
 
 clean:
 	rm -rf main main-static

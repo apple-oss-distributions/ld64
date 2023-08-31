@@ -43,11 +43,12 @@
 
 #include <vector>
 #include <unordered_set>
+#include <string_view>
 
 #include "Options.h"
 #include "ld.hpp"
 #include "SymbolTable.h"
-
+#include "Containers.h"
 
 namespace ld {
 namespace tool {
@@ -60,11 +61,13 @@ class Resolver : public ld::File::AtomHandler
 public:
 							Resolver(const Options& opts, InputFiles& inputs, ld::Internal& state) 
 								: _options(opts), _inputFiles(inputs), _internal(state), 
-								  _symbolTable(opts, state.indirectBindingTable),
+								  _symbolTable(opts, state.indirectBindingTable, inputs.count()),
 								  _haveLLVMObjs(false),
 								  _completedInitialObjectFiles(false),
 								  _ltoCodeGenFinished(false),
-								  _haveAliases(false), _havellvmProfiling(false) {}
+								  _haveAliases(false), _havellvmProfiling(false),
+								  _printWhyLive(opts.printWhyLive()),
+								  _synthesizeObjcMsgSendStubs(opts.dyldLoadsOutput()) {}
 								
 
 		virtual void		doAtom(const ld::Atom&);
@@ -84,7 +87,13 @@ private:
 	void					buildAtomList();
 	void					addInitialUndefines();
 	void					deadStripOptimize(bool force=false);
-	void					resolveUndefines();
+	template<typename T>
+	void					forEachDeadStripRoot(std::vector<const ld::Atom*>& dontDeadStripIfReferencesLive,
+												 bool force,
+												 T callback);
+	bool					atomIsDeadStripRoot(const ld::Atom*, bool forceDeadStrip) const;
+	void					resolveCurrentUndefines();
+	void					resolveAllUndefines();
 	void					checkUndefines(bool force=false);
 	void					checkDylibSymbolCollisions();
 	void					tentativeOverrideOfDylib(ld::Atom&);
@@ -96,10 +105,11 @@ private:
 	void					linkTimeOptimize();
 	void					convertReferencesToIndirect(const ld::Atom& atom);
 	const ld::Atom*			entryPoint(bool searchArchives);
+	bool					diagnoseAtomsWithUnalignedPointers() const;
 	void					markLive(const ld::Atom& atom, WhyLiveBackChain* previous);
 	bool					isDtraceProbe(ld::Fixup::Kind kind);
-	void					liveUndefines(std::vector<const char*>&);
-	void					remainingUndefines(std::vector<const char*>&);
+	void					liveUndefines(std::vector<std::string_view>&);
+	void					remainingUndefines(std::vector<std::string_view>&);
 	bool					printReferencedBy(const char* name, SymbolTable::IndirectBindingSlot slot);
 	void					tweakWeakness();
 	void					buildArchivesList();
@@ -107,8 +117,6 @@ private:
 	void					dumpAtoms();
 	void					checkChainedFixupsBounds();
 	void					writeDotOutput();
-
-	typedef std::unordered_set<const char*, CStringHash, CStringEquals>  StringSet;
 
 	class NotLive {
 	public:
@@ -128,9 +136,6 @@ private:
 	InputFiles&						_inputFiles;
 	ld::Internal&					_internal;
 	std::vector<const ld::Atom*>	_atoms;
-	std::set<const ld::Atom*>		_deadStripRoots;
-	std::vector<const ld::Atom*>	_dontDeadStripIfReferencesLive;
-	std::vector<const ld::Atom*>	_atomsWithUnresolvedReferences;
 	std::vector<const class AliasAtom*>	_aliasesFromCmdLine;
 	SymbolTable						_symbolTable;
 	bool							_haveLLVMObjs;
@@ -138,6 +143,9 @@ private:
 	bool							_ltoCodeGenFinished;
 	bool							_haveAliases;
 	bool							_havellvmProfiling;
+	bool							_printWhyLive;
+	bool							_synthesizeObjcMsgSendStubs;
+	bool							_needsObjcMsgSendProxy;
 };
 
 

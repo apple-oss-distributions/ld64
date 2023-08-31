@@ -35,7 +35,7 @@ all:
 	${CC} ${CCFLAGS} main.c -c -o main.o
 	${LD} -r main.o -add_linker_option '-framework Foo' -o main2.o 
 	${CC} ${CCFLAGS} main2.o -o main -F.
-	${DYLDINFO} -lazy_bind main | grep _foo | grep Foo | ${FAIL_IF_EMPTY}
+	${DYLDINFO} -lazy_bind -bind main | grep _foo | grep Foo | ${FAIL_IF_EMPTY}
 	${PASS_IFF_GOOD_MACHO} main
 
 clean:
