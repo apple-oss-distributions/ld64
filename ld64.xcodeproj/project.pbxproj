@@ -59,6 +59,7 @@
 		F9849E3610B38EF5009E9878 /* order.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9849E3410B38EF5009E9878 /* order.cpp */; };
 		F984A38210BB4B0D009E9878 /* branch_island.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F984A38010BB4B0D009E9878 /* branch_island.cpp */; };
 		F989D30D106826020014B60C /* OutputFile.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F989D30B106826020014B60C /* OutputFile.cpp */; };
+		F993989226F94A9F0074D515 /* FatFile.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F993989126F942020074D515 /* FatFile.cpp */; };
 		F9A3DDD30ED762E400C590B9 /* PruneTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9A3DDD20ED762E400C590B9 /* PruneTrie.cpp */; };
 		F9A3DE1E0ED7738300C590B9 /* prune_trie.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = F9A3DE0F0ED76D1900C590B9 /* prune_trie.h */; };
 		F9A4DB9110F816FF00BD8423 /* objc.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9A4DB8F10F816FF00BD8423 /* objc.cpp */; };
@@ -291,6 +292,8 @@
 		F989D3AA10684F5B0014B60C /* LinkEdit.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; name = LinkEdit.hpp; path = src/ld/LinkEdit.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F989D44B10694F2E0014B60C /* LinkEditClassic.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; name = LinkEditClassic.hpp; path = src/ld/LinkEditClassic.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F989D7E91072DEC20014B60C /* HeaderAndLoadCommands.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; name = HeaderAndLoadCommands.hpp; path = src/ld/HeaderAndLoadCommands.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F993989026F942020074D515 /* FatFile.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = FatFile.h; path = src/ld/FatFile.h; sourceTree = "<group>"; };
+		F993989126F942020074D515 /* FatFile.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = FatFile.cpp; path = src/ld/FatFile.cpp; sourceTree = "<group>"; };
 		F9A3DDCA0ED762B700C590B9 /* libprunetrie.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libprunetrie.a; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9A3DDD20ED762E400C590B9 /* PruneTrie.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = PruneTrie.cpp; path = src/other/PruneTrie.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9A3DE0F0ED76D1900C590B9 /* prune_trie.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; name = prune_trie.h; path = src/other/prune_trie.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
@@ -567,6 +570,8 @@
 				F989D44B10694F2E0014B60C /* LinkEditClassic.hpp */,
 				F9463C63244E774A009BAA3F /* libcodedirectory.c */,
 				F9463C62244E774A009BAA3F /* libcodedirectory.h */,
+				F993989126F942020074D515 /* FatFile.cpp */,
+				F993989026F942020074D515 /* FatFile.h */,
 				F9CC24131461FB4300A92174 /* code-sign-blobs */,
 				F9AA650B1051BD2B003E3539 /* passes */,
 				F9AA65861051E750003E3539 /* parsers */,
@@ -989,6 +994,7 @@
 				F9AA44DC1294885F00CB8390 /* branch_shim.cpp in Sources */,
 				B3B672421406D42800A376BB /* Snapshot.cpp in Sources */,
 				B028FCF21A9E7C3F00E3584B /* bitcode_bundle.cpp in Sources */,
+				F993989226F94A9F0074D515 /* FatFile.cpp in Sources */,
 				F9CC24191461FB4300A92174 /* blob.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

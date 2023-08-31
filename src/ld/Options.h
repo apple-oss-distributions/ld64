@@ -283,6 +283,7 @@ public:
 	bool						allowSubArchitectureMismatches() const { return fAllowCpuSubtypeMismatches; }
 	bool						enforceDylibSubtypesMatch() const { return fEnforceDylibSubtypesMatch; }
 	bool						warnOnSwiftABIVersionMismatches() const { return fWarnOnSwiftABIVersionMismatches; }
+	bool						warnOnClassROSigningMismatches() const { return fWarnOnClassROSigningMismatches; }
 	bool						forceCpuSubtypeAll() const { return fForceSubtypeAll; }
 	const char*					architectureName() const { return fArchitectureName; }
 	void						setInferredArch(cpu_type_t, cpu_subtype_t subtype);
@@ -327,7 +328,7 @@ public:
 	const std::vector<const char*>&	allowableClients() const { return fAllowableClients; }
 	const char*					clientName() const { return fClientName; }
 	const char*					initFunctionName() const { return fInitFunctionName; }			// only for kDynamicLibrary
-	const char*					dotOutputFile();
+	const char*					dotOutputFile() const;
 	uint64_t					pageZeroSize() const { return fZeroPageSize; }
 	bool						hasCustomStack() const { return (fStackSize != 0); }
 	uint64_t					customStackSize() const { return fStackSize; }
@@ -745,9 +746,11 @@ private:
 	bool								fMakeThreadedStartsSection;
 	bool								fNoEHLabels;
 	bool								fAllowCpuSubtypeMismatches;
-	bool								fAllowCpuSubtypeMismatchesForceOn;
 	bool								fEnforceDylibSubtypesMatch;
+	bool								fAllowCpuSubtypeMismatchesForceOn;
+	bool								fAllowCpuSubtypeMismatchesForceOff;
 	bool								fWarnOnSwiftABIVersionMismatches;
+	bool								fWarnOnClassROSigningMismatches;
 	bool								fUseSimplifiedDylibReExports;
 	bool								fObjCABIVersion2Override;
 	bool								fObjCABIVersion1Override;
