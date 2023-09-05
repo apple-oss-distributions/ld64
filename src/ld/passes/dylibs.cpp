@@ -211,6 +211,82 @@ static void replaceGlueUseOfAuditString(ld::Internal& state, const ld::Atom* org
 	}
 }
 
+static void pathAddTbdExtension(char* path)
+{
+	const std::string_view dylibSuffix = ".dylib";
+	if ( std::string_view sv(path); sv.ends_with(dylibSuffix) )
+		*(path + sv.size() - dylibSuffix.size()) = '\0';
+	strlcat(path, ".tbd", PATH_MAX);
+}
+
+static void auditSoftlink(const ld::Atom* atom, unsigned int atomIndex, std::set<const ld::Atom*>& deadAtoms, const Options& opts, const char* path, ld::Internal::FinalSection& sect, ld::Internal& state, const char* str)
+{
+	for (const char* sdkPath : opts.sdkPaths()) {
+		char fullPath[PATH_MAX];
+		// check to see if there is a symlink in PrivateFrameworks to Frameworks
+		bool symLinkInPF = false;
+		if ( strncmp(path, "/System/Library/PrivateFrameworks/", 34) == 0 ) {
+			strlcpy(fullPath, sdkPath, PATH_MAX);
+			strlcat(fullPath, path, PATH_MAX);
+			char* lastSlash = strrchr(fullPath, '/');
+			*lastSlash = '\0';
+			struct stat statBuffer;
+			if ( ::lstat(fullPath, &statBuffer) == 0 ) {
+				if ( S_ISLNK(statBuffer.st_mode) )
+					symLinkInPF = true;
+			}
+		}
+		strlcpy(fullPath, sdkPath, PATH_MAX);
+		strlcat(fullPath, path, PATH_MAX);
+		if ( fileExists(fullPath) && !symLinkInPF )
+			continue;
+
+		pathAddTbdExtension(fullPath);
+		if ( fileExists(fullPath) && !symLinkInPF )
+			continue;
+
+		char realPath[PATH_MAX];
+		// rdar://93854103 (Suppress "softlinked <framework> is symlink to real framework location" warning for frameworks moved to cryptex)
+		bool skip = ( (realpath(fullPath, realPath) != nullptr) && (strstr(realPath, "/System/Cryptex") != nullptr) );
+		if ( skip )
+			continue;
+
+		if ( symLinkInPF )
+			warning("softlinked '%s' is symlink to real framework location", path);
+		else
+			warning("softlinked '%s' does not exist in SDK", path);
+		// see if switching to /S/L/Frameworks helps (most common error)
+		if ( strncmp(path, "/System/Library/Frameworks/", 27) != 0 ) {
+			if ( const char* s = strstr(path, "Frameworks/") ) {
+				char altPath[PATH_MAX];
+				strlcpy(altPath, sdkPath, PATH_MAX);
+				strlcat(altPath, "/System/Library/Frameworks/", PATH_MAX);
+				strlcat(altPath, &s[11], PATH_MAX);
+				bool foundAlt = fileExists(altPath);
+				if ( !foundAlt ) {
+					pathAddTbdExtension(altPath);
+					foundAlt = fileExists(altPath);
+				}
+				if ( foundAlt ) {
+					char altStr[PATH_MAX];
+					strncpy(altStr, str, 16);
+					strcpy(&altStr[16], "/System/Library/Frameworks/");
+					strcat(altStr, &s[11]);
+					// switch audit atom to use new path
+					const ld::Atom* newAtom = new SoftLinkAuditAtom(atom, altStr);
+					sect.atoms[atomIndex] = newAtom;
+					// switch dlopen string to use new path
+					replaceStringLiteral(state, path, &altStr[16], deadAtoms);
+					// switch paths array to use new path
+					replaceAuditStringLiteral(state, str, newAtom);
+					// if this was built for older OS, _sl_dlopen glue is inlined
+					replaceGlueUseOfAuditString(state, atom, newAtom);
+					return;
+				}
+			}
+		}
+	}
+}
 
 void doPass(const Options& opts, ld::Internal& state)
 {
@@ -357,67 +433,7 @@ void doPass(const Options& opts, ld::Internal& state)
 					if ( strncmp(&str[11], "path:", 5) == 0 ) {
 						const char* path = &str[16];
 						// see if softlink path actually exists in SDK
-						for (const char* sdkPath : opts.sdkPaths()) {
-							char fullPath[PATH_MAX];
-							// check to see if there is a symlink in PrivateFrameworks to Frameworks
-							bool symLinkInPF = false;
-							if ( strncmp(path, "/System/Library/PrivateFrameworks/", 34) == 0 ) {
-								strlcpy(fullPath, sdkPath, PATH_MAX);
-								strlcat(fullPath, path, PATH_MAX);
-								char* lastSlash = strrchr(fullPath, '/');
-								*lastSlash = '\0';
-								struct stat statBuffer;
-								if ( ::lstat(fullPath, &statBuffer) == 0 ) {
-									if ( S_ISLNK(statBuffer.st_mode) )
-										symLinkInPF = true;
-								}
-							}
-							strlcpy(fullPath, sdkPath, PATH_MAX);
-							strlcat(fullPath, path, PATH_MAX);
-							if ( !fileExists(fullPath) || symLinkInPF ) {
-								strlcat(fullPath, ".tbd", PATH_MAX);
-								if ( !fileExists(fullPath) || symLinkInPF ) {
-									char realPath[PATH_MAX];
-									// rdar://93854103 (Suppress "softlinked <framework> is symlink to real framework location" warning for frameworks moved to cryptex)
-									bool skip = ( (realpath(fullPath, realPath) != nullptr) && (strstr(realPath, "/System/Cryptex") != nullptr) );
-									if ( !skip ) {
-										if ( symLinkInPF )
-											warning("softlinked '%s' is symlink to real framework location", path);
-										else
-											warning("softlinked '%s' does not exist in SDK", path);
-										// see if switching to /S/L/Frameworks helps (most common error)
-										if ( strncmp(path, "/System/Library/Frameworks/", 27) != 0 ) {
-											if ( const char* s = strstr(path, "Frameworks/") ) {
-												char altPath[PATH_MAX];
-												strlcpy(altPath, sdkPath, PATH_MAX);
-												strlcat(altPath, "/System/Library/Frameworks/", PATH_MAX);
-												strlcat(altPath, &s[11], PATH_MAX);
-												bool foundAlt = fileExists(altPath);
-												if ( !foundAlt ) {
-													strlcat(altPath, ".tbd", PATH_MAX);
-													foundAlt = fileExists(altPath);
-												}
-												if ( foundAlt ) {
-													char altStr[PATH_MAX];
-													strncpy(altStr, str, 16);
-													strcpy(&altStr[16], "/System/Library/Frameworks/");
-													strcat(altStr, &s[11]);
-													// switch audit atom to use new path
-													const ld::Atom* newAtom = new SoftLinkAuditAtom(atom, altStr);
-													sect->atoms[atomIndex] = newAtom;
-													// switch dlopen string to use new path
-													replaceStringLiteral(state, path, &altStr[16], deadAtoms);
-													// switch paths array to use new path
-													replaceAuditStringLiteral(state, str, newAtom);
-													// if this was built for older OS, _sl_dlopen glue is inlined
-													replaceGlueUseOfAuditString(state, atom, newAtom);
-												}
-											}
-										}
-									}
-								}
-							}
-						}
+						auditSoftlink(atom, atomIndex, deadAtoms, opts, path, *sect, state, str);
 					}
 				}
 				++atomIndex;

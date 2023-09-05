@@ -3,7 +3,7 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 46;
+	objectVersion = 54;
 	objects = {
 
 /* Begin PBXAggregateTarget section */
@@ -56,7 +56,7 @@
 		F933E3D9092E855B0083EAC8 /* ObjectDump.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F971EED706D5AD240041D381 /* ObjectDump.cpp */; };
 		F93CB248116E69EB003233B8 /* tlvp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F93CB246116E69EB003233B8 /* tlvp.cpp */; };
 		F9463C64244E774B009BAA3F /* libcodedirectory.c in Sources */ = {isa = PBXBuildFile; fileRef = F9463C63244E774A009BAA3F /* libcodedirectory.c */; };
-		F97F5029070D0BB200B9FCD7 /* ld.1 in copy man page */ = {isa = PBXBuildFile; fileRef = F97F5028070D0BB200B9FCD7 /* ld.1 */; };
+		F97F5029070D0BB200B9FCD7 /* ld-classic.1 in copy man page */ = {isa = PBXBuildFile; fileRef = F97F5028070D0BB200B9FCD7 /* ld-classic.1 */; };
 		F98498A310AE2159009E9878 /* compact_unwind.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9BA963310A2545C0097A440 /* compact_unwind.cpp */; };
 		F98498A410AE2159009E9878 /* got.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9AB1063107D380700E54C9E /* got.cpp */; };
 		F9849E3610B38EF5009E9878 /* order.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9849E3410B38EF5009E9878 /* order.cpp */; };
@@ -193,7 +193,7 @@
 			dstPath = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/share/man/man1";
 			dstSubfolderSpec = 0;
 			files = (
-				F97F5029070D0BB200B9FCD7 /* ld.1 in copy man page */,
+				F97F5029070D0BB200B9FCD7 /* ld-classic.1 in copy man page */,
 			);
 			name = "copy man page";
 			runOnlyForDeploymentPostprocessing = 1;
@@ -244,7 +244,7 @@
 		C1ED154723C934E800748423 /* objc_constants.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = objc_constants.h; sourceTree = "<group>"; };
 		DE3EC65C240ECBE4008CD445 /* ResponseFiles.cpp */ = {isa = PBXFileReference; indentWidth = 2; lastKnownFileType = sourcecode.cpp.cpp; name = ResponseFiles.cpp; path = src/ld/ResponseFiles.cpp; sourceTree = "<group>"; };
 		DE3EC65D240ECBE4008CD445 /* ResponseFiles.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = ResponseFiles.h; path = src/ld/ResponseFiles.h; sourceTree = "<group>"; };
-		F9023C3906D5A23E001BBF46 /* ld */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ld; sourceTree = BUILT_PRODUCTS_DIR; };
+		F9023C3906D5A23E001BBF46 /* ld-classic */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = "ld-classic"; sourceTree = BUILT_PRODUCTS_DIR; };
 		F9023C3F06D5A254001BBF46 /* ld.cpp */ = {isa = PBXFileReference; fileEncoding = 30; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ld.cpp; path = src/ld/ld.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F91B7B0318987D5F0099486F /* AddressSpace.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = AddressSpace.hpp; sourceTree = "<group>"; };
 		F91B7B0418987D5F0099486F /* DwarfInstructions.hpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; path = DwarfInstructions.hpp; sourceTree = "<group>"; };
@@ -263,7 +263,7 @@
 		F9556DEF27A25CDB00E4D054 /* libcorecrypto.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libcorecrypto.tbd; path = usr/lib/system/libcorecrypto.tbd; sourceTree = SDKROOT; };
 		F971EED306D5ACF60041D381 /* ObjectDump */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ObjectDump; sourceTree = BUILT_PRODUCTS_DIR; };
 		F971EED706D5AD240041D381 /* ObjectDump.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ObjectDump.cpp; path = src/other/ObjectDump.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		F97F5028070D0BB200B9FCD7 /* ld.1 */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text.man; name = ld.1; path = doc/man/man1/ld.1; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
+		F97F5028070D0BB200B9FCD7 /* ld-classic.1 */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text.man; name = "ld-classic.1"; path = "doc/man/man1/ld-classic.1"; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9849E3410B38EF5009E9878 /* order.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = order.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9849E3510B38EF5009E9878 /* order.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = order.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F984A13B10B614CF009E9878 /* stub_arm_classic.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; path = stub_arm_classic.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
@@ -416,7 +416,7 @@
 		F9023C3A06D5A23E001BBF46 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				F9023C3906D5A23E001BBF46 /* ld */,
+				F9023C3906D5A23E001BBF46 /* ld-classic */,
 				F971EED306D5ACF60041D381 /* ObjectDump */,
 				F9EA72CB097454A6008B4F1D /* machocheck */,
 				F9B670080DDA176100E6D0DA /* unwinddump */,
@@ -531,7 +531,7 @@
 		F9B8137E0EC2651200F94C13 /* doc */ = {
 			isa = PBXGroup;
 			children = (
-				F97F5028070D0BB200B9FCD7 /* ld.1 */,
+				F97F5028070D0BB200B9FCD7 /* ld-classic.1 */,
 				F9C12E9F0ED63DB1005BC69D /* dyldinfo.1 */,
 				F9B813810EC2653000F94C13 /* unwinddump.1 */,
 			);
@@ -659,7 +659,7 @@
 			);
 			name = ld;
 			productName = ld64;
-			productReference = F9023C3906D5A23E001BBF46 /* ld */;
+			productReference = F9023C3906D5A23E001BBF46 /* ld-classic */;
 			productType = "com.apple.product-type.tool";
 		};
 		F971EED206D5ACF60041D381 /* ObjectDump */ = {
@@ -737,6 +737,7 @@
 		F9023C3006D5A227001BBF46 /* Project object */ = {
 			isa = PBXProject;
 			attributes = {
+				BuildIndependentTargetsInParallel = YES;
 				DefaultBuildSystemTypeForWorkspace = Latest;
 				LastUpgradeCheck = 1200;
 				ORGANIZATIONNAME = "Apple Inc.";
@@ -799,8 +800,8 @@
 				"$(DERIVED_FILE_DIR)/compile_stubs.h",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/csh;
-			shellScript = "echo \"static const char *compile_stubs = \" > $DERIVED_FILE_DIR/compile_stubs.h\ncat compile_stubs | sed s/\\\"/\\\\\\\\\\\"/g | sed s/^/\\\"/ | sed s/\\$/\\\\\\\\n\\\"/ >> $DERIVED_FILE_DIR/compile_stubs.h\necho \";\" >> $DERIVED_FILE_DIR/compile_stubs.h";
+			shellPath = /bin/sh;
+			shellScript = "echo \"static const char *compile_stubs = \" > $DERIVED_FILE_DIR/compile_stubs.h\ncat compile_stubs | sed s/\\\"/\\\\\\\\\\\"/g | sed s/^/\\\"/ | sed s/\\$/\\\\\\\\n\\\"/ >> $DERIVED_FILE_DIR/compile_stubs.h\necho \";\" >> $DERIVED_FILE_DIR/compile_stubs.h\n";
 			showEnvVarsInLog = 0;
 		};
 		F94E0A911CAC6B870092DC75 /* Add libtapi symlink */ = {
@@ -812,10 +813,13 @@
 			);
 			name = "Add libtapi symlink";
 			outputPaths = (
+				"${BUILD_DIR}/lib/libLTO.dylib",
+				"${BUILD_DIR}/lib/libtapi.dylib",
+				"${BUILD_DIR}/lib/libswiftDemangle.dylib",
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"${CONFIGURATION}\" == \"Debug\" ]; then\n    cd \"${TARGET_BUILD_DIR}\"\n    cd ..\n    mkdir -p lib\n    cd lib\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libLTO.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libtapi.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib\"\nfi\n\n";
+			shellScript = "if [ \"${CONFIGURATION}\" == \"Debug\" ]; then\n    cd \"${BUILD_DIR}\"\n    mkdir -p lib\n    cd lib\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libLTO.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libtapi.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib\"\nfi\n\n";
 			showEnvVarsInLog = 0;
 		};
 		F96D5367094A2754008E9EE8 /* ShellScript */ = {
@@ -911,7 +915,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
 			shellScript = "${SRCROOT}/src/create_configure\n";
-			showEnvVarsInLog = 0;
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -1215,11 +1218,11 @@
 					"-ltapi",
 					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-stack_size,0x10000000",
+					"-Wl,-client_name,ld",
 				);
-				PRODUCT_NAME = ld;
+				PRODUCT_NAME = "ld-classic";
 				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
-				TOOLCHAINS = default;
 				VERSIONING_SYSTEM = "apple-generic";
 				WARNING_CFLAGS = (
 					"-Wall",
@@ -1295,13 +1298,13 @@
 					"-ltapi",
 					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-stack_size,0x02000000",
+					"-Wl,-client_name,ld",
 				);
-				PRODUCT_NAME = ld;
+				PRODUCT_NAME = "ld-classic";
 				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
-				TOOLCHAINS = default;
 				VERSIONING_SYSTEM = "apple-generic";
 				WARNING_CFLAGS = (
 					"-Wall",
@@ -1398,6 +1401,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = (
+					arm64,
+					x86_64,
+				);
 				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
@@ -1442,6 +1449,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = (
+					arm64,
+					x86_64,
+				);
 				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
@@ -1504,6 +1515,10 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = (
+					arm64,
+					x86_64,
+				);
 				CLANG_ANALYZER_LOCALIZABILITY_NONLOCALIZED = YES;
 				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
 				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
@@ -1618,13 +1633,13 @@
 					"-ltapi",
 					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-stack_size,0x02000000",
+					"-Wl,-client_name,ld",
 				);
-				PRODUCT_NAME = ld;
+				PRODUCT_NAME = "ld-classic";
 				SDKROOT = macosx.internal;
 				SECTORDER_FLAGS = "";
 				STRIP_INSTALLED_PRODUCT = YES;
 				STRIP_STYLE = debugging;
-				TOOLCHAINS = default;
 				VERSIONING_SYSTEM = "apple-generic";
 				WARNING_CFLAGS = (
 					"-Wall",

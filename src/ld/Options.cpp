@@ -35,6 +35,7 @@
 #include <spawn.h>
 #include <Availability.h>
 #include <tapi/tapi.h>
+#include <mach-o/dyld_priv.h>
 
 #include <algorithm>
 #include <vector>
@@ -66,12 +67,12 @@ static char crashreporterBuffer[crashreporterBufferSize];
 #if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 	#include <CrashReporterClient.h>
 	// hack until ld does not need to build on 10.6 anymore
-    struct crashreporter_annotations_t gCRAnnotations 
-        __attribute__((section("__DATA," CRASHREPORTER_ANNOTATIONS_SECTION))) 
+    struct crashreporter_annotations_t gCRAnnotations
+        __attribute__((section("__DATA," CRASHREPORTER_ANNOTATIONS_SECTION)))
         = { CRASHREPORTER_ANNOTATIONS_VERSION, 0, 0, 0, 0, 0, 0 };
 #else
 	extern "C" char* __crashreporter_info__;
-	__attribute__((used)) 
+	__attribute__((used))
 	char* __crashreporter_info__ = crashreporterBuffer;
 #endif
 
@@ -217,7 +218,7 @@ Options::Options(int argc, const char* argv[])
 	  fUnalignedPointerTreatment(kUnalignedPointerIgnore), fPreferTAPIFile(false), fOSOPrefixPath(NULL), fImageSuffix(NULL)
 {
 	this->expandResponseFiles(argc, argv);
-	this->checkForClassic(argc, argv);
+	this->setupCrashReportInfo(argc, argv);
 	this->parsePreCommandLineEnvironmentSettings();
 	this->parse(argc, argv);
 	this->parsePostCommandLineEnvironmentSettings();
@@ -2614,6 +2615,13 @@ void Options::parse(int argc, const char* argv[])
 						   fOutputFile);
 				}
 			}
+			else if ( strcmp(arg, "-ld_classic") == 0 ) {
+				// force use of ld-classic - nothing to do, because ld is the driver now
+			}
+			else if ( strcmp(arg, "-ld64") == 0 ) {
+				// force use of ld-classic - nothing to do, because ld is the driver now
+				warning("-ld64 is deprecated, use -ld_classic instead");
+			}
 			else if ( strncmp(arg, "-lazy-l", 7) == 0 ) {
                 snapshotArgCount = 0;
 				FileInfo info = findLibrary(&arg[7], true);
@@ -2737,6 +2745,7 @@ void Options::parse(int argc, const char* argv[])
 			// in the namespace to be flat.
 			// ??? Deprecate
 			else if ( strcmp(arg, "-force_flat_namespace") == 0 ) {
+				warning("-force_flat_namespace is no longer supported, using -flat_namespace instead");
 				fNameSpace = kForceFlatNameSpace;
 				cannotBeUsedWithBitcode(arg);
 			}
@@ -4214,6 +4223,11 @@ void Options::parse(int argc, const char* argv[])
 			else if ( strcmp(arg, "-reproducible") == 0 ) {
 				fReproducible = true;
 			}
+			else if ( strncmp(arg, "-O", 2) == 0 ) { // Note: must be after "-ObjC"
+				// for now the only variant ld64 handles is -O0 which turns off deduplication pass
+				if ( strcmp(arg, "-O0") == 0 )
+					fDeDupe = false;
+			}
             else if (strcmp(arg, "-objc_class_ro_signing_mismatch") == 0) {
                 const char* setting = checkForNullArgument(arg, argv[++i]);
                 fWarnOnClassROSigningMismatches = !strcasecmp(setting, "warn");
@@ -4331,8 +4345,8 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 			addStandardLibraryDirectories = false;
 		else if ( strcmp(argv[i], "-v") == 0 ) {
 			fVerbose = true;
-			extern const char ldVersionString[];
-			fprintf(stderr, "%s", ldVersionString);
+			extern const char ld_classicVersionString[];
+			fprintf(stderr, "%s", ld_classicVersionString);
 			fprintf(stderr, "BUILD "  __TIME__ " "  __DATE__"\n");
 			fprintf(stderr, "configured to support archs: %s\n", ALL_SUPPORTED_ARCHS);
 			 // if only -v specified, exit cleanly
@@ -4347,7 +4361,7 @@ void Options::buildSearchPaths(int argc, const char* argv[])
 		}
 		else if ( strcmp(argv[i], "-version_details") == 0 ) {
 			fVerbose = true;
-			extern const char ldVersionString[];
+			extern const char ld_classicVersionString[];
 			fprintf(stdout, "{\n");
 			fprintf(stdout, "\t\"version\": \"%s\",\n", STRINGIFY(LD64_VERSION_NUM));
 			fprintf(stdout, "\t\"architectures\": [\n");
@@ -5043,7 +5057,13 @@ void Options::reconfigureDefaults()
 	}
 
 	// Use V2 shared cache info when targeting newer OSs and archs
-	if ( fSharedRegionEligible && (platforms().minOS(ld::supportsSplitSegV2) || (fArchitecture == CPU_TYPE_ARM64)) ) {
+	if ( fSharedRegionEligible
+		&& (platforms().minOS(ld::supportsSplitSegV2)
+			|| (fArchitecture == CPU_TYPE_ARM64)
+#if SUPPORT_ARCH_arm64_32
+			|| (fArchitecture == CPU_TYPE_ARM64_32)
+#endif
+			) ) {
 		fSharedRegionEncodingV2 = true;
 		if ( fSharedRegionEncodingV2 && (fArchitecture == CPU_TYPE_I386) ) {
 			// Disable V2 on i386 as its not qualififed yet.
@@ -5624,6 +5644,8 @@ void Options::reconfigureDefaults()
 	// Simulator defaults to PIE
 	if ( targetIOSSimulator() && (fOutputKind == kDynamicExecutable) )
 		fPositionIndependentExecutable = true;
+
+
 
 	// -no_pie anywhere on command line disable PIE
 	if ( fDisablePositionIndependentExecutable )
@@ -6802,21 +6824,11 @@ void Options::expandResponseFiles(int& argc, const char**& argv)
 	}
 }
 
-void Options::checkForClassic(int argc, const char* argv[])
+
+void Options::setupCrashReportInfo(int argc, const char* argv[])
 {
-	// scan options
-	bool archFound = false;
-	bool staticFound = false;
-	bool dtraceFound = false;
-	bool kextFound = false;
-	bool rFound = false;
-	bool creatingMachKernel = false;
-	bool newLinker = false;
-	
 	// build command line buffer in case ld crashes
-#if __MAC_OS_X_VERSION_MIN_REQUIRED >= 1070
 	CRSetCrashLogMessage(crashreporterBuffer);
-#endif
 	const char* srcRoot = getenv("SRCROOT");
 	if ( srcRoot != NULL ) {
 		strlcpy(crashreporterBuffer, "SRCROOT=", crashreporterBufferSize);
@@ -6832,97 +6844,7 @@ void Options::checkForClassic(int argc, const char* argv[])
 		strlcat(crashreporterBuffer, argv[i], crashreporterBufferSize);
 		strlcat(crashreporterBuffer, " ", crashreporterBufferSize);
 	}
-
-	for(int i=0; i < argc; ++i) {
-		const char* arg = argv[i];
-		if ( arg[0] == '-' ) {
-			if ( strcmp(arg, "-arch") == 0 ) {
-				parseArch(argv[++i]);
-				archFound = true;
-			}
-			else if ( strcmp(arg, "-static") == 0 ) {
-				staticFound = true;
-			}
-			else if ( strcmp(arg, "-kext") == 0 ) {
-				kextFound = true;
-			}
-			else if ( strcmp(arg, "-dtrace") == 0 ) {
-				dtraceFound = true;
-			}
-			else if ( strcmp(arg, "-r") == 0 ) {
-				rFound = true;
-			}
-			else if ( strcmp(arg, "-new_linker") == 0 ) {
-				newLinker = true;
-			}
-			else if ( strcmp(arg, "-classic_linker") == 0 ) {
-				// ld_classic does not understand this option, so remove it
-				for(int j=i; j < argc; ++j)
-					argv[j] = argv[j+1];
-				warning("using ld_classic");
-				this->gotoClassicLinker(argc-1, argv);
-			}
-			else if ( strcmp(arg, "-o") == 0 ) {
-				const char* outfile = argv[++i];
-				if ( (outfile != NULL) && (strstr(outfile, "/mach_kernel") != NULL) )
-					creatingMachKernel = true;
-			}
-		}
-	}
 }
-
-void Options::gotoClassicLinker(int argc, const char* argv[])
-{
-	argv[0] = "ld_classic";
-	// ld_classic does not support -iphoneos_version_min, so change
-	for(int j=0; j < argc; ++j) {
-		if ( (strcmp(argv[j], "-iphoneos_version_min") == 0) || (strcmp(argv[j], "-ios_version_min") == 0) ) {
-			argv[j] = "-macosx_version_min";
-			if ( j < argc-1 )
-				argv[j+1] = "10.5";
-			break;
-		}
-	}
-	// ld classic does not understand -kext (change to -static -r)
-	for(int j=0; j < argc; ++j) {
-		if ( strcmp(argv[j], "-kext") == 0) 
-			argv[j] = "-r";
-		else if ( strcmp(argv[j], "-dynamic") == 0) 
-			argv[j] = "-static";
-	}
-	// ld classic does not understand -demangle 
-	for(int j=0; j < argc; ++j) {
-		if ( strcmp(argv[j], "-demangle") == 0) 
-			argv[j] = "-noprebind";
-	}
-	// in -v mode, print command line passed to ld_classic
-	for(int i=0; i < argc; ++i) {
-		if ( strcmp(argv[i], "-v") == 0 ) {
-			for(int j=0; j < argc; ++j)
-				printf("%s ", argv[j]);
-			printf("\n");
-			break;
-		}
-	}
-	char rawPath[PATH_MAX];
-	char path[PATH_MAX];
-	uint32_t bufSize = PATH_MAX;
-	if ( _NSGetExecutablePath(rawPath, &bufSize) != -1 ) {
-		if ( realpath(rawPath, path) != NULL ) {
-			char* lastSlash = strrchr(path, '/');
-			if ( lastSlash != NULL ) {
-				strcpy(lastSlash+1, "ld_classic");
-				argv[0] = path;
-				execvp(path, (char**)argv);
-			}
-		}
-	}
-	// in case of error in above, try searching for ld_classic via PATH
-	execvp(argv[0], (char**)argv);
-	fprintf(stderr, "can't exec ld_classic\n");
-	exit(1);
-}
-
 
 // Note, returned string buffer is own by this function.
 // It should not be freed
@@ -6960,8 +6882,8 @@ void Options::writeDependencyInfo() const
 	uint8_t version = depLinkerVersion;
 	if ( fwrite(&version, 1, 1, file) != 1 )
 		throwf("write() to -dependency_info failed, errno=%d", errno);
-	extern const char ldVersionString[];
-	if ( fwrite(ldVersionString, strlen(ldVersionString)+1, 1, file) != 1 )
+	extern const char ld_classicVersionString[];
+	if ( fwrite(ld_classicVersionString, strlen(ld_classicVersionString)+1, 1, file) != 1 )
 		throwf("write() to -dependency_info failed, errno=%d", errno);
 
 	// write each dependency

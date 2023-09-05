@@ -1152,10 +1152,20 @@ void InternalState::setSectionSizesAndAlignments()
 						offset = (offset + 4095) & (-4096); // round up to end of page
 					}
 				}
-				if ( (atom->scope() == ld::Atom::scopeGlobal) 
+				auto isHiddenAutoHide = [&]() {
+					// <rdar://problem/6783167> support auto hidden weak symbols: .weak_def_can_be_hidden
+					if ( atom->autoHide() && (_options.outputKind() != Options::kObjectFile) ) {
+						// adding auto-hide symbol to .exp file should keep it global
+						if ( !_options.hasExportMaskList() || !_options.shouldExport(atom->name()) )
+							return true;
+					}
+					return false;
+				};
+				if ( (atom->scope() == ld::Atom::scopeGlobal)
 					&& (atom->definition() == ld::Atom::definitionRegular) 
-					&& (atom->combine() == ld::Atom::combineByName) 
-					&& ((atom->symbolTableInclusion() == ld::Atom::symbolTableIn) 
+					&& (atom->combine() == ld::Atom::combineByName)
+					&& !isHiddenAutoHide()
+					&& ((atom->symbolTableInclusion() == ld::Atom::symbolTableIn)
 					 || (atom->symbolTableInclusion() == ld::Atom::symbolTableInAndNeverStrip)) ) {
 						this->hasWeakExternalSymbols = true;
 						if ( _options.warnWeakExports()	) 

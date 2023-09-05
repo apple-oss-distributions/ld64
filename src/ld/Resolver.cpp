@@ -200,6 +200,12 @@ SectionBoundaryAtom* SectionBoundaryAtom::makeSectionBoundaryAtom(const char* na
 		sectType = ld::Section::typeChainStarts;
 	else if (!strcmp(segName, "__TEXT") && !strcmp(sectionName, "__rebase_info"))
 		sectType = ld::Section::typeRebaseRLE;
+	else if (!strcmp(segName, "__DATA") && !strcmp(sectionName, "__thread_bss"))
+		sectType = ld::Section::typeTLVZeroFill;
+	else if (!strcmp(segName, "__DATA") && !strcmp(sectionName, "__thread_data"))
+		sectType = ld::Section::typeTLVInitialValues;
+	else if (!strcmp(segName, "__DATA") && !strcmp(sectionName, "__thread_vars"))
+		sectType = ld::Section::typeTLVDefs;
 	else if (!strcmp(segName, "__DATA") && !strcmp(sectionName, "__zerofill")) {
 		if ( opts.mergeZeroFill() )
 			sectType = ld::Section::typeZeroFill;
@@ -682,9 +688,6 @@ void Resolver::doFile(const ld::File& file)
 			}
 		}
 
-		if ( _options.checkDylibsAreAppExtensionSafe() && !dylibFile->appExtensionSafe() ) {
-			warning("linking against a dylib which is not safe for use in application extensions: %s", file.path());
-		}
 		const char* depInstallName = dylibFile->installPath();
 		// <rdar://problem/17229513> embedded frameworks are only supported on iOS 8 and later
 		if ( (depInstallName != NULL) && (depInstallName[0] != '/') ) {
@@ -1568,6 +1571,35 @@ bool Resolver::printReferencedBy(const char* name, SymbolTable::IndirectBindingS
 	return (foundReferenceCount != 0);
 }
 
+void Resolver::removeUnusedAliases(std::vector<std::string_view>& unresolvableUndefines)
+{
+	if ( !_options.haveCmdLineAliases() )
+		return;
+
+	UndefinedAlias undefinedAliases(_options);
+	auto isUnusedAlias = ^(std::string_view& name) {
+		if ( !undefinedAliases(name) )
+			return false;
+
+		// Check if this alias has uses
+		unsigned int slot = _symbolTable.findSlotForName(name);
+		for (std::vector<const ld::Atom*>::const_iterator it=_atoms.begin(); it != _atoms.end(); ++it) {
+			const ld::Atom* atom = *it;
+			for (ld::Fixup::iterator fit=atom->fixupsBegin(); fit != atom->fixupsEnd(); ++fit) {
+				if ( fit->binding == ld::Fixup::bindingsIndirectlyBound ) {
+					if ( fit->u.bindingIndex == slot )
+						return false;
+				}
+			}
+		}
+
+		return true;
+	};
+
+	unresolvableUndefines.erase(std::remove_if(unresolvableUndefines.begin(), unresolvableUndefines.end(),
+											   isUnusedAlias), unresolvableUndefines.end());
+}
+
 void Resolver::checkUndefines(bool force)
 {
 	// when using LTO, undefines are checked after bitcode is optimized
@@ -1605,9 +1637,7 @@ void Resolver::checkUndefines(bool force)
 	}
 
 	// hack to temporarily make missing aliases a warning
-	if ( _options.haveCmdLineAliases() ) {
-		unresolvableUndefines.erase(std::remove_if(unresolvableUndefines.begin(), unresolvableUndefines.end(), UndefinedAlias(_options)), unresolvableUndefines.end());
-	}
+	removeUnusedAliases(unresolvableUndefines);
 	
 	const int unresolvableCount = unresolvableUndefines.size();
 	int unresolvableExportsCount = 0;

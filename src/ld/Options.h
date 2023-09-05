@@ -381,7 +381,7 @@ public:
 	bool						pauseAtEnd() { return fPause; }
 	bool						printStatistics() const { return fStatistics; }
 	bool						printArchPrefix() const { return fMessagesPrefixedWithArchitecture; }
-	void						gotoClassicLinker(int argc, const char* argv[]);
+	void						gotoPrimeLinker(int argc, const char* argv[]);
 	bool						sharedRegionEligible() const { return fSharedRegionEligible; }
 	bool						printOrderFileStatistics() const { return fPrintOrderFileStatistics; }
 	const char*					orderFilePath() const { return fOrderFilePath; }
@@ -637,7 +637,7 @@ private:
 	Treatment					parseTreatment(const char* treatment);
 	void						reconfigureDefaults();
 	void						expandResponseFiles(int& argc, const char**& argv);
-	void						checkForClassic(int argc, const char* argv[]);
+	void						setupCrashReportInfo(int argc, const char* argv[]);
 	void						parseSegAddrTable(const char* segAddrPath, const char* installPath);
 	void						addLibrary(const FileInfo& info);
 	void						warnObsolete(const char* arg);

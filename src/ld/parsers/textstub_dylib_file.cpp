@@ -197,9 +197,21 @@ void File<A>::init(tapi::LinkerInterfaceFile* file, const Options *opts, bool bu
 		this->_allowableClients.emplace_back(strdup(client.c_str()));
 
 	ld::VersionSet lcPlatforms;
-	for (const auto &platform : file->getPlatformSet())
-		lcPlatforms.insert((ld::Platform)platform);
-
+#if (TAPI_API_VERSION_MAJOR == 2 && TAPI_API_VERSION_MINOR >= 2)
+	if (tapi::APIVersion::isAtLeast(2, 2)) {
+		for (const auto &rpath : file->rPaths())
+			this->_rpaths.emplace_back(rpath.c_str());
+		
+		for (const auto &[platform, minOS] : file->getPlatformsAndMinDeployment()) {
+			ld::PlatformVersion pv((ld::Platform)platform, minOS);
+			lcPlatforms.insert(pv);
+		}
+	} else
+#endif
+	{
+		for (const auto &platform : file->getPlatformSet())
+			lcPlatforms.insert((ld::Platform)platform);
+	}
 
 	// check cross-linking
 	cmdLinePlatforms.checkDylibCrosslink(lcPlatforms, path, ".tbd", internalSDK, indirectDylib, usingBitcode, _isUnzipperedTwin, _dylibInstallPath, fromSDK, platformMismatchesAreWarning);

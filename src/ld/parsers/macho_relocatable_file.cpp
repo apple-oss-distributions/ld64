@@ -8607,6 +8607,17 @@ bool Section<riscv32>::addRelocFixup(class Parser<riscv32>& parser, const macho_
 	src.offsetInAtom = srcAddr - src.atom->_objAddress;
 	const uint8_t* fixUpPtr = file().fileContent() + sect->offset() + reloc->r_address();
 	uint32_t prefixRelocAddend = 0;
+	if ( reloc->r_type() == RISCV_RELOC_ADDEND ) {
+		uint32_t rawAddend = reloc->r_symbolnum();
+		prefixRelocAddend = rawAddend;
+		if ( rawAddend & 0x00800000 )
+			prefixRelocAddend |= 0xFF000000; // sign extend 24-bit signed int to 32-bits
+		uint32_t addendAddress = reloc->r_address();
+		++reloc;  //advance to next reloc record
+		result = true;
+		if ( reloc->r_address() != addendAddress )
+			throw "RISCV_RELOC_ADDEND r_address does not match next reloc's r_address";
+	}
 	uint64_t contentValue = 0;
 
 	switch ( reloc->r_length() ) {
@@ -8695,6 +8706,7 @@ bool Section<riscv32>::addRelocFixup(class Parser<riscv32>& parser, const macho_
 			parser.addFixups(src, ld::Fixup::kindStoreRISCVBranch20, target);
 			break;
 		case RISCV_RELOC_HI20:
+			target.addend = prefixRelocAddend;
 			if ( ! reloc->r_extern() )
 				throw "r_extern == 0 and RISCV_RELOC_HI20 not supported";
 			if ( reloc->r_length() != 2 )
@@ -8705,6 +8717,7 @@ bool Section<riscv32>::addRelocFixup(class Parser<riscv32>& parser, const macho_
 				parser.addFixups(src, ld::Fixup::kindStoreRISCVhi20, target);
 			break;
 		case RISCV_RELOC_LO12:
+			target.addend = prefixRelocAddend;
 			if ( ! reloc->r_extern() )
 				throw "r_extern == 0 and RISCV_RELOC_LO12 not supported";
 			if ( reloc->r_length() != 2 )
@@ -8716,6 +8729,7 @@ bool Section<riscv32>::addRelocFixup(class Parser<riscv32>& parser, const macho_
 				parser.addFixups(src, ld::Fixup::kindStoreRISCVlo12, target);
 			break;
 		case RISCV_RELOC_HI20_GOT:
+			target.addend = prefixRelocAddend;
 			if ( ! reloc->r_extern() )
 				throw "r_extern == 0 and RISCV_RELOC_HI20_GOT not supported";
 			if ( reloc->r_length() != 2 )
@@ -8726,6 +8740,7 @@ bool Section<riscv32>::addRelocFixup(class Parser<riscv32>& parser, const macho_
 				parser.addFixups(src, ld::Fixup::kindStoreRISCVhi20GOT, target);
 			break;
 		case RISCV_RELOC_LO12_GOT:
+			target.addend = prefixRelocAddend;
 			if ( ! reloc->r_extern() )
 				throw "r_extern == 0 and RISCV_RELOC_LO12_GOT not supported";
 			if ( reloc->r_length() != 2 )
@@ -8735,9 +8750,6 @@ bool Section<riscv32>::addRelocFixup(class Parser<riscv32>& parser, const macho_
 				parser.addFixups(src, ld::Fixup::kindStoreRISCVlo12PCRelGOT, target);
 			else
 				parser.addFixups(src, ld::Fixup::kindStoreRISCVlo12GOT, target);
-			break;
-		case RISCV_RELOC_ADDEND:
-			target.addend = reloc->r_symbolnum();
 			break;
 		default:
 			warning("unhandled relocation %d at address 0x%08X", reloc->r_type(), reloc->r_address());

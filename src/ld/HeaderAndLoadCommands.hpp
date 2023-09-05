@@ -664,7 +664,6 @@ uint32_t HeaderAndLoadCommandsAtom<A>::flags() const
 				case Options::kFlatNameSpace:
 					break;
 				case Options::kForceFlatNameSpace:
-					bits |= MH_FORCE_FLAT;
 					break;
 			}
 			if ( _state.hasWeakExternalSymbols || _writer.overridesWeakExternalSymbols || _writer.reExportsWeakDefSymbols )

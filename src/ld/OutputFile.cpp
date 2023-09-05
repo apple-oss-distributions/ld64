@@ -2247,13 +2247,21 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 				set32LE(fixUpLocation, newInstruction);
 				break;
 			case ld::Fixup::kindStoreRISCVlo12:
-				// the addi/lw instruction encodes the lo12 bits of the address to target
+				// the addi/load/store instruction encodes the lo12 bits of the address to target
 				if ( fit->contentAddendOnly )
 					delta = 0; // FIXME: needs to be delta to paired hi20 instruction
 				else
 					delta = accumulator;
 				instruction = get32LE(fixUpLocation);
-				newInstruction = (instruction & 0x000FFFFF) | ((delta & 0x00000FFF) << 20);
+				if ((instruction & 0x7F) == 0x23 || (instruction & 0x7F) == 0x27) {
+					// sw/sh/sb/fsw/fsd
+					uint32_t imm11_5 = extractBits(delta, 11, 5) << 25;
+					uint32_t imm4_0 = extractBits(delta, 4, 0) << 7;
+					newInstruction = (instruction & 0x1FFF07F) | imm11_5 | imm4_0;
+				} else {
+					// addi/lw/lh/lb
+					newInstruction = (instruction & 0x000FFFFF) | ((delta & 0x00000FFF) << 20);
+				}
 				set32LE(fixUpLocation, newInstruction);
 				break;
 			case ld::Fixup::kindStoreRISCVhi20PCRel:
@@ -2284,7 +2292,15 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 					signedImm12 |= 0xFFFFF000;
 				delta -= signedImm12;
 				// FIXME: rangeCheck(delta, state, atom, fit);
-				newInstruction = (instruction & 0x000FFFFF) | ((delta & 0x00000FFF) << 20);
+				if ((instruction & 0x7F) == 0x23 || (instruction & 0x7F) == 0x27) {
+					// sw/sh/sb/fsw/fsd
+					uint32_t imm11_5 = extractBits(delta, 11, 5) << 25;
+					uint32_t imm4_0 = extractBits(delta, 4, 0) << 7;
+					newInstruction = (instruction & 0x1FFF07F) | imm11_5 | imm4_0;
+				} else {
+					// addi/lw/lh/lb
+					newInstruction = (instruction & 0x000FFFFF) | ((delta & 0x00000FFF) << 20);
+				}
 				set32LE(fixUpLocation, newInstruction);
 				break;
 			case ld::Fixup::kindStoreRISCVhi20PCRelGOT:
@@ -3952,24 +3968,12 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 	// Lastly, only delete existing file if it is a normal file (e.g. not /dev/null).
 	struct stat stat_buf;
 	bool outputIsRegularFile = false;
-	bool outputIsMappableFile = false;
 	if ( stat(_options.outputFilePath(), &stat_buf) != -1 ) {
 		if (stat_buf.st_mode & S_IFREG) {
 			outputIsRegularFile = true;
 
-			// <rdar://problem/12264302> Don't use mmap on non-hfs volumes
-			struct statfs fsInfo;
-			if ( statfs(_options.outputFilePath(), &fsInfo) != -1 ) {
-				// <rdar://problem/72136053>
-				(void)unlink(_options.outputFilePath());
-
-				if ( (strcmp(fsInfo.f_fstypename, "hfs") == 0) || (strcmp(fsInfo.f_fstypename, "apfs") == 0) ) {
-					outputIsMappableFile = true;
-				}
-			}
-			else {
-				outputIsMappableFile = false;
-			}
+			// <rdar://problem/72136053>
+			(void)unlink(_options.outputFilePath());
 		} 
 		else {
 			outputIsRegularFile = false;
@@ -3978,7 +3982,37 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 	else {
 		// special files (pipes, devices, etc) must already exist
 		outputIsRegularFile = true;
-		// output file does not exist yet
+	}
+
+	// assume mappable by default
+	bool outputIsMappableFile = true;
+
+#if __arm64__
+	// <rdar://problem/66598213> work around VM limitation on Apple Silicon and use write() instead of mmap() to produce output file
+	outputIsMappableFile = false;
+#elif __x86_64__
+#ifndef kIsTranslated
+   #define kIsTranslated  0x4000000000000000ULL
+#endif
+	// <rdar://problem/70505306>
+	bool isTranslated = ((*(uint64_t*)_COMM_PAGE_CPU_CAPABILITIES64) & kIsTranslated);
+	if ( isTranslated ) {
+		outputIsMappableFile = false;
+	}
+#endif
+
+	// rdar://107066824 (ld64: provide an environment variable or so to switch to the
+	// allocate+pwrite writing mode (instead of mmap) on Intels)
+	if (getenv("LD_FORCE_PWRITE_FILE") != NULL)
+		outputIsMappableFile = false;
+
+	// rdar://106830469 (ld should make fewer statfs syscalls)
+	// do a statfs call only if LD_FORCE_PWRITE_FILE isn't set
+	if ( outputIsRegularFile && outputIsMappableFile ) {
+		// clear mappable file state, it will be set if fs is supported
+		outputIsMappableFile = false;
+
+		// check file system from the directory path, output file doesn't exist yet
 		char dirPath[PATH_MAX];
 		strcpy(dirPath, _options.outputFilePath());
 		char* end = strrchr(dirPath, '/');
@@ -3993,19 +4027,6 @@ void OutputFile::writeOutputFile(ld::Internal& state)
 			}
 		}
 	}
-#if __arm64__
-	// <rdar://problem/66598213> work around VM limitation on Apple Silicon and use write() instead of mmap() to produce output file
-	outputIsMappableFile = false;
-#elif __x86_64__
-#ifndef kIsTranslated
-   #define kIsTranslated  0x4000000000000000ULL
-#endif
-	// <rdar://problem/70505306>
-	bool isTranslated = ((*(uint64_t*)_COMM_PAGE_CPU_CAPABILITIES64) & kIsTranslated);
-	if ( isTranslated ) {
-		outputIsMappableFile = false;
-	}
-#endif
 
 	//fprintf(stderr, "outputIsMappableFile=%d, outputIsRegularFile=%d, path=%s\n", outputIsMappableFile, outputIsRegularFile, _options.outputFilePath());
 	
@@ -4225,7 +4246,8 @@ void OutputFile::partitionSymbolTable(ld::Internal& state)
 				if ( atom->scope() == ld::Atom::scopeGlobal ) {
 					_exportedAtoms.push_back(atom);
 					// <rdar://problem/69955069> re-exported weak-def symbol should set MH_WEAK_DEFINES
-					this->reExportsWeakDefSymbols = true;
+					if ( atom->combine() == ld::Atom::combineByName )
+						this->reExportsWeakDefSymbols = true;
 				}
 				continue;
 			}
@@ -5657,6 +5679,13 @@ void OutputFile::buildChainedFixupInfo(ld::Internal& state)
 			_chainedFixupSegments.push_back(seg);
 		}
 		for (const ld::Atom* atom : sect->atoms) {
+			// Record regular atoms that override a dylib's weak definitions
+			if ( (atom->scope() == ld::Atom::scopeGlobal) && atom->overridesDylibsWeakDef() ) {
+				this->overridesWeakExternalSymbols = true;
+				if ( _options.warnWeakExports()	)
+					warning("overrides weak external symbol: %s", atom->name());
+			}
+
 			const ld::Atom* target;
 			const ld::Atom* fromTarget;
 			bool hadSubtract;
@@ -7257,8 +7286,8 @@ void OutputFile::writeMapFile(ld::Internal& state)
 					fprintf(mapFile, "0x%08llX\t0x%08llX\t[%3u] %s\n", atom->finalAddress(), atom->size(), fromFileOrdinal, name);
 				}
 			}
-			// preload check is hack until 26613948 is fixed
-			if ( _options.deadCodeStrip() && (_options.outputKind() != Options::kPreload) ) {
+			bool emitDeadStrippedSymbols = _options.deadCodeStrip();
+			if ( emitDeadStrippedSymbols  ) {
 				fprintf(mapFile, "\n");
 				fprintf(mapFile, "# Dead Stripped Symbols:\n");
 				fprintf(mapFile, "#        \tSize    \tFile  Name\n");
