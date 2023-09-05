@@ -319,7 +319,7 @@ bool Parser::_s_llvmOptionsProcessed = false;
 bool Parser::validFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t architecture, cpu_subtype_t subarch)
 {
 	for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
-		if ( (architecture == t->cpuType) && (!(t->isSubType) || (subarch == t->cpuSubType)) ) {
+		if ( (architecture == t->cpuType) && (subarch == t->cpuSubType) ) {
 			bool result = ::lto_module_is_object_file_in_memory_for_target(fileContent, fileLength, t->llvmTriplePrefix);
 			if ( !result ) {
 				// <rdar://problem/8434487> LTO only supports thumbv7 not armv7
@@ -339,18 +339,13 @@ const char* Parser::fileKind(const uint8_t* p, uint64_t fileLength)
 		cpu_type_t arch = LittleEndian::get32(*((uint32_t*)(&p[16])));
 		for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
 			if ( arch == t->cpuType ) {
-				 if ( t->isSubType ) {
-					if ( ::lto_module_is_object_file_in_memory_for_target(p, fileLength, t->llvmTriplePrefix) )
+				if ( ::lto_module_is_object_file_in_memory_for_target(p, fileLength, t->llvmTriplePrefix) )
 						return t->archName;
-				}
-				else {
-					return t->archName;
-				}
 			}
 		}
 		return "unknown bitcode architecture";
 	}
-	return NULL;
+	return nullptr;
 }
 
 File* Parser::parse(const uint8_t* fileContent, uint64_t fileLength, const char* path, time_t modTime, ld::File::Ordinal ordinal,

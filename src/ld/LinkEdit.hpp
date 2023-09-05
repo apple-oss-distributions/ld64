@@ -1478,7 +1478,7 @@ void ExportInfoAtom<A>::encode() const
 			}
 			else {
 				// symbol name stays same as re-export
-				exportedSymbol.importName = atom->name();
+				exportedSymbol.importName = "";
 			}
 			//fprintf(stderr, "re-export %s from lib %llu as %s\n", entry.importName, entry.other, entry.name);
 		}
@@ -1513,8 +1513,12 @@ void ExportInfoAtom<A>::encode() const
     };
 
 	mach_o::ExportsTrie trie(exportedAtoms.size(), get);
+	if ( mach_o::Error err = std::move(trie.buildError()) )
+		throwf("error creating exports trie: %s\n", err.message());
+	size_t          trieSize  = 0;
+	const uint8_t*  trieBytes = trie.bytes(trieSize);
 
-	this->_encodedData.append_mem(trie.trieBytes(), trie.trieSize());
+	this->_encodedData.append_mem(trieBytes, trieSize);
 
 	// Add additional data padding for the dyld shared cache
 	for (unsigned int i = 0; i < padding; ++i)

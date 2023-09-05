@@ -1317,6 +1317,7 @@ static ld::relocatable::File* createReader(const char* path)
 	objOpts.treateBitcodeAsData = false;
 	objOpts.usingBitcode		= true;
 	objOpts.forceHidden			= false;
+	objOpts.avoidMisalignedPointers = false;
 #if 1
 	if ( ! foundFatSlice ) {
 		cpu_type_t archOfObj;
@@ -1410,8 +1411,7 @@ int main(int argc, const char* argv[])
 					for (const ArchInfo* t=archInfoArray; t->archName != NULL; ++t) {
 						if ( strcmp(t->archName,archName) == 0 ) {
 							sPreferredArch = t->cpuType;
-							if ( t->isSubType )
-								sPreferredSubArch = t->cpuSubType;
+							sPreferredSubArch = t->cpuSubType;
 							found = true;
 						}
 					}

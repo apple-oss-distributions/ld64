@@ -297,7 +297,6 @@ public:
 	const std::vector<FileInfo>&		getInputFiles() const { return fInputFiles; }
 
 	cpu_type_t					architecture() const { return fArchitecture; }
-	bool						preferSubArchitecture() const { return fHasPreferredSubType; }
 	cpu_subtype_t				subArchitecture() const { return fSubArchitecture & ~CPU_SUBTYPE_MASK; }
 	uint8_t						subArchitectureFlags() const { return (fSubArchitecture & CPU_SUBTYPE_MASK) >> 24; }
 	cpu_type_t                  fallbackArchitecture() const { return fFallbackArchitecture; }
@@ -661,7 +660,6 @@ private:
 	cpu_subtype_t						fFallbackSubArchitecture;
 	const char*							fArchitectureName;
 	OutputKind							fOutputKind;
-	bool								fHasPreferredSubType;
 	Thumb2Support						fArchThumb2Support;
 	bool								fBindAtLoad;
 	bool								fKeepPrivateExterns;

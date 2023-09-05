@@ -685,7 +685,7 @@ void OutputFile::rangeCheckARMBranch24(int64_t displacement, ld::Internal& state
 bool OutputFile::checkThumbBranch22Displacement(int64_t displacement)
 {
 	// thumb2 supports  +/- 16MB displacement
-	if ( _options.preferSubArchitecture() && _options.archThumb2Support() >= Thumb2Support::branch24 ) {
+	if ( _options.archThumb2Support() >= Thumb2Support::branch24 ) {
 		if ( (displacement > 16777214LL) || (displacement < (-16777216LL)) ) {
 			return false;
 		}
@@ -708,7 +708,7 @@ void OutputFile::rangeCheckThumbBranch22(int64_t displacement, ld::Internal& sta
 	printSectionLayout(state);
 
 	const ld::Atom* target;	
-	if ( _options.preferSubArchitecture() && _options.archThumb2Support() >= Thumb2Support::branch24 ) {
+	if ( _options.archThumb2Support() >= Thumb2Support::branch24 ) {
 		throwf("b/bl/blx thumb2 branch out of range (%lld max is +/-16MB): from %s (0x%08llX) to %s (0x%08llX)", 
 				displacement, atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fixup), 
 				addressOf(state, fixup, &target));
@@ -1931,7 +1931,7 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 						delta += 0x2000000;
 				}
 				rangeCheckThumbBranch22(delta, state, atom, fit);
-				if ( _options.preferSubArchitecture() && _options.archThumb2Support() >= Thumb2Support::branch24) {
+				if ( _options.archThumb2Support() >= Thumb2Support::branch24) {
 					// The instruction is really two instructions:
 					// The lower 16 bits are the first instruction, which contains the high
 					//   11 bits of the displacement.
@@ -3860,20 +3860,20 @@ void OutputFile::computeContentUUID(ld::Internal& state, uint8_t* wholeBuffer)
 			if ( log ) fprintf(stderr, "linkedit SegCmdOffset=0x%08llX, size=0x%08llX\n", symbolTableCmdOffset, symbolTableCmdSize);
 		}
 		const ccdigest_info* di = ccsha256_di();
-		if ( !excludeRegions.empty() ) {
-			ccdigest_di_decl(di, ctx);
-			ccdigest_init(di, ctx);
-			// rdar://problem/19487042 include the output leaf file name in the hash
-			const char* lastSlash = strrchr(_options.outputFilePath(), '/');
-			if ( lastSlash !=  NULL ) {
-				ccdigest_update(di, ctx, strlen(lastSlash), lastSlash);
-			}
-			// <rdar://problem/38679559> use train name when calculating a binary's UUID
-			const char* buildName = _options.buildContextName();
-			if ( buildName != NULL ) {
-				ccdigest_update(di, ctx, strlen(buildName), buildName);
-			}
+		ccdigest_di_decl(di, ctx);
+		ccdigest_init(di, ctx);
+		// rdar://problem/19487042 include the output leaf file name in the hash
+		const char* lastSlash = strrchr(_options.outputFilePath(), '/');
+		if ( lastSlash !=  NULL ) {
+			ccdigest_update(di, ctx, strlen(lastSlash), lastSlash);
+		}
+		// <rdar://problem/38679559> use train name when calculating a binary's UUID
+		const char* buildName = _options.buildContextName();
+		if ( buildName != NULL ) {
+			ccdigest_update(di, ctx, strlen(buildName), buildName);
+		}
 
+		if ( !excludeRegions.empty() ) {
 			// Work out which ranges of the file to measure, ignoring the exluded regions
 			std::sort(excludeRegions.begin(), excludeRegions.end());
 			std::vector<std::pair<uint64_t, uint64_t>> regionsToMeasure;
@@ -3905,14 +3905,14 @@ void OutputFile::computeContentUUID(ld::Internal& state, uint8_t* wholeBuffer)
 
 			// Merge the resuls in serial
 			ccdigest_update(di, ctx, digests.size() * sizeof(Digest), digests.data());
+		} else {
+			ccdigest_update(di, ctx, _fileSize, wholeBuffer);
+		}
 
-			ccdigest_final(di, ctx, digest);
-			if ( log ) fprintf(stderr, "uuid=%02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X\n", digest[0], digest[1], digest[2],
-							   digest[3], digest[4], digest[5], digest[6],  digest[7]);
-		}
-		else {
-			ccdigest(di, _fileSize, wholeBuffer, digest);
-		}
+		ccdigest_final(di, ctx, digest);
+		if ( log ) fprintf(stderr, "uuid=%02X, %02X, %02X, %02X, %02X, %02X, %02X, %02X\n", digest[0], digest[1], digest[2],
+							 digest[3], digest[4], digest[5], digest[6],  digest[7]);
+
 		// <rdar://problem/6723729> LC_UUID uuids should conform to RFC 4122 UUID version 4 & UUID version 5 formats
 		digest[6] = ( digest[6] & 0x0F ) | ( 3 << 4 );
 		digest[8] = ( digest[8] & 0x3F ) | 0x80;
@@ -5131,8 +5131,8 @@ uint32_t OutputFile::dylibToOrdinal(const ld::dylib::File* dylib) const
 
 void OutputFile::buildDylibOrdinalMapping(ld::Internal& state)
 {
-	std::map<const char *,  generic::dylib::File*> syntheticDylibs;
-	std::set<const generic::dylib::File*> potentiallyDeadDylibs;
+	OrderedMap<std::string_view,  generic::dylib::File*> syntheticDylibs;
+	Set<const generic::dylib::File*> potentiallyDeadDylibs;
 
 	// Scan through all import atoms looking for redirects
 	for (const ld::Internal::FinalSection* sect : state.sections) {
@@ -7909,7 +7909,11 @@ void OutputFile::buildLINKEDITContent(ld::Internal& state)
 	}
 	if ( _exportInfoAtom != nullptr ) {
 		dispatch_group_async(group, queue, ^{
-			_exportInfoAtom->encode(); 		// needs _exportedAtoms, updates: _exportInfoAtom
+				try {
+					_exportInfoAtom->encode(); 		// needs _exportedAtoms, updates: _exportInfoAtom
+				} catch ( const char* msg ) {
+					exceptionMsg = msg;
+				}
 		});
 	}
 	dispatch_group_async(group, queue, ^{

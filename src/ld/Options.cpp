@@ -142,7 +142,7 @@ bool Options::FileInfo::checkFileExists(const Options& options, const char *p)
 Options::Options(int argc, const char* argv[])
 	: fOutputFile("a.out"), fArchitecture(0), fSubArchitecture(0),
 	  fFallbackArchitecture(0), fFallbackSubArchitecture(0), fArchitectureName("unknown"), fOutputKind(kDynamicExecutable),
-	  fHasPreferredSubType(false), fArchThumb2Support(Thumb2Support::none), fBindAtLoad(false), fKeepPrivateExterns(false),
+	  fArchThumb2Support(Thumb2Support::none), fBindAtLoad(false), fKeepPrivateExterns(false),
 	  fIgnoreOtherArchFiles(false), fErrorOnOtherArchFiles(false), fForceSubtypeAll(false),
 	  fInterposeMode(kInterposeNone), fDeadStrip(false), fRemoveSwiftReflectionMetadataSections(false), fNameSpace(kTwoLevelNameSpace),
 	  fDylibCompatVersion(0), fDylibCurrentVersion(0), fDylibInstallName(NULL), fFinalName(NULL), fEntryName(NULL),
@@ -712,8 +712,7 @@ void Options::setInferredArch(cpu_type_t type, cpu_subtype_t subtype)
 			fArchitecture        = type;
 			fSubArchitecture     = subtype;
 			fArchitectureName    = t->archName;
-			fHasPreferredSubType = t->isSubType;
-			fArchThumb2Support  = t->thumb2Support;
+			fArchThumb2Support   = t->thumb2Support;
 #if SUPPORT_ARCH_arm64e
 			if ( (fArchitecture == CPU_TYPE_ARM64) && (fSubArchitecture == CPU_SUBTYPE_ARM64E) ) {
 				fSupportsAuthenticatedPointers = true;
@@ -789,7 +788,6 @@ void Options::parseArch(const char* arch)
 			fArchitectureName = arch;
 			fArchitecture = t->cpuType;
 			fSubArchitecture = t->cpuSubType;
-			fHasPreferredSubType = t->isSubType;
 			fArchThumb2Support = t->thumb2Support;
 			selectFallbackArch(arch);
 			return;
@@ -1023,23 +1021,22 @@ bool Options::findFileWithSuffix(const std::string &path, const std::vector<std:
 	}
 	// There are both - a text-based stub file and a dynamic library file.
 	else if ( !tbdInfo.missing() && !dylibInfo.missing() ) {
-		// Check if we should prefer the text-based stub file (env var).
+		// Check if we should prefer the text-based stub file (env var or in B&I).
 		if (fPreferTAPIFile) {
 			result = tbdInfo;
-		}
-		// Check if we should prefer the text-based stub file (installapi).
-		else if (tapi::LinkerInterfaceFile::shouldPreferTextBasedStubFile(tbdInfo.path)) {
+		// Check if provided path points directly to the TBD file.
+		} else if (path == tbdInfo.path) {
+			result = tbdInfo;
+		// Use the TBD whenever its not from a locally installed SDK.
+		} else if (strstr(tbdInfo.path, ".sdk/") == NULL ) {
 			result = tbdInfo;
 		}
-		// If the files are still in sync we can use and should use the text-based stub file.
-		else if (tapi::LinkerInterfaceFile::areEquivalent(tbdInfo.path, dylibInfo.path)) {
-			result = tbdInfo;
-		}
-		// Otherwise issue a warning and fall-back to the dynamic library file.
+		// Otherwise fall-back to the dynamic library file.
 		else {
-			// <rdar://problem/48850374> Suppress warnings about iOSHostAdditions until mastering is fixed (rdar://46486148)
-			if ( strstr(tbdInfo.path, "/SDKs/iOSHostAdditions") == NULL )
-				warning("text-based stub file %s and library file %s are out of sync. Falling back to library file for linking.", tbdInfo.path, dylibInfo.path);
+			// rdar://102474464 (Xcode.Internal.sdk should remove binary dylibs and introduce tbd post processing to replace them)
+			if ( strstr(tbdInfo.path, "/SDKs/Xcode.Internal") == NULL )
+				warning("text-based stub file %s and library file %s unexpectedly found. Falling back to library file for linking.", tbdInfo.path, dylibInfo.path);
+			
 			result = dylibInfo;
 		}
 	} else {
@@ -3195,7 +3192,7 @@ void Options::parse(int argc, const char* argv[])
 				uint64_t temp = fZeroPageSize & (-4096); // page align
 				if ( (fZeroPageSize != temp)  )
 					warning("-pagezero_size not page aligned, rounding down");
-				 fZeroPageSize = temp;
+				fZeroPageSize = temp;
 				cannotBeUsedWithBitcode(arg);
 			}
 			else if ( strcmp(arg, "-stack_addr") == 0 ) {
@@ -4681,11 +4678,11 @@ void Options::parsePreCommandLineEnvironmentSettings()
 	}
 
 	// <rdar://problem/38679559> ld64 should consider RC_RELEASE when calculating a binary's UUID
-	fBuildContextName = getenv("RC_RELEASE");
+	// rdar://47768207 (ld64 should use RC_UUID_SALT instead of RC_RELEASE when calculating a binary's UUID)
+	fBuildContextName = getenv("RC_UUID_SALT");
 	
 	if (getenv("LD_PREFER_TAPI_FILE") != NULL)
 		fPreferTAPIFile = true;
-
 }
 
 
@@ -4929,11 +4926,6 @@ void Options::reconfigureDefaults()
 				case Options::kKextBundle:
 					fMaxAddress = 0xFFFFFFFF;
 					break;
-			}
-			// range check -seg1addr for ARM
-			if ( fBaseAddress > fMaxAddress ) {
-				warning("ignoring -seg1addr 0x%08llX.  Address out of range.", fBaseAddress);
-				fBaseAddress = 0;
 			}
 			break;
 	}
@@ -5529,6 +5521,11 @@ void Options::reconfigureDefaults()
 				}
 			}
 		}
+
+		// <rdar://problem/102088753> chained fixups and undefined_dynamic_lookup aren't compatible
+		if ( fMakeChainedFixups && dyldLoadsOutput() && fUndefinedTreatment == kUndefinedDynamicLookup ) {
+			fMakeChainedFixups = false;
+		}
 	}
 	else {
 		switch ( fOutputKind ) {
@@ -5940,7 +5937,7 @@ void Options::reconfigureDefaults()
 			fKeepDwarfUnwind = true;
 			break;
 	}
-	
+
 	// Make sure -image_base matches alignment
 	uint64_t alignedBaseAddress = (fBaseAddress+fSegmentAlignment-1) & (-fSegmentAlignment);
 	if ( alignedBaseAddress != fBaseAddress ) {
@@ -5959,6 +5956,20 @@ void Options::reconfigureDefaults()
 				fBaseAddress = 0;
 				break;
 		}
+	}
+
+	if ( fArchitecture == CPU_TYPE_ARM ) {
+		// range check -seg1addr for ARM
+		if ( fBaseAddress > fMaxAddress ) {
+			warning("ignoring -seg1addr 0x%08llX.  Address out of range.", fBaseAddress);
+			fBaseAddress = 0;
+		}
+	}
+
+	// <rdar://problem/47805298> building chained fixups should not allow a custom load address
+	if ( fMakeChainedFixups && dyldLoadsOutput() && fBaseAddress != 0 ) {
+			warning("prefered load addresses (-seg1addr) are disabled with chained fixups");
+			fBaseAddress = 0;
 	}
 
 	// <rdar://problem/20503811> Reduce the default alignment of structures/arrays to save memory in embedded systems
@@ -6095,14 +6106,6 @@ void Options::checkIllegalOptionCombinations()
 			// always legal
 			break;
 		case kUndefinedDynamicLookup: {
-			if ( fMakeChainedFixups && dyldLoadsOutput() ) {
-				bool skipWarning = false;
-				if (const char* project = getenv("RC_ProjectName")) {
-					skipWarning = (strcmp(project, "objc4_tests") == 0);
-				}
-				if ( !skipWarning )
-					warning("-undefined dynamic_lookup may not work with chained fixups");
-			}
 			platforms().forEach(^(ld::Platform platform, uint32_t minVersion, uint32_t sdkVersion, bool &stop) {
 				if ( isModernPlatform(platform) && fOutputKind != kKextBundle ) {
 					warning("-undefined dynamic_lookup is deprecated on %s", nameFromPlatform(platform));
@@ -6438,25 +6441,19 @@ void Options::checkIllegalOptionCombinations()
 			throwf("-kernel must be used with -static");
 	}
 
-	// <rdar://problem/47805298> building chained fixups should not allow a custom load address
 	if ( fMakeChainedFixups ) {
 		switch ( fOutputKind ) {
 			case Options::kDynamicExecutable: {
-				uint64_t maxZeroPageSize = 0x100000000;
+				constexpr uint64_t maxZeroPageSize = 0x100000000;
 				if (fZeroPageSize != ULLONG_MAX && fZeroPageSize > maxZeroPageSize) {
 					warning("-pagezero_size is too large, setting it to 4GB");
 					fZeroPageSize = maxZeroPageSize;
 				}
-				[[clang::fallthrough]];
+				break;
 			}
 			case Options::kDynamicLibrary:
 			case Options::kDynamicBundle:
 			case Options::kDyld:
-				if ( fBaseAddress != 0 ) {
-					warning("prefered load addresses (-seg1addr) are disabled with chained fixups");
-					fBaseAddress = 0;
-				}
-				break;
 			case Options::kPreload:
 			case Options::kKextBundle:
 				break;
@@ -6557,8 +6554,8 @@ void Options::checkIllegalOptionCombinations()
 	}
 
 
-	// if main executable with custom base address, model zero page as custom segment
-	if ( (fOutputKind == Options::kDynamicExecutable) && (fBaseAddress != 0) && (fZeroPageSize != 0) ) {
+	// when using a custom base address or __TEXT segment, model zero page as a custom segment
+	if ( (fBaseAddress != 0 || hasCustomSegmentAddress("__TEXT")) && (fZeroPageSize != 0) ) {
 		SegmentStart seg;
 		seg.name = "__PAGEZERO";
 		seg.address = 0;;
@@ -7026,13 +7023,10 @@ void Options::writeToTraceFile(const char* buffer, size_t len) const
 
 uint64_t Options::machHeaderVmAddr() const
 {
-	if ( fOutputKind == Options::kDynamicExecutable )
-		return fBaseAddress + fZeroPageSize;
-
 	if ( uint64_t customTextAddr = customSegmentAddress("__TEXT") )
 		return customTextAddr;
 
-	return fBaseAddress;
+	return fBaseAddress + fZeroPageSize;
 }
 
 bool Options::fromSDK(const char* path) const

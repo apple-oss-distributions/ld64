@@ -41,7 +41,10 @@
 
 /* Begin PBXBuildFile section */
 		2D07B6E727E1F6FC009DF6CC /* Mangling.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D07B6E627E1F6FB009DF6CC /* Mangling.cpp */; };
-		2D2F2E9528995D07005E83B3 /* ExportsTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9556DF327A6800C00E4D054 /* ExportsTrie.cpp */; };
+		2D57F2F0291C0F5E003049A7 /* ExportsTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D57F2ED291C0F5E003049A7 /* ExportsTrie.cpp */; };
+		2D57F2F1291C0F5E003049A7 /* ExportsTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D57F2ED291C0F5E003049A7 /* ExportsTrie.cpp */; };
+		2D57F2F2291C0F5E003049A7 /* Error.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D57F2EE291C0F5E003049A7 /* Error.cpp */; };
+		2D57F2F3291C0F5E003049A7 /* Error.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D57F2EE291C0F5E003049A7 /* Error.cpp */; };
 		37D7995423A4666000B314BC /* generic_dylib_file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 37D7995323A4666000B314BC /* generic_dylib_file.cpp */; };
 		83046A851C8FF2F700024A7E /* objcimageinfo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 83046A841C8FF2D000024A7E /* objcimageinfo.cpp */; };
 		B028FCF21A9E7C3F00E3584B /* bitcode_bundle.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B028FCF11A9E7C3F00E3584B /* bitcode_bundle.cpp */; };
@@ -53,7 +56,6 @@
 		F933E3D9092E855B0083EAC8 /* ObjectDump.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F971EED706D5AD240041D381 /* ObjectDump.cpp */; };
 		F93CB248116E69EB003233B8 /* tlvp.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F93CB246116E69EB003233B8 /* tlvp.cpp */; };
 		F9463C64244E774B009BAA3F /* libcodedirectory.c in Sources */ = {isa = PBXBuildFile; fileRef = F9463C63244E774A009BAA3F /* libcodedirectory.c */; };
-		F9556DF527A6808D00E4D054 /* ExportsTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9556DF327A6800C00E4D054 /* ExportsTrie.cpp */; };
 		F97F5029070D0BB200B9FCD7 /* ld.1 in copy man page */ = {isa = PBXBuildFile; fileRef = F97F5028070D0BB200B9FCD7 /* ld.1 */; };
 		F98498A310AE2159009E9878 /* compact_unwind.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9BA963310A2545C0097A440 /* compact_unwind.cpp */; };
 		F98498A410AE2159009E9878 /* got.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9AB1063107D380700E54C9E /* got.cpp */; };
@@ -222,6 +224,10 @@
 /* Begin PBXFileReference section */
 		2D07B6E527E1F6FB009DF6CC /* Mangling.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.h; name = Mangling.h; path = src/ld/Mangling.h; sourceTree = "<group>"; };
 		2D07B6E627E1F6FB009DF6CC /* Mangling.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = Mangling.cpp; path = src/ld/Mangling.cpp; sourceTree = "<group>"; };
+		2D57F2EC291C0F5E003049A7 /* Error.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = Error.h; path = src/mach_o/Error.h; sourceTree = "<group>"; };
+		2D57F2ED291C0F5E003049A7 /* ExportsTrie.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = ExportsTrie.cpp; path = src/mach_o/ExportsTrie.cpp; sourceTree = "<group>"; };
+		2D57F2EE291C0F5E003049A7 /* Error.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = Error.cpp; path = src/mach_o/Error.cpp; sourceTree = "<group>"; };
+		2D57F2EF291C0F5E003049A7 /* ExportsTrie.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = ExportsTrie.h; path = src/mach_o/ExportsTrie.h; sourceTree = "<group>"; };
 		2D7AB23F285B372F00D9BA35 /* Containers.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = Containers.h; path = src/abstraction/Containers.h; sourceTree = "<group>"; };
 		37D7995323A4666000B314BC /* generic_dylib_file.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = generic_dylib_file.cpp; sourceTree = "<group>"; };
 		83046A831C8FF23E00024A7E /* objcimageinfo */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = objcimageinfo; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -255,8 +261,6 @@
 		F9463C62244E774A009BAA3F /* libcodedirectory.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = libcodedirectory.h; path = src/ld/libcodedirectory.h; sourceTree = "<group>"; };
 		F9463C63244E774A009BAA3F /* libcodedirectory.c */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.c; name = libcodedirectory.c; path = src/ld/libcodedirectory.c; sourceTree = "<group>"; };
 		F9556DEF27A25CDB00E4D054 /* libcorecrypto.tbd */ = {isa = PBXFileReference; lastKnownFileType = "sourcecode.text-based-dylib-definition"; name = libcorecrypto.tbd; path = usr/lib/system/libcorecrypto.tbd; sourceTree = SDKROOT; };
-		F9556DF327A6800C00E4D054 /* ExportsTrie.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = ExportsTrie.cpp; path = src/abstraction/ExportsTrie.cpp; sourceTree = "<group>"; };
-		F9556DF427A6800C00E4D054 /* ExportsTrie.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = ExportsTrie.h; path = src/abstraction/ExportsTrie.h; sourceTree = "<group>"; };
 		F971EED306D5ACF60041D381 /* ObjectDump */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = ObjectDump; sourceTree = BUILT_PRODUCTS_DIR; };
 		F971EED706D5AD240041D381 /* ObjectDump.cpp */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = sourcecode.cpp.cpp; name = ObjectDump.cpp; path = src/other/ObjectDump.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F97F5028070D0BB200B9FCD7 /* ld.1 */ = {isa = PBXFileReference; fileEncoding = 30; lastKnownFileType = text.man; name = ld.1; path = doc/man/man1/ld.1; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
@@ -385,9 +389,21 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		2D57F2EB291C0F45003049A7 /* mach_o */ = {
+			isa = PBXGroup;
+			children = (
+				2D57F2EE291C0F5E003049A7 /* Error.cpp */,
+				2D57F2EC291C0F5E003049A7 /* Error.h */,
+				2D57F2ED291C0F5E003049A7 /* ExportsTrie.cpp */,
+				2D57F2EF291C0F5E003049A7 /* ExportsTrie.h */,
+			);
+			name = mach_o;
+			sourceTree = "<group>";
+		};
 		F9023C2C06D5A227001BBF46 = {
 			isa = PBXGroup;
 			children = (
+				2D57F2EB291C0F45003049A7 /* mach_o */,
 				F9B813A80EC27B6300F94C13 /* abstraction */,
 				F9B813AD0EC27B8500F94C13 /* ld */,
 				F9B813B00EC27B9E00F94C13 /* other */,
@@ -525,8 +541,6 @@
 		F9B813A80EC27B6300F94C13 /* abstraction */ = {
 			isa = PBXGroup;
 			children = (
-				F9556DF327A6800C00E4D054 /* ExportsTrie.cpp */,
-				F9556DF427A6800C00E4D054 /* ExportsTrie.h */,
 				F933D9470929277C0083EAC8 /* MachOFileAbstraction.hpp */,
 				F933D9460929277C0083EAC8 /* FileAbstraction.hpp */,
 				F9B813BF0EC27C6700F94C13 /* MachOTrie.hpp */,
@@ -936,6 +950,7 @@
 				F9AA67B610570C41003E3539 /* dtrace_dof.cpp in Sources */,
 				F98498A310AE2159009E9878 /* compact_unwind.cpp in Sources */,
 				F98498A410AE2159009E9878 /* got.cpp in Sources */,
+				2D57F2F0291C0F5E003049A7 /* ExportsTrie.cpp in Sources */,
 				F9BA955E10A233000097A440 /* huge.cpp in Sources */,
 				F9C2BC2D1F43B875000046CD /* inits.cpp in Sources */,
 				37D7995423A4666000B314BC /* generic_dylib_file.cpp in Sources */,
@@ -949,10 +964,10 @@
 				B3B672421406D42800A376BB /* Snapshot.cpp in Sources */,
 				B028FCF21A9E7C3F00E3584B /* bitcode_bundle.cpp in Sources */,
 				2D07B6E727E1F6FC009DF6CC /* Mangling.cpp in Sources */,
+				2D57F2F2291C0F5E003049A7 /* Error.cpp in Sources */,
 				F993989226F94A9F0074D515 /* FatFile.cpp in Sources */,
 				F9FE2C612717DDAC00FD9588 /* objc_stubs.cpp in Sources */,
 				F9CC24191461FB4300A92174 /* blob.cpp in Sources */,
-				F9556DF527A6808D00E4D054 /* ExportsTrie.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -971,8 +986,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				2D57F2F3291C0F5E003049A7 /* Error.cpp in Sources */,
 				F9A3DDD30ED762E400C590B9 /* PruneTrie.cpp in Sources */,
-				2D2F2E9528995D07005E83B3 /* ExportsTrie.cpp in Sources */,
+				2D57F2F1291C0F5E003049A7 /* ExportsTrie.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

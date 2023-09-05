@@ -92,7 +92,7 @@ void doPass(const Options& opts, ld::Internal& internal)
 
     bool runPass = false;
 #if SUPPORT_ARCH_arm64e
-    runPass = opts.supportsAuthenticatedPointers() & opts.sharedRegionEligible();
+    runPass = opts.supportsAuthenticatedPointers() && opts.sharedRegionEligible();
 #endif
     if ( !runPass )
         return;

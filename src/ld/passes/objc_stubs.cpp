@@ -72,16 +72,6 @@ private:
          }
     };
 
-    struct SelRefAtomByNameSorter
-    {
-              SelRefAtomByNameSorter(Pass& p) : _pass(p) { }
-         bool operator()(const ld::Atom* left, const ld::Atom* right)
-         {
-              return (strcmp(_pass.selectorRefName(left), _pass.selectorRefName(right)) < 0);
-         }
-    private:
-        Pass&   _pass;
-    };
     using SelectorMap = Map<std::string_view, const ld::Atom*>;
 
     const ld::Atom*              msgSendCallSite(const ld::Fixup* fixup);
@@ -409,7 +399,7 @@ private:
     static ld::Section                      _s_section;
 };
 
-ld::Section MethodNameAtom::_s_section("__TEXT", "__objc_methname", ld::Section::typeCString);
+ld::Section MethodNameAtom::_s_section("__TEXT", "__objc_methname", ld::Section::typeNonStdCString);
 
 
 const ld::Atom* Pass::getSelector(std::string_view selectorName)
@@ -556,6 +546,7 @@ void Pass::process()
                 std::sort(sect->atoms.begin(), sect->atoms.end(), AtomByNameSorter());
                 break;
             case ld::Section::typeCStringPointer:
+            case ld::Section::typeNonStdCString:
                 // don't need to sort because objc pass after this pass will sort
                 break;
             case ld::Section::typeImportProxies:

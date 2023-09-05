@@ -386,7 +386,6 @@ void RebaseRLEAtom::makeRebaseRuns(ld::Internal::FinalSection* sect, std::vector
 				uint32_t fixupAddress = (atom->finalAddressMode()
 										? atom->finalAddress() + offsetInAtom
 										: sect->address + atom->sectionOffset() + offsetInAtom);
-				//fprintf(stderr, "fixup at 0x%08X in %s\n", fixupAddress, atom->name());
 				if ( (fixupAddress % 4) != 0 )
 					throwf("misaligned pointer at 0x%08X in %s\n", fixupAddress, atom->name());
 				if ( runsContent.empty() ) {
@@ -412,6 +411,13 @@ void RebaseRLEAtom::makeRebaseRuns(ld::Internal::FinalSection* sect, std::vector
 						count = 1;
 						if ( delta/4 > 255 ) {
 							// gap too large, start new run
+							// make sure existing run has 0x00 0x00 termination, then 4-byte align
+							if ( runsContent.size() > 4 ) {
+								if ( (runsContent[runsContent.size()-1] != 0) || (runsContent[runsContent.size()-2] != 0) ) {
+									runsContent.push_back(0);
+									runsContent.push_back(0);
+								}
+							}
 							while ( (runsContent.size() % 4) != 0 )
 								runsContent.push_back(0);
 							size_t curOffset = runsContent.size();
@@ -456,7 +462,7 @@ void RebaseRLEAtom::computeSize()
 		runsContent.clear();
 		this->makeRebaseRuns(sect, runsContent);
 		_size += runsContent.size();
-		//fprintf(stderr, "computeSize: %s/%s size=%lu\n", sect->segmentName(), sect->sectionName(), runsContent.size());
+		//fprintf(stderr, "computeSize: %s/%s size=0x%0lX, totalSize=0x%0X\n", sect->segmentName(), sect->sectionName(), runsContent.size(), _size);
 		//printf("");
 	}
 	//fprintf(stderr, "computeSize: total size=%d\n", _size);

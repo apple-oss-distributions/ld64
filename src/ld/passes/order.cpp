@@ -620,6 +620,8 @@ void Layout::doPass()
 	// sort atoms in each section
 	dispatch_apply(_state.sections.size(), DISPATCH_APPLY_AUTO, ^(size_t index) {
 		ld::Internal::FinalSection* sect = _state.sections[index];
+
+		bool needsSort = true;
 		switch ( sect->type() ) {
 			case ld::Section::typeTempAlias:
 			case ld::Section::typeStub:
@@ -628,16 +630,25 @@ void Layout::doPass()
 			case ld::Section::typeStubClose:
 			case ld::Section::typeNonLazyPointer:
 				// these sections are already sorted by pass that created them
+				needsSort = false;
 				break;
 			case ld::Section::typeCStringPointer:
 				// sel ref section already sorted by name by objc pass
 				if ( strcmp(sect->sectionName(), "__objc_selrefs") == 0 )
-					break;
-				[[clang::fallthrough]];
-			default:
-				if ( log ) fprintf(stderr, "sorting section %s\n", sect->sectionName());
-				std::sort(sect->atoms.begin(), sect->atoms.end(), _comparer);
+					needsSort = false;
 				break;
+			case ld::Section::typeNonStdCString:
+				// sel names section already sorted by name by objc pass
+				if ( strcmp(sect->sectionName(), "__objc_methname") == 0 )
+					needsSort = false;
+				break;
+			default:
+				break;
+		}
+
+		if ( needsSort ) {
+			if ( log ) fprintf(stderr, "sorting section %s\n", sect->sectionName());
+			std::sort(sect->atoms.begin(), sect->atoms.end(), _comparer);
 		}
 	});
 

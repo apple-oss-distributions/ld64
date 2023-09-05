@@ -326,8 +326,6 @@ uint32_t InternalState::FinalSection::segmentOrder(const ld::Section& sect, cons
 			return ((options.outputKind() == Options::kKextBundle) ? 8 : (armCloseStubs ? 5 : 3));
 		if ( strcmp(sect.segmentName(), "__AUTH_CONST") == 0 )
 			return (options.outputKind() == Options::kKextBundle) ? 6 : 4;
-		if ( strcmp(sect.segmentName(), "__OBJC_CONST") == 0 )
-			return 5;
 		if ( strcmp(sect.segmentName(), "__AUTH") == 0 )
 			return (options.outputKind() == Options::kKextBundle) ? 7 : 6;
 		// in -r mode, want __DATA  last so zerofill sections are at end
@@ -484,14 +482,6 @@ uint32_t InternalState::FinalSection::sectionOrder(const ld::Section& sect, uint
 				else
 					return sectionsSeen+40;
 		}
-	}
-	else if ( strcmp(sect.segmentName(), "__OBJC_CONST") == 0 ) {
-		// First emit the sections we want the shared cache builder to keep in order
-		if ( strcmp(sect.sectionName(), "__objc_class_ro") == 0 )
-			return 10;
-		if ( strcmp(sect.sectionName(), "__cfstring") == 0 )
-			return 11;
-		return sectionsSeen+10;
 	}
 	// make sure zerofill in any other section is at end of segment
 	if ( sect.type() == ld::Section::typeZeroFill )
@@ -824,21 +814,6 @@ ld::Internal::FinalSection* InternalState::addAtom(const ld::Atom& atom)
 						printf("symbol '%s', .axsymbol mapped it to %s/%s\n", atom.name(), curSegName, curSectName);
 				}
 			}
-#if SUPPORT_ARCH_arm64e
-			else if ( (strncmp(symName, "__OBJC_CLASS_RO_", 16) == 0) || (strncmp(symName, "__OBJC_METACLASS_RO_", 20) == 0) ) {
-				// The shared cache knows how to strip authenticated pointers from these atoms.
-				// Move them to __OBJC_CONST to make it easier to optimize them.
-				// Note the magic 72 here is the size of an objc class_ro_t.
-				// Swift has a larger class_ro_t which we don't know if we can optimize
-				if ( (atom.size() == 72) && _options.supportsAuthenticatedPointers() && _options.sharedRegionEligible() ) {
-					curSegName = "__OBJC_CONST";
-					curSectName  = "__objc_class_ro";
-					fs = this->getFinalSection(curSegName, curSectName, sectType);
-					if ( _options.traceSymbolLayout() )
-						printf("symbol '%s', class_ro_t mapped it to %s/%s\n", atom.name(), curSegName, curSectName);
-				}
-			}
-#endif
 		}
 		if ( (fs == NULL) && inMoveROChain(atom, path, dstSeg, wildCardMatch) ) {
 			if ( (sectType != ld::Section::typeCode)
@@ -1576,9 +1551,9 @@ int main(int argc, const char* argv[])
 		//ld::passes::objc_constants::doPass(options, state);
 		ld::passes::tlvp::doPass(options, state);
 		ld::passes::dylibs::doPass(options, state);	// must be after stubs and GOT passes
-		ld::passes::order::doPass(options, state);
-		state.markAtomsOrdered();
 		ld::passes::dedup::doPass(options, state);
+		ld::passes::order::doPass(options, state); // must run after code dedup, so that deduplicated aliases are sorted
+		state.markAtomsOrdered();
 		ld::passes::branch_shim::doPass(options, state);	// must be after stubs
 		ld::passes::branch_island::doPass(options, state);	// must be after stubs and order pass
 		ld::passes::dtrace::doPass(options, state);

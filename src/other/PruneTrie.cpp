@@ -84,6 +84,9 @@ prune_trie(
 
 		return newExport;
 	});
+	if ( mach_o::Error err = std::move(trie.buildError()) )
+		return strdup(err.message());
+
 
 	uint8_t trieAlign = 0;
 	uint8_t triePadding = 0;
@@ -94,19 +97,21 @@ prune_trie(
 	} else {
 		trieAlign = 8;
 	}
-	if ( (trie.trieSize() % trieAlign) != 0 ) {
-		triePadding = trieAlign - (trie.trieSize() % trieAlign);
+	size_t					trieSize = 0;
+	const uint8_t*	trieBytes = trie.bytes(trieSize);
+	if ( (trieSize % trieAlign) != 0 ) {
+		triePadding = trieAlign - (trieSize % trieAlign);
 	}
 	
 	// copy into place, zero pad
-	*trie_new_size = trie.trieSize() + triePadding;
+	*trie_new_size = trieSize + triePadding;
 	if ( *trie_new_size > trie_start_size ) {
 		char* msg;
 		asprintf(&msg, "new trie is larger (%d) than original (%d)", *trie_new_size, trie_start_size);
 		return msg;
 	}
-	memcpy(trie_start, trie.trieBytes(), trie.trieSize());
-	bzero(trie_start + trie.trieSize(), trie_start_size - trie.trieSize());
+	memcpy(trie_start, trieBytes, trieSize);
+	bzero(trie_start + trieSize, trie_start_size - trieSize);
 
 	// success
 	return nullptr;

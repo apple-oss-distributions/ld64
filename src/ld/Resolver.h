@@ -67,7 +67,8 @@ public:
 								  _ltoCodeGenFinished(false),
 								  _haveAliases(false), _havellvmProfiling(false),
 								  _printWhyLive(opts.printWhyLive()),
-								  _synthesizeObjcMsgSendStubs(opts.dyldLoadsOutput()) {}
+								  _synthesizeObjcMsgSendStubs(opts.dyldLoadsOutput()),
+								  _needsObjcMsgSendProxy(false) {}
 								
 
 		virtual void		doAtom(const ld::Atom&);

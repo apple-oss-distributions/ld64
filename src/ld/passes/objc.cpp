@@ -1318,6 +1318,17 @@ struct AtomSorter
 	}
 };
 
+struct AtomByContentSorter
+{
+
+	bool operator()(const ld::Atom* left, const ld::Atom* right)
+	{
+		std::string_view lContent((char*)left->rawContentPointer(), left->size());
+		std::string_view rContent((char*)right->rawContentPointer(), right->size());
+
+		return (lContent < rContent);
+	}
+};
 
 template <typename A>
 static void optimizeCategories(const std::vector<const ld::Atom*>& categories,
@@ -1765,7 +1776,7 @@ void optimizeSingletonPatching(const Options& opts, ld::Internal& state)
 	section->indirectSymTabElementSize = 2 * pointerSize;
 }
 
-static const char* selectorRefName(const ld::Atom* selRefAtom, const ld::Internal& state)
+static const std::string_view selectorRefName(const ld::Atom* selRefAtom, const ld::Internal& state)
 {
 	ld::Fixup::iterator fit = selRefAtom->fixupsBegin();
 	const ld::Atom* targetAtom = nullptr;
@@ -1784,7 +1795,7 @@ static const char* selectorRefName(const ld::Atom* selRefAtom, const ld::Interna
 	}
 	assert(targetAtom != nullptr);
 	assert(targetAtom->contentType() == ld::Atom::typeCString);
-	return (char*)targetAtom->rawContentPointer();
+	return std::string_view((char*)targetAtom->rawContentPointer(), targetAtom->size());
 }
 
 
@@ -2106,10 +2117,45 @@ void OptimizeCategories<A>::doit(const Options& opts, ld::Internal& state, bool 
 
 	// sort __selrefs section
 	for (ld::Internal::FinalSection* sect : state.sections ) {
-		if ( (sect->type() == ld::Section::typeCStringPointer) && (strcmp(sect->sectionName(), "__objc_selrefs") == 0) ) {
-			std::sort(sect->atoms.begin(), sect->atoms.end(), [&state](const ld::Atom* lhs, const ld::Atom* rhs) {
-				return strcmp(selectorRefName(lhs, state), selectorRefName(rhs, state)) < 0;
-			});
+		switch ( sect->type() ) {
+			case ld::Section::typeCStringPointer:
+				if ( strcmp(sect->sectionName(), "__objc_selrefs") == 0 ) {
+					std::sort(sect->atoms.begin(), sect->atoms.end(), [&state](const ld::Atom* lhs, const ld::Atom* rhs) {
+						return (selectorRefName(lhs, state) < selectorRefName(rhs, state));
+					});
+				}
+				break;
+			case ld::Section::typeNonStdCString:
+				if ( strcmp(sect->sectionName(), "__objc_methname") == 0 ) {
+					auto& atoms = sect->atoms;
+					// Sort selector strings alphabetically for deterministic output.
+					std::sort(atoms.begin(), atoms.end(), AtomByContentSorter{});
+
+					// Now divide the atoms into two groups, one where the length of the
+					// selectors is a power-of-2. Then intertwine the groups together
+					// to reduce the number of adjacent selectors with a power-of-2 length.
+					// This is to potentially reduce number of hash collisions in ObjC method
+					// cache, where hashes are the lower bits of selector strings.
+					const auto notPowerOf2Start = std::stable_partition(atoms.begin(), atoms.end(), [](const ld::Atom* atom) {
+						uint64_t atomSize = atom->size();
+						uint64_t isPowerOf2 = ((atomSize-1) & atomSize) == 0;
+						return isPowerOf2;
+					});
+
+					auto powerOf2It = atoms.begin() + 1;
+					auto notPowerOf2It = notPowerOf2Start + 1;
+
+					while ( powerOf2It < notPowerOf2Start && notPowerOf2It < atoms.end() ) {
+						std::swap(*notPowerOf2It, *powerOf2It);
+						// Increment iterators by two, so the adjacent elements don't have
+						// a power-of-2 size.
+						powerOf2It += 2;
+						notPowerOf2It += 2;
+					}
+				}
+				break;
+			default:
+				break;
 		}
 	}
 
