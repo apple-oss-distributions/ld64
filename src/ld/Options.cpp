@@ -5815,10 +5815,10 @@ void Options::reconfigureDefaults()
 		if ( !fPlatfromVersionCmdFound && (fSDKPaths.size() > 0) ) {
 			const char* sdkPath = fSDKPaths.front();
 			const char* end = &sdkPath[strlen(sdkPath)-1];
-			while ( !isdigit(*end) && (end > sdkPath) )
+			while ( (end > sdkPath) && !isdigit(*end) )
 				--end;
 			const char* start = end-1;
-			while ( (isdigit(*start) || (*start == '.')) && (start > sdkPath))
+			while ( (start > sdkPath) && (isdigit(*start) || (*start == '.')) )
 				--start;
 			char sdkVersionStr[32];
 			int len = end-start+1;

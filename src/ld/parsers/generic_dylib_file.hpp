@@ -114,6 +114,7 @@ public:
 
 	// overrides of ld::dylib::File
 	virtual void							processIndirectLibraries(ld::dylib::File::DylibHandler*, bool addImplicitDylibs) override;
+	virtual bool							indirectLibrariesProcessed() const final { return _indirectDylibsProcessed; }
 	virtual bool							providedExportAtom() const	override final { return _providedAtom; }
     virtual bool                            hasReExportedDependentsThatProvidedExportAtom() const override;
 	virtual const char*						parentUmbrella() const override final { return _parentUmbrella; }

@@ -331,10 +331,11 @@ void doPass(const Options& opts, ld::Internal& state)
 					if ( const ld::File* targetFile = targetAtom->file() ) {
 						if ( const ld::dylib::File* targetDylib = dynamic_cast<const ld::dylib::File*>(targetFile) ) {
 							// turn this fixup into a nop.  This will remove the bind in the final image
+							// <rdar://99457165> only nop the fixup, without dead stripping the target atom,
+							//   to ensure correct libraries are linked in.
 							fit->kind     = ld::Fixup::kindNone;
 							fit->binding  = ld::Fixup::bindingNone;
 							fit->u.target = nullptr;
-							deadAtoms.insert(targetAtom);
 						}
 					}
 				}

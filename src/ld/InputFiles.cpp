@@ -793,45 +793,45 @@ void InputFiles::addLinkerOptionLibraries(ld::Internal& state, ld::File::AtomHan
 void InputFiles::createIndirectDylibs()
 {	
 	// keep processing dylibs until no more dylibs are added
-	unsigned long lastMapSize = 0;
-	std::set<ld::dylib::File*>  dylibsProcessed;
-	while ( lastMapSize != _allDylibs.size() ) {
-		lastMapSize = _allDylibs.size();
-		// can't iterator _installPathToDylibs while modifying it, so use temp buffer
+	while ( _numProcessedIndirectDylibs != _allDylibs.size() ) {
+		_numProcessedIndirectDylibs = _allDylibs.size();
+		// can't iterate _allDylibs while modifying it, so use temp buffer
 		std::vector<ld::dylib::File*> unprocessedDylibs;
-		for (std::set<ld::dylib::File*>::iterator it=_allDylibs.begin(); it != _allDylibs.end(); it++) {
-			if ( dylibsProcessed.count(*it) == 0 )
-				unprocessedDylibs.push_back(*it);
+		for (ld::dylib::File* dylib : _allDylibs) {
+			if ( !dylib->indirectLibrariesProcessed() )
+				unprocessedDylibs.push_back(dylib);
 		}
 		// <rdar://problem/42675402> ld64 output is not deterministic due to dylib processing order
 		std::sort(unprocessedDylibs.begin(), unprocessedDylibs.end(), [](const ld::dylib::File* lhs, const ld::dylib::File* rhs) {
 			return strcmp(lhs->path(), rhs->path()) < 0;
 		});
-		for (std::vector<ld::dylib::File*>::iterator it=unprocessedDylibs.begin(); it != unprocessedDylibs.end(); it++) {
-			dylibsProcessed.insert(*it);
-			(*it)->processIndirectLibraries(this, _options.implicitlyLinkIndirectPublicDylibs());
+		for (ld::dylib::File* dylib : unprocessedDylibs) {
+			dylib->processIndirectLibraries(this, _options.implicitlyLinkIndirectPublicDylibs());
+			assert(dylib->indirectLibrariesProcessed() && "Internal error, dylib has indirect libraries processed but it's not marked");
 		}
 	}
+}
 
-	// go back over original dylibs and mark sub frameworks as re-exported
-	if ( _options.outputKind() == Options::kDynamicLibrary ) {
-		const char* myLeaf = strrchr(_options.installPath(), '/');
-		if ( myLeaf != NULL ) {
-			for (std::vector<class ld::File*>::const_iterator it=_inputFiles.begin(); it != _inputFiles.end(); it++) {
-				ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(*it);
-				if ( dylibReader != NULL ) {
-					const char* childParent = dylibReader->parentUmbrella();
-					if ( childParent != NULL ) {
-						if ( strcmp(childParent, &myLeaf[1]) == 0 ) {
-							// mark that this dylib will be re-exported
-							dylibReader->setWillBeReExported();
-						}
-					}
-				}
-			}
+void InputFiles::markSubDylibsReexported() {
+	if ( _options.outputKind() != Options::kDynamicLibrary )
+		return;
+
+	const char* myLeaf = strrchr(_options.installPath(), '/');
+	if ( myLeaf == nullptr )
+		return;
+
+	// go back over original dylibs and mark sub dylibs as re-exported
+	for (ld::File* file : _inputFiles) {
+		ld::dylib::File* dylibReader = dynamic_cast<ld::dylib::File*>(file);
+		if ( dylibReader == nullptr )
+			continue;
+
+		const char* childParent = dylibReader->parentUmbrella();
+		if ( (childParent != nullptr) && (strcmp(childParent, &myLeaf[1]) == 0) ) {
+			// mark that this dylib will be re-exported
+			dylibReader->setWillBeReExported();
 		}
 	}
-	
 }
 
 void InputFiles::createOpaqueFileSections()
@@ -1361,6 +1361,7 @@ void InputFiles::forEachInitialAtom(ld::File::AtomHandler& handler, ld::Internal
 	markExplicitlyLinkedDylibs();
 	addLinkerOptionLibraries(state, handler);
 	createIndirectDylibs();
+	markSubDylibsReexported();
 	createOpaqueFileSections();
 	
 	while (fileIndex < _inputFiles.size()) {

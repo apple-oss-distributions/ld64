@@ -41,6 +41,7 @@
 
 /* Begin PBXBuildFile section */
 		2D07B6E727E1F6FC009DF6CC /* Mangling.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D07B6E627E1F6FB009DF6CC /* Mangling.cpp */; };
+		2D2F2E9528995D07005E83B3 /* ExportsTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9556DF327A6800C00E4D054 /* ExportsTrie.cpp */; };
 		37D7995423A4666000B314BC /* generic_dylib_file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 37D7995323A4666000B314BC /* generic_dylib_file.cpp */; };
 		83046A851C8FF2F700024A7E /* objcimageinfo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 83046A841C8FF2D000024A7E /* objcimageinfo.cpp */; };
 		B028FCF21A9E7C3F00E3584B /* bitcode_bundle.cpp in Sources */ = {isa = PBXBuildFile; fileRef = B028FCF11A9E7C3F00E3584B /* bitcode_bundle.cpp */; };
@@ -971,6 +972,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				F9A3DDD30ED762E400C590B9 /* PruneTrie.cpp in Sources */,
+				2D2F2E9528995D07005E83B3 /* ExportsTrie.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1709,6 +1711,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;
@@ -1738,6 +1741,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;
@@ -1759,6 +1763,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
 				CLANG_ENABLE_OBJC_WEAK = YES;
 				COMBINE_HIDPI_IMAGES = YES;
 				COPY_PHASE_STRIP = NO;

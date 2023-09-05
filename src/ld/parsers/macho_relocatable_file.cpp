@@ -1180,7 +1180,7 @@ public:
 		bool					next(Parser<A>& parser, const Section<A>& sect, uint32_t sectNum, pint_t startAddr, pint_t endAddr, 
 										pint_t* addr, pint_t* size, const macho_nlist<P>** sym);
 		pint_t					peek(Parser<A>& parser, pint_t startAddr, pint_t endAddr);
-		void					beginSection() { newSection = true; symIndex = 0; }
+		void					beginSection() { newSection = true; symIndex = 0; cfiIndex = 0; }
 		
 		const uint32_t* const		sortedSymbolIndexes;
 		const uint32_t				sortedSymbolCount;
@@ -1706,6 +1706,30 @@ bool Parser<A>::LabelAndCFIBreakIterator::next(Parser<A>& parser, const Section<
 			}
 			++symIndex;
 		}
+
+		// Find first cfiIndex that belongs to this section.
+		// Fast path - no CFIs in this section.
+		if ( cfiIndex < cfiStartsCount && cfiStartsArray[cfiStartsCount - 1] < startAddr ) {
+			cfiIndex = cfiStartsCount;
+		}
+		// Find first CFI start within the section.
+		while ( cfiIndex < cfiStartsCount ) {
+			pint_t nextCfiAddr = cfiStartsArray[cfiIndex];
+
+			// if next CFI addr is not in this section, then skip remaining
+			// and continue parsing only symbols
+			if ( nextCfiAddr >= endAddr ) {
+				cfiIndex = cfiStartsCount;
+				break;
+			}
+
+			if ( nextCfiAddr >= startAddr ) {
+				break;
+			}
+
+			++cfiIndex;
+		}
+
 		if ( symIndex < sortedSymbolCount ) {
 			const macho_nlist<P>& sym = parser.symbolFromIndex(sortedSymbolIndexes[symIndex]);
 			pint_t nextSymbolAddr = sym.n_value();

@@ -40,10 +40,10 @@ all:
 	${CC} ${CCFLAGS} -dynamiclib -Wl,-reexport_library,liba.dylib -Wl,-reexport_library,libb.dylib -Wl,-reexport_library,libc.dylib -o libBig.dylib -install_name /usr/local/lib/libBig.dylib 
 	# re-link against correct dylibs now that everything is built
 	${CC} ${CCFLAGS} -dynamiclib a.c -o liba.dylib libc.dylib -install_name /usr/local/lib/liba.dylib -umbrella Big
-	${DYLDINFO} -lazy_bind liba.dylib | grep c2 | grep libc | ${FAIL_IF_EMPTY}
+	${DYLD_INFO} -fixups liba.dylib | grep c2 | grep libc | ${FAIL_IF_EMPTY}
 	${CC} ${CCFLAGS} -dynamiclib b.c -o libb.dylib libc.dylib -install_name /usr/local/lib/libb.dylib -umbrella Big
 	${CC} ${CCFLAGS} -dynamiclib c.c -o libc.dylib liba.dylib -install_name /usr/local/lib/libc.dylib -umbrella Big
-	${DYLDINFO} -lazy_bind libc.dylib | grep a2 | grep liba | ${FAIL_IF_EMPTY}
+	${DYLD_INFO} -fixups libc.dylib | grep a2 | grep liba | ${FAIL_IF_EMPTY}
 	${CC} ${CCFLAGS} -dynamiclib -Wl,-reexport_library,liba.dylib -Wl,-reexport_library,libb.dylib -Wl,-reexport_library,libc.dylib -o libBig.dylib -install_name /usr/local/lib/libBig.dylib 
 	${CC} ${CCFLAGS} main.c -o main libBig.dylib -L.
 	${PASS_IFF_GOOD_MACHO} main

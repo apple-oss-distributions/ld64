@@ -94,6 +94,7 @@ private:
 	void						logDylib(ld::File*, bool indirect, bool speculative);
 	void						logArchive(ld::File*) const;
 	void						markExplicitlyLinkedDylibs();
+	void						markSubDylibsReexported();
 	void						checkDylibClientRestrictions(ld::dylib::File*);
 	void						createOpaqueFileSections();
 	bool						libraryAlreadyLoaded(const char* path);
@@ -116,6 +117,7 @@ private:
 	mutable std::vector<std::string>	_archiveFilePaths;
 	InstallNameToDylib			_installPathToDylibs;
 	std::set<ld::dylib::File*>	_allDylibs;
+	uint64_t					_numProcessedIndirectDylibs = 0;
 	ld::dylib::File*			_bundleLoader;
     struct strcompclass {
         bool operator() (const char *a, const char *b) const { return ::strcmp(a, b) < 0; }

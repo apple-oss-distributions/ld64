@@ -1528,6 +1528,17 @@ bool Parser::optimize(  const std::vector<const ld::Atom*>&	allAtoms,
 		(*it)->internalAtom().setCoalescedAway();
 	}
 
+	// <rdar://97955721> ld64 incorrectly coalesces ThinLTO atoms with different attributes
+	// With ThinLTO we might get multiple weak-def atoms that need to be coalesced.
+	// They're all added to the new atoms list as LTO atoms are processed, but that
+	// can cause issues in the symbol table. Depending on the name collision logic, ld64
+	// might try to use a symbol that's been coalesced already during LTO.
+	// We can instead remove all the coalesced atoms early to avoid the issue,
+	// that will also save some work for the resolver.
+	newAtoms.erase(std::remove_if(newAtoms.begin(), newAtoms.end(), [](const ld::Atom* atom) {
+			return atom->coalescedAway();
+	}), newAtoms.end());
+
 	return result;
 }
 

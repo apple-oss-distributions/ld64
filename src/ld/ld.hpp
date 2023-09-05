@@ -572,6 +572,7 @@ namespace dylib {
 				bool						willRemoved() const				{ return _dead; }
 				
 		virtual void						processIndirectLibraries(DylibHandler* handler, bool addImplicitDylibs) = 0;
+		virtual bool						indirectLibrariesProcessed() const = 0;
 		virtual bool						providedExportAtom() const = 0;
 		virtual const char*					parentUmbrella() const = 0;
 		virtual const std::vector<const char*>*	allowableClients() const = 0;
@@ -685,6 +686,8 @@ private:
 // Atom holding the reference where the fix-up (relocation) will be applied.
 //
 //
+#pragma clang diagnostic push
+#pragma clang diagnostic error "-Wpadded"
 struct Fixup 
 {
 	enum TargetBinding { bindingNone, bindingByNameUnbound, bindingDirectlyBound, bindingByContentBound, bindingsIndirectlyBound };
@@ -809,7 +812,7 @@ struct Fixup
 #if SUPPORT_ARCH_arm64e
 	struct AuthData {
 		// clang encodes the combination of the key bits as these values.
-		typedef enum {
+		typedef enum : uint8_t {
 			ptrauth_key_asia = 0,
 			ptrauth_key_asib = 1,
 			ptrauth_key_asda = 2,
@@ -839,6 +842,7 @@ struct Fixup
 	bool			contentAddendOnly : 1;
 	bool			contentDetlaToAddendOnly : 1;
 	bool			contentIgnoresAddend : 1;
+	uint32_t		unusedPadding : 13;
 	
 	typedef Fixup*		iterator;
 
@@ -1089,7 +1093,7 @@ struct Fixup
 	union LOH_arm64 {
 		uint64_t	addend;
 		struct {
-			unsigned	kind	:  6,
+			uint64_t	kind	:  6,
 						count	:  2,	// 00 => 1 addr, 11 => 4 addrs
 						delta1 : 14,	// 16-bit delta, low 2 bits assumed zero
 						delta2 : 14,
@@ -1099,6 +1103,7 @@ struct Fixup
 	};
 	
 };
+#pragma clang diagnostic pop
 
 //
 // ld::Atom
