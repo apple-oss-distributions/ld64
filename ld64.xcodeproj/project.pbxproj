@@ -819,7 +819,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "if [ \"${CONFIGURATION}\" == \"Debug\" ]; then\n    cd \"${BUILD_DIR}\"\n    mkdir -p lib\n    cd lib\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libLTO.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libtapi.dylib\"\n    ln -s -f \"${DT_TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib\"\nfi\n\n";
+			shellScript = "if [ \"${CONFIGURATION}\" == \"Debug\" ]; then\n    cd \"${BUILD_DIR}\"\n    mkdir -p lib\n    cd lib\n    ln -s -f \"${TOOLCHAIN_DIR}/usr/lib/libLTO.dylib\"\n    ln -s -f \"${TOOLCHAIN_DIR}/usr/lib/libtapi.dylib\"\n    ln -s -f \"${TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib\"\nfi\n\n";
 			showEnvVarsInLog = 0;
 		};
 		F96D5367094A2754008E9EE8 /* ShellScript */ = {
@@ -1083,7 +1083,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/src/ld",
 					"$(DEVELOPER_DIR)/usr/local/include",
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
+					"$(TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/bin";
 				ONLY_ACTIVE_ARCH = NO;
@@ -1112,7 +1112,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/src/ld",
 					"$(DEVELOPER_DIR)/usr/local/include",
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
+					"$(TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/bin";
 				PRODUCT_NAME = objcimageinfo;
@@ -1140,7 +1140,7 @@
 				HEADER_SEARCH_PATHS = (
 					"$(SRCROOT)/src/ld",
 					"$(DEVELOPER_DIR)/usr/local/include",
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
+					"$(TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/bin";
 				PRODUCT_NAME = objcimageinfo;
@@ -1199,7 +1199,6 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
@@ -1214,7 +1213,7 @@
 					"-stdlib=libc++",
 					"-lxar",
 					"-Wl,-exported_symbol,__mh_execute_header",
-					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
+					"-L$(TOOLCHAIN_DIR)/usr/lib",
 					"-ltapi",
 					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-stack_size,0x10000000",
@@ -1281,7 +1280,6 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
@@ -1294,7 +1292,7 @@
 					"-stdlib=libc++",
 					"-lxar",
 					"-Wl,-exported_symbol,__mh_execute_header",
-					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
+					"-L$(TOOLCHAIN_DIR)/usr/lib",
 					"-ltapi",
 					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-stack_size,0x02000000",
@@ -1338,7 +1336,6 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(TOOLCHAIN_DIR)/usr/local/include",
 					"$(SRCROOT)/src/ld",
 				);
@@ -1376,7 +1373,6 @@
 				GCC_OPTIMIZATION_LEVEL = s;
 				GCC_PREPROCESSOR_DEFINITIONS = NDEBUG;
 				HEADER_SEARCH_PATHS = (
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(TOOLCHAIN_DIR)/usr/local/include",
 					"$(SRCROOT)/src/ld",
 				);
@@ -1615,7 +1611,6 @@
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				HEADER_SEARCH_PATHS = (
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(TOOLCHAIN_DIR)/usr/local/include",
 				);
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
@@ -1629,7 +1624,7 @@
 					"-stdlib=libc++",
 					"-lxar",
 					"-Wl,-exported_symbol,__mh_execute_header",
-					"-L$(DT_TOOLCHAIN_DIR)/usr/lib",
+					"-L$(TOOLCHAIN_DIR)/usr/lib",
 					"-ltapi",
 					"@$(DERIVED_FILE_DIR)/linkExtras",
 					"-Wl,-stack_size,0x02000000",
@@ -1695,7 +1690,6 @@
 				GCC_PREPROCESSOR_DEFINITIONS = NDEBUG;
 				GCC_WARN_ABOUT_INVALID_OFFSETOF_MACRO = NO;
 				HEADER_SEARCH_PATHS = (
-					"$(DT_TOOLCHAIN_DIR)/usr/local/include",
 					"$(TOOLCHAIN_DIR)/usr/local/include",
 					"$(SRCROOT)/src/ld",
 				);

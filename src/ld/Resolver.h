@@ -120,13 +120,6 @@ private:
 	void					checkChainedFixupsBounds();
 	void					writeDotOutput();
 
-	class NotLive {
-	public:
-		bool operator()(const ld::Atom* atom) const {
-			return ! (atom->live() || atom->dontDeadStrip());
-		}
-	};
-
 	class AtomCoalescedAway {
 	public:
 		bool operator()(const ld::Atom* atom) const {
