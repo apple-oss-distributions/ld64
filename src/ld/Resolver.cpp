@@ -728,6 +728,12 @@ void Resolver::doAtom(const ld::Atom& atom)
 			return;
 	}
 
+	// rdar://123947731 (ld should discard unwind information for sepOS binaries)
+	if ( _options.removeDwarfUnwindSections() ) {
+		if ( atom.contentType() == Atom::ContentType::typeCFI )
+			return;
+	}
+
 	// add to list of known atoms
 	_atoms.push_back(&atom);
 	
@@ -921,6 +927,18 @@ void Resolver::addInitialUndefines()
 	// add initial undefines from -u option
 	for (Options::UndefinesIterator it=_options.initialUndefinesBegin(); it != _options.initialUndefinesEnd(); ++it) {
 		_symbolTable.findSlotForName(*it);
+	}
+
+	if ( _haveLLVMObjs && _options.ltoSoftloadRuntimeSymbols() ) {
+		// when building firmware with LTO, make sure all surprise symbols libLTO might generate are loaded if possible
+		// add these symbols before resolving other undefines, because adding them might pull in other symbols
+		for ( const std::string& softName : lto::softloadRuntimeSymbols() ) {
+			if ( !_symbolTable.hasName(softName) ) {
+				_inputFiles.searchLibraries(softName.c_str(), false, true, false, *this);
+				// keep track of all soft loaded symbols, so that they won't be dead stripped before LTO compilation
+				_softloadLTORuntimeSymbols.insert(strdup(softName.c_str()));
+			}
+		}
 	}
 }
 
@@ -1256,6 +1274,12 @@ bool Resolver::atomIsDeadStripRoot(const ld::Atom* atom, bool forceDeadStrip) co
 			return true;
 		}
 	}
+
+	// rdar://123282031 (ld64 dead strips softloaded LTO symbols too early)
+	// softloaded symbols don't have any references prior to LTO codegen, that's why they're
+	// loaded explicitly, so we have to make sure they're not dead stripped until after codegen
+	if ( _haveLLVMObjs && !forceDeadStrip && _softloadLTORuntimeSymbols.find(atom->name()) != _softloadLTORuntimeSymbols.end())
+			return true;
 
 	return false;
 }
@@ -2001,41 +2025,14 @@ void Resolver::removeCoalescedAwayAtoms()
 	}
 }
 
-// Note: this list should come from libLTO.dylib
-// It is a list of symbols the backend for libLTO.dylib might generate
-// and for statically linked firmware, we need to load the impl from archives
-// before running LTO compilation.
-static const char* sSoftSymbolNames[] = { "___udivdi3", "___udivsi3", "___divsi3", "___muldi3",
-										  "___gtdf2", "___ltdf2",
-										   "_memset", "_strcpy",  "_snprintf", "___sanitize_trap" };
-
 void Resolver::linkTimeOptimize()
 {
 	// only do work here if some llvm obj files where loaded
 	if ( ! _haveLLVMObjs )
 		return;
 
-	// when building firmware with LTO, make sure all surprise symbols libLTO might generate are loaded if possible
-	switch ( _options.outputKind() ) {
-		case Options::kDynamicExecutable:
-		case Options::kDynamicLibrary:
-		case Options::kDynamicBundle:
-		case Options::kObjectFile:
-		case Options::kKextBundle:
-		case Options::kDyld:
-			break;
-		case Options::kStaticExecutable:
-		case Options::kPreload:
-			for (const char* softName : sSoftSymbolNames ) {
-				if ( ! _symbolTable.hasName(softName) ) {
-					_inputFiles.searchLibraries(softName, false, true, false, *this);
-				}
-			}
-			break;
-	}
-
 	// <rdar://problem/15314161> LTO: Symbol multiply defined error should specify exactly where the symbol is found
-    _symbolTable.checkDuplicateSymbols();
+	_symbolTable.checkDuplicateSymbols();
 
 	// run LLVM lto code-gen
 	lto::OptimizeOptions optOpt;

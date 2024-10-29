@@ -133,6 +133,7 @@ private:
 	std::vector<const ld::Atom*>	_atoms;
 	std::vector<const class AliasAtom*>	_aliasesFromCmdLine;
 	SymbolTable						_symbolTable;
+	StringViewSet					_softloadLTORuntimeSymbols;
 	bool							_haveLLVMObjs;
 	bool							_completedInitialObjectFiles;
 	bool							_ltoCodeGenFinished;

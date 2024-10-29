@@ -145,7 +145,8 @@ Options::Options(int argc, const char* argv[])
 	  fFallbackArchitecture(0), fFallbackSubArchitecture(0), fArchitectureName("unknown"), fOutputKind(kDynamicExecutable),
 	  fArchThumb2Support(Thumb2Support::none), fBindAtLoad(false), fKeepPrivateExterns(false),
 	  fIgnoreOtherArchFiles(false), fErrorOnOtherArchFiles(false), fForceSubtypeAll(false),
-	  fInterposeMode(kInterposeNone), fDeadStrip(false), fRemoveSwiftReflectionMetadataSections(false), fNameSpace(kTwoLevelNameSpace),
+	  fInterposeMode(kInterposeNone), fDeadStrip(false), fRemoveSwiftReflectionMetadataSections(false), fRemoveDwarfUnwindSections(false),
+	  fNameSpace(kTwoLevelNameSpace),
 	  fDylibCompatVersion(0), fDylibCurrentVersion(0), fDylibInstallName(NULL), fFinalName(NULL), fEntryName(NULL),
 	  fBaseAddress(0), fMaxAddress(0xFFFFFFFFFFFFFFFFULL),
 	  fBaseWritableAddress(0),
@@ -155,12 +156,14 @@ Options::Options(int argc, const char* argv[])
 	  fClientName(NULL),
 	  fUmbrellaName(NULL), fInitFunctionName(NULL), fDotOutputFile(NULL), fExecutablePath(NULL),
 	  fBundleLoader(NULL), fDtraceScriptName(NULL), fMapPath(NULL),
-	  fDyldInstallPath("/usr/lib/dyld"), fLtoCachePath(NULL), fTempLtoObjectPath(NULL), fOverridePathlibLTO(NULL), fLtoCpu(NULL),
+	  fDyldInstallPath("/usr/lib/dyld"), fLtoCachePath(NULL),
+	  fLTOSoftloadRuntimeSymbols(false), fLTOSoftloadRuntimeSymbolsForceOn(false), fLTOSoftloadRuntimeSymbolsForceOff(false),
+	  fTempLtoObjectPath(NULL), fOverridePathlibLTO(NULL), fLtoCpu(NULL),
 	  fToolchainPath(NULL),fOrderFilePath(NULL),
 	  fZeroPageSize(ULLONG_MAX), fStackSize(0), fStackAddr(0), fSourceVersion(0), fSDKVersion(0), fImplicitPageZero(false), fExecutableStack(false),
 	  fNonExecutableHeap(false), fDisableNonExecutableHeap(false),
 	  fMinimumHeaderPad(32), fSegmentAlignment(LD_PAGE_SIZE), fForceAlignment(false),
-	  fCommonsMode(kCommonsIgnoreDylibs),  fUUIDMode(kUUIDContent), fLocalSymbolHandling(kLocalSymbolsAll), fWarnCommons(false), 
+	  fCommonsMode(kCommonsIgnoreDylibs),  fUUIDMode(kUUIDContent), fLocalSymbolHandling(kLocalSymbolsAll), fWarnCommons(false),
 	  fVerbose(false), fKeepRelocations(false), fWarnStabs(false),
 	  fTraceDylibSearching(false), fPause(false), fStatistics(false), fPrintOptions(false),
 	  fSharedRegionEligible(false), fSharedRegionEligibleForceOff(false), fPrintOrderFileStatistics(false),
@@ -216,7 +219,7 @@ Options::Options(int argc, const char* argv[])
 	  fForceObjCRelativeMethodListsOn(false), fForceObjCRelativeMethodListsOff(false), fUseObjCRelativeMethodLists(false), fObjcSmallStubs(false), fRunHugePass(true),
 	  fSaveTempFiles(false), fLinkSnapshot(this), fSnapshotRequested(false), fPipelineFifo(NULL),
 	  fDependencyInfoPath(NULL), fBuildContextName(NULL), fTraceFileDescriptor(-1), fMaxDefaultCommonAlign(0),
-	  fUnalignedPointerTreatment(kUnalignedPointerIgnore), fPreferTAPIFile(false), fOSOPrefixPath(NULL), fImageSuffix(NULL)
+	  fUnalignedPointerTreatment(kUnalignedPointerIgnore), fPreferTAPIFile(false), fOSOPrefixPath(NULL)
 {
 	this->expandResponseFiles(argc, argv);
 	this->setupCrashReportInfo(argc, argv);
@@ -827,8 +830,8 @@ bool Options::checkForFile(const char* format, const char* dir, const char* root
 	char possiblePath[strlen(dir)+strlen(rootName)+strlen(format)+8];
 	sprintf(possiblePath, format,  dir, rootName);
 
-	if ( fImageSuffix != NULL ) {
-		auto possiblePathWithSuffix = addSuffix(possiblePath, fImageSuffix);
+	for ( const char* imageSuffix : fImageSuffixes ) {
+		auto possiblePathWithSuffix = addSuffix(possiblePath, imageSuffix);
 		if ( checkForFileWithSuffix(possiblePathWithSuffix.c_str(), result) ) {
 			return true;
 		}
@@ -1046,8 +1049,8 @@ bool Options::findFileWithSuffix(const std::string &path, const std::vector<std:
 
 bool Options::findFile(const std::string &path, const std::vector<std::string> &tbdExtensions, FileInfo& result) const
 {
-	if ( fImageSuffix != NULL ) {
-		auto pathWithSuffix = addSuffix(path, fImageSuffix);
+	for ( const char* imageSuffix : fImageSuffixes ) {
+		auto pathWithSuffix = addSuffix(path, imageSuffix);
 		if ( findFileWithSuffix(pathWithSuffix, tbdExtensions, result) ) {
 			return true;
 		}
@@ -2640,6 +2643,12 @@ void Options::parse(int argc, const char* argv[])
 				if ( fOverridePathlibLTO == NULL )
 					throw "missing argument to -lto_library";
 			}
+			else if ( strcmp(arg, "-lto_softload_runtime_symbols") == 0 ) {
+				fLTOSoftloadRuntimeSymbolsForceOn = true;
+			}
+			else if ( strcmp(arg, "-no_lto_softload_runtime_symbols") == 0 ) {
+				fLTOSoftloadRuntimeSymbolsForceOff = true;
+			}
 			else if ( strcmp(arg, "-cache_path_lto") == 0 ) {
 				fLtoCachePath = argv[++i];
 				if ( fLtoCachePath == NULL )
@@ -2990,7 +2999,7 @@ void Options::parse(int argc, const char* argv[])
 				fSearchInSparseFrameworks = true;
 			}
 			else if ( strcmp(arg, "-image_suffix") == 0 ) {
-				fImageSuffix = checkForNullArgument(arg, argv[++i]);
+				fImageSuffixes.push_back(checkForNullArgument(arg, argv[++i]));
 			}
 			else if ( strcmp(arg, "-framework") == 0 ) {
 				FileInfo info = findFramework(argv[++i]);
@@ -3709,6 +3718,10 @@ void Options::parse(int argc, const char* argv[])
 				fAddCompactUnwindEncoding = false;
 				cannotBeUsedWithBitcode(arg);
 			}
+			else if ( strcmp(arg, "-no_dwarf_unwind") == 0 ) {
+				fRemoveDwarfUnwindSections = true;
+				cannotBeUsedWithBitcode(arg);
+			}
 			else if ( strcmp(arg, "-mllvm") == 0 ) {
 				const char* opts = checkForNullArgument(arg, argv[++i], true);
 				fLLVMOptions.push_back(opts);
@@ -4105,6 +4118,11 @@ void Options::parse(int argc, const char* argv[])
 				fSharedRegionEligibleForceOff = true;
 				cannotBeUsedWithBitcode(arg);
 			}
+			else if ( strcmp(arg, "-no_shared_cache_eligible") == 0 ) {
+				fAddMarkerForCacheIneligibleDylibs = true;
+				fSharedRegionEligibleForceOff = true;
+				cannotBeUsedWithBitcode(arg);
+			}
 			else if ( strcmp(arg, "-dirty_data_list") == 0 ) {
 				 if ( argv[i+1] == NULL )
 					throw "-dirty_data_list missing <symbol-list-file>";
@@ -4300,6 +4318,7 @@ bool Options::shouldUseBuildVersion(ld::Platform plat, uint32_t minOSvers) const
 		return true;
 	}
 #endif
+
 
 	// three libsystem simulator support dylibs need to use old load commands to work with old simulators
 	if ( isSimulatorSupportDylib() && (plat != ld::Platform::iOSMac) )
@@ -4783,6 +4802,15 @@ bool Options::sharedCacheEligiblePath(const char* path) const
 
 void Options::reconfigureDefaults()
 {
+	for (const char* sdkPath : fSDKPaths) {
+		std::string possiblePath = std::string(sdkPath) + "/AppleInternal/";
+		struct stat statBuffer;
+		if ( stat(possiblePath.c_str(), &statBuffer) == 0 ) {
+			fInternalSDK = true;
+			break;
+		}
+	}
+
 	// -preload maps to "freestanding" platform
 	if ( fOutputKind == Options::kPreload ) {
 		// Some EFI builds set -macosx_version_min, even though they are -preload
@@ -4869,9 +4897,15 @@ void Options::reconfigureDefaults()
 
 	// default to adding functions start for dynamic code, static code must opt-in
 	switch ( fOutputKind ) {
+		case Options::kKextBundle:
+#if SUPPORT_ARCH_arm64e
+			// rdar://113276963 (ER: Function starts by default for kexts)
+			if ( !fFunctionStartsForcedOff )
+				fFunctionStartsLoadCommand = internalSDK() && (fArchitecture == CPU_TYPE_ARM64) && (fSubArchitecture == CPU_SUBTYPE_ARM64E);
+#endif
+			[[clang::fallthrough]];
 		case Options::kPreload:
 		case Options::kStaticExecutable:
-		case Options::kKextBundle:
 			if ( fDataInCodeInfoLoadCommandForcedOn )
 				fDataInCodeInfoLoadCommand = true;
 			if ( fFunctionStartsForcedOn )
@@ -5001,9 +5035,6 @@ void Options::reconfigureDefaults()
 			case Options::kDynamicLibrary:
 			case Options::kDyld:
 				fUseDataConstSegment = true;
-				// rdar://118247827 (Avoid CONST and DIRTY segments for ExclaveKit dylibs)
-				if ( strncmp(this->installPath(), "/System/ExclaveKit/", 19) == 0 )
-					fUseDataConstSegment = false;
 				break;
 			case Options::kStaticExecutable:
 			case Options::kObjectFile:
@@ -5011,11 +5042,16 @@ void Options::reconfigureDefaults()
 			case Options::kKextBundle:
 				break;
 		}
+
+		// rdar://118247827 (Avoid CONST and DIRTY segments for ExclaveKit dylibs)
+		if ( strncmp(installPath(), "/System/ExclaveKit/", 19) == 0 )
+			fUseDataConstSegment = false;
 	}
 
 	// If we are going to be shared cache eligible, work out if we have dirty data as that requires V2
 	if ( fSharedRegionEligible && (fArchitecture != CPU_TYPE_I386)
-		&& (platforms().minOS(ld::supportsSplitSegV2) || (fArchitecture == CPU_TYPE_ARM64)) ) {
+		&& (platforms().minOS(ld::supportsSplitSegV2) || (fArchitecture == CPU_TYPE_ARM64))
+		&& (fOutputKind != OutputKind::kKextBundle /* rdar://109380314 */ ) ) {
 		// If -dirty_data_list not specified, look in $SDKROOT/AppleInternal/DirtyDataFiles/<dylib>.dirty for dirty data list
 		if ( fSymbolsMovesData.empty() && ( installPath() != NULL) && !fSDKPaths.empty() ) {
 			const char* dylibLeaf = strrchr(installPath(), '/');
@@ -5273,6 +5309,13 @@ void Options::reconfigureDefaults()
 			fAddCompactUnwindEncoding = false;
 			break;
 	}
+
+	// rdar://123947731 (ld should discard unwind information for sepOS binaries)
+	if ( platforms().contains(ld::Platform::sepOS) ) {
+		fAddCompactUnwindEncoding = false;
+		fRemoveDwarfUnwindIfCompactExists = false;
+		fRemoveDwarfUnwindSections = true;
+	}
 		
 	// only iOS/tvOS/watchOS executables should be encryptable
 	switch ( fOutputKind ) {
@@ -5296,7 +5339,6 @@ void Options::reconfigureDefaults()
 			ld::Platform::iOS,
 			ld::Platform::tvOS,
 			ld::Platform::watchOS,
-			ld::Platform::sepOS,
 			ld::Platform::driverKit
 	} );
 	bool noEncryptablePlatforms = std::none_of(encryptablePlatforms.begin(), encryptablePlatforms.end(), [this](ld::Platform p) {
@@ -5614,7 +5656,7 @@ void Options::reconfigureDefaults()
 	}
 
 	if ( fMakeRebaseSection ) {
-		if  ( (fOutputKind != kPreload) || (fArchitecture != CPU_TYPE_ARM) )
+		if ( (fOutputKind != kPreload) || ((fArchitecture != CPU_TYPE_ARM) && (fArchitecture != CPU_TYPE_RISCV32)) )
 			throw "-rebase_section can only be used with 32-bit arm and -preload output type";
 		fAllowTextRelocs = true;
 	}
@@ -5635,7 +5677,9 @@ void Options::reconfigureDefaults()
 		fNoLazyBinding = true;
 
 	// <rdar://problem/29241917> transform __DATA, __mod_init_funcs to __TEXT offsets
-	if ( fMakeChainedFixups )
+	// enable init-offsets by default only for userspace programs
+	// firmware can opt-in explicitly using -init_offsets option
+	if ( dyldLoadsOutput() && fMakeChainedFixups )
 		fMakeInitializersIntoOffsets = true;
 
 	if ( fPIEOnCommandLine && fDisablePositionIndependentExecutable )
@@ -5745,7 +5789,8 @@ void Options::reconfigureDefaults()
 				fVersionLoadCommand = true;
 			break;
 	}
-	
+
+
 	// support re-export of individual symbols in MacOSX 10.7 and iOS 4.2
 	if ( (fOutputKind == kDynamicLibrary) && platforms().minOS(ld::version2010) )
 		fCanReExportSymbols = true;
@@ -5911,7 +5956,7 @@ void Options::reconfigureDefaults()
   
 	// <rdar://problem/12258065> ARM64 needs 16KB page size for user land code
 	// <rdar://problem/15974532> make armv7[s] use 16KB pages in user land code for iOS 8 or later
-	if ( fSegmentAlignment == LD_PAGE_SIZE ) {
+	if ( !fForceAlignment ) {
 		switch ( fOutputKind ) {
 			case Options::kDynamicExecutable:
 			case Options::kDynamicLibrary:
@@ -6080,6 +6125,29 @@ void Options::reconfigureDefaults()
 		fWarnUnusedDylibs = fSharedRegionEligible;
 	}
 
+	// rdar://124540589 (Allow projects to opt out of softlinking LTO symbols)
+	if ( fLTOSoftloadRuntimeSymbolsForceOn ) {
+		fLTOSoftloadRuntimeSymbols = true;
+	}
+	else if ( fLTOSoftloadRuntimeSymbolsForceOff ) {
+		fLTOSoftloadRuntimeSymbols = false;
+	}
+	else {
+		switch ( fOutputKind ) {
+			case Options::kDynamicExecutable:
+			case Options::kDynamicLibrary:
+			case Options::kDynamicBundle:
+			case Options::kDyld:
+			case Options::kKextBundle:
+			case Options::kObjectFile:
+				fLTOSoftloadRuntimeSymbols = false;
+				break;
+			case Options::kStaticExecutable:
+			case Options::kPreload:
+				fLTOSoftloadRuntimeSymbols = true;
+				break;
+		}
+	}
 
 	// targeting newer OSs gets you relative objc method lists
 	if ( fForceObjCRelativeMethodListsOn ) {
@@ -6145,6 +6213,7 @@ static bool isModernPlatform(ld::Platform platform)
 		case ld::Platform::driverKit:
 		case ld::Platform::sepOS:
 			return true;
+
 	}
 }
 
@@ -6702,7 +6771,7 @@ void Options::checkIllegalOptionCombinations()
 		throw "-dyld_env can only used used when created main executables";
 
 	// -segment_order can only be used with -preload or -static
-	if ( !fSegmentOrder.empty() && ((fOutputKind != Options::kPreload) && (fOutputKind != kStaticExecutable)) )
+	if ( !fSegmentOrder.empty() && ((fOutputKind != Options::kPreload) && (fOutputKind != kStaticExecutable) && !platforms().contains(ld::Platform::freestanding) && !platforms().contains(ld::Platform::sepOS)) )
 		throw "-segment_order can only used used with -preload output";
 
 	// warn about bitcode option combinations
@@ -6765,15 +6834,6 @@ void Options::checkIllegalOptionCombinations()
 		if ( (fOutputKind != Options::kDynamicLibrary) && (fOutputKind != Options::kDynamicBundle) && (fOutputKind != Options::kObjectFile) ) {
 			warning("Only dylibs and bundles can be zippered, changing output to be macOS only.");
 			fPlatforms.erase(ld::Platform::iOSMac);
-		}
-	}
-
-	for (const char* sdkPath : fSDKPaths) {
-		std::string possiblePath = std::string(sdkPath) + "/AppleInternal/";
-		struct stat statBuffer;
-		if ( stat(possiblePath.c_str(), &statBuffer) == 0 ) {
-			fInternalSDK = true;
-			break;
 		}
 	}
 

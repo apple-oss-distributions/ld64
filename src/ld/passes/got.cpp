@@ -45,8 +45,8 @@ class File; // forward reference
 
 class GOTEntryAtom : public ld::Atom {
 public:
-											GOTEntryAtom(ld::Internal& internal, const ld::Atom* target, bool weakImport, bool weakDef, bool is64)
-				: ld::Atom(weakDef ? _s_sectionWeak : _s_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
+											GOTEntryAtom(ld::Internal& internal, const ld::Atom* target, bool weakImport, bool is64)
+				: ld::Atom(_s_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
 							ld::Atom::scopeLinkageUnit, ld::Atom::typeNonLazyPointer, 
 							symbolTableNotIn, false, false, false, (is64 ? ld::Atom::Alignment(3) : ld::Atom::Alignment(2))),
 				_fixup(0, ld::Fixup::k1of1, (is64 ? ld::Fixup::kindStoreTargetAddressLittleEndian64 : ld::Fixup::kindStoreTargetAddressLittleEndian32), target),
@@ -69,11 +69,9 @@ private:
 	bool									_is64;
 	
 	static ld::Section						_s_section;
-	static ld::Section						_s_sectionWeak;
 };
 
 ld::Section GOTEntryAtom::_s_section("__DATA", "__got", ld::Section::typeNonLazyPointer);
-ld::Section GOTEntryAtom::_s_sectionWeak("__DATA", "__got_weak", ld::Section::typeNonLazyPointer);
 
 uint64_t GOTEntryAtom::objectAddress() const
 {
@@ -89,8 +87,8 @@ uint64_t GOTEntryAtom::objectAddress() const
 
 class GOTAuthEntryAtom : public ld::Atom {
 public:
-											GOTAuthEntryAtom(ld::Internal& internal, const ld::Atom* target, bool weakImport, bool weakDef)
-				: ld::Atom(weakDef ? _s_sectionWeak : _s_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
+											GOTAuthEntryAtom(ld::Internal& internal, const ld::Atom* target, bool weakImport)
+				: ld::Atom(_s_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
 							ld::Atom::scopeLinkageUnit, ld::Atom::typeNonLazyPointer,
 							symbolTableNotIn, false, false, false, ld::Atom::Alignment(3)),
 				_fixup1(0, ld::Fixup::k1of2, ld::Fixup::kindSetAuthData, (ld::Fixup::AuthData){ 0, true, ld::Fixup::AuthData::ptrauth_key_asia }),
@@ -113,11 +111,9 @@ private:
 	const ld::Atom*							_target;
 
 	static ld::Section						_s_section;
-	static ld::Section						_s_sectionWeak;
 };
 
 ld::Section GOTAuthEntryAtom::_s_section("__DATA", "__auth_got", ld::Section::typeNonLazyPointer);
-ld::Section GOTAuthEntryAtom::_s_sectionWeak("__DATA", "__got_weak", ld::Section::typeNonLazyPointer);
 
 #endif
 
@@ -131,9 +127,8 @@ static uint64_t approxAtomAddress(const Options &opts, const ld::Atom *atom)
 }
 
 static bool gotFixup(const Options& opts, ld::Internal& internal, const ld::Atom* targetOfGOT, const ld::Atom* fixupAtom,
-					 const ld::Fixup* fixup, bool* optimizable, bool* targetIsExternalWeakDef, bool* targetIsPersonalityFn)
+					 const ld::Fixup* fixup, bool* optimizable, bool* targetIsPersonalityFn)
 {
-	*targetIsExternalWeakDef = false;
 	*targetIsPersonalityFn = false;
 	switch (fixup->kind) {
 		case ld::Fixup::kindStoreTargetAddressX86PCRel32GOTLoad:
@@ -175,7 +170,6 @@ static bool gotFixup(const Options& opts, ld::Internal& internal, const ld::Atom
 						case Options::kDynamicLibrary:
 						case Options::kDynamicBundle:
 						case Options::kKextBundle:
-							*targetIsExternalWeakDef = true;
 							*optimizable = false;
 							break;
 						case Options::kStaticExecutable:
@@ -308,7 +302,6 @@ void doPass(const Options& opts, ld::Internal& internal)
 	// don't create GOT atoms during this loop because that could invalidate the sections iterator
 	std::vector<const ld::Atom*> atomsReferencingGOT;
 	std::map<const ld::Atom*,bool>		weakImportMap;
-	std::map<const ld::Atom*,bool>		weakDefMap;
 	atomsReferencingGOT.reserve(128);
 	for (std::vector<ld::Internal::FinalSection*>::iterator sit=internal.sections.begin(); sit != internal.sections.end(); ++sit) {
 		ld::Internal::FinalSection* sect = *sit;
@@ -333,9 +326,8 @@ void doPass(const Options& opts, ld::Internal& internal)
                         break;   
 				}
 				bool optimizable;
-				bool targetIsExternalWeakDef;
 				bool targetIsPersonalityFn;
-				if ( !gotFixup(opts, internal, targetOfGOT, atom, fit, &optimizable, &targetIsExternalWeakDef, &targetIsPersonalityFn) )
+				if ( !gotFixup(opts, internal, targetOfGOT, atom, fit, &optimizable, &targetIsPersonalityFn) )
 					continue;
 				if ( optimizable ) {
 					// change from load of GOT entry to lea of target
@@ -406,8 +398,6 @@ void doPass(const Options& opts, ld::Internal& internal)
 					}
 					if ( gotMap.count({ targetOfGOT, targetIsPersonalityFn }) == 0 )
 						gotMap[{ targetOfGOT, targetIsPersonalityFn }] = NULL;
-					// record if target is weak def
-					weakDefMap[targetOfGOT] = targetIsExternalWeakDef;
 					// record weak_import attribute
 					std::map<const ld::Atom*,bool>::iterator pos = weakImportMap.find(targetOfGOT);
 					if ( pos == weakImportMap.end() ) {
@@ -468,15 +458,14 @@ void doPass(const Options& opts, ld::Internal& internal)
 	// make GOT entries
 	for (auto& entry : gotMap) {
 		if ( entry.second == NULL ) {
-			bool weakDef = opts.useDataConstSegment() && opts.sharedRegionEligible() && weakDefMap[entry.first.atom];
 #if SUPPORT_ARCH_arm64e
 			if ( entry.first.isPersonalityFn && (opts.supportsAuthenticatedPointers()) ) {
-				entry.second = new GOTAuthEntryAtom(internal, entry.first.atom, weakImportMap[entry.first.atom], weakDef);
+				entry.second = new GOTAuthEntryAtom(internal, entry.first.atom, weakImportMap[entry.first.atom]);
 				if (log) fprintf(stderr, "making new GOT slot for %s, gotMap[%p] = %p\n", entry.first.atom->name(), entry.first.atom, entry.second);
 				continue;
 			}
 #endif
-			entry.second = new GOTEntryAtom(internal, entry.first.atom, weakImportMap[entry.first.atom], weakDef, is64);
+			entry.second = new GOTEntryAtom(internal, entry.first.atom, weakImportMap[entry.first.atom], is64);
 			if (log) fprintf(stderr, "making new GOT slot for %s, gotMap[%p] = %p\n", entry.first.atom->name(), entry.first.atom, entry.second);
 		}
 	}
@@ -505,10 +494,9 @@ void doPass(const Options& opts, ld::Internal& internal)
                     break;    
 			}
 			bool optimizable;
-			bool targetIsExternalWeakDef;
 			bool targetIsPersonalityFn;
 			if ( (targetOfGOT == NULL) || !gotFixup(opts, internal, targetOfGOT, atom, fit,
-													&optimizable, &targetIsExternalWeakDef, &targetIsPersonalityFn) )
+													&optimizable, &targetIsPersonalityFn) )
 				continue;
 			if ( !optimizable ) {
 				// GOT use not optimized away, update to bind to GOT entry

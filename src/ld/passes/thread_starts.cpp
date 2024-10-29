@@ -206,7 +206,11 @@ static uint32_t processSections(ld::Internal& state, uint64_t minAlignment) {
 				if ( fit->kind == ld::Fixup::kindSubtractTargetAddress )
 					seenSubtractTarget = true;
 				if ( fit->isStore() ) {
-					if ( (fit->kind == ld::Fixup::kindStoreLittleEndian32) || (fit->kind == ld::Fixup::kindStoreLittleEndian64) )
+					if ( (fit->kind == ld::Fixup::kindStoreLittleEndian32) || (fit->kind == ld::Fixup::kindStoreLittleEndian64)
+#if SUPPORT_ARCH_arm64e
+						|| (fit->kind == ld::Fixup::kindStoreLittleEndianAuth64)
+#endif
+						)
 						isPointerStore = true;
 					if ( (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian32) || (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian64)
 #if SUPPORT_ARCH_arm64e
@@ -265,9 +269,17 @@ static uint32_t countChains(ld::Internal& state, uint32_t pointerFormat) {
 				if ( fit->kind == ld::Fixup::kindSubtractTargetAddress )
 					seenSubtractTarget = true;
 				if ( fit->isStore() ) {
-					if ( (fit->kind == ld::Fixup::kindStoreLittleEndian32) || (fit->kind == ld::Fixup::kindStoreLittleEndian64) )
+					if ( (fit->kind == ld::Fixup::kindStoreLittleEndian32) || (fit->kind == ld::Fixup::kindStoreLittleEndian64)
+#if SUPPORT_ARCH_arm64e
+						|| (fit->kind == ld::Fixup::kindStoreLittleEndianAuth64)
+#endif
+						)
 						isPointerStore = true;
-					if ( (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian32) || (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian64) )
+					if ( (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian32) || (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian64)
+#if SUPPORT_ARCH_arm64e
+						|| (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndianAuth64)
+#endif
+						)
 						isPointerStore = true;
 				}
 				if ( fit->isPcRelStore(false) )
@@ -367,9 +379,17 @@ void RebaseRLEAtom::makeRebaseRuns(ld::Internal::FinalSection* sect, std::vector
 			if ( fit->kind == ld::Fixup::kindSubtractTargetAddress )
 				seenSubtractTarget = true;
 			if ( fit->isStore() ) {
-				if ( (fit->kind == ld::Fixup::kindStoreLittleEndian32) || (fit->kind == ld::Fixup::kindStoreLittleEndian64) )
+				if ( (fit->kind == ld::Fixup::kindStoreLittleEndian32) || (fit->kind == ld::Fixup::kindStoreLittleEndian64)
+#if SUPPORT_ARCH_arm64e
+						|| (fit->kind == ld::Fixup::kindStoreLittleEndianAuth64)
+#endif
+						)
 					isPointerStore = true;
-				if ( (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian32) || (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian64) )
+				if ( (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian32) || (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian64)
+#if SUPPORT_ARCH_arm64e
+						|| (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndianAuth64)
+#endif
+						)
 					isPointerStore = true;
 			}
 			if ( fit->isPcRelStore(false) )
@@ -508,9 +528,17 @@ void RebaseRLEAtom::gatherRebases(std::vector<uint32_t>& locations) const
 				if ( fit->kind == ld::Fixup::kindSubtractTargetAddress )
 					seenSubtractTarget = true;
 				if ( fit->isStore() ) {
-					if ( (fit->kind == ld::Fixup::kindStoreLittleEndian32) || (fit->kind == ld::Fixup::kindStoreLittleEndian64) )
+					if ( (fit->kind == ld::Fixup::kindStoreLittleEndian32) || (fit->kind == ld::Fixup::kindStoreLittleEndian64)
+#if SUPPORT_ARCH_arm64e
+						|| (fit->kind == ld::Fixup::kindStoreLittleEndianAuth64)
+#endif
+						)
 						isPointerStore = true;
-					if ( (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian32) || (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian64) )
+					if ( (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian32) || (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndian64)
+#if SUPPORT_ARCH_arm64e
+						|| (fit->kind == ld::Fixup::kindStoreTargetAddressLittleEndianAuth64)
+#endif
+						)
 						isPointerStore = true;
 				}
 				if ( fit->isPcRelStore(false) )

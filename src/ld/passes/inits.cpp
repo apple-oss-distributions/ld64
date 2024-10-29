@@ -75,10 +75,6 @@ void doPass(Options& opts, ld::Internal& state)
 {
 	//const bool log = false;
 
-	// only transform initializers in final linked image
-	if ( !opts.dyldLoadsOutput() )
-		return;
-
     // only transform if targetting new enough OS
     if ( !opts.makeInitializersIntoOffsets() )
         return;

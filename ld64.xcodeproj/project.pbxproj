@@ -649,7 +649,6 @@
 				F9023C3606D5A23E001BBF46 /* Sources */,
 				F9023C3706D5A23E001BBF46 /* Frameworks */,
 				F97F5025070D0B6300B9FCD7 /* copy man page */,
-				F94E0A911CAC6B870092DC75 /* Add libtapi symlink */,
 			);
 			buildRules = (
 				F9E8D4BE07FCAF2A00FD5801 /* PBXBuildRule */,
@@ -802,24 +801,6 @@
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
 			shellScript = "echo \"static const char *compile_stubs = \" > $DERIVED_FILE_DIR/compile_stubs.h\ncat compile_stubs | sed s/\\\"/\\\\\\\\\\\"/g | sed s/^/\\\"/ | sed s/\\$/\\\\\\\\n\\\"/ >> $DERIVED_FILE_DIR/compile_stubs.h\necho \";\" >> $DERIVED_FILE_DIR/compile_stubs.h\n";
-			showEnvVarsInLog = 0;
-		};
-		F94E0A911CAC6B870092DC75 /* Add libtapi symlink */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "Add libtapi symlink";
-			outputPaths = (
-				"${BUILD_DIR}/lib/libLTO.dylib",
-				"${BUILD_DIR}/lib/libtapi.dylib",
-				"${BUILD_DIR}/lib/libswiftDemangle.dylib",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "if [ \"${CONFIGURATION}\" == \"Debug\" ]; then\n    cd \"${BUILD_DIR}\"\n    mkdir -p lib\n    cd lib\n    ln -s -f \"${TOOLCHAIN_DIR}/usr/lib/libLTO.dylib\"\n    ln -s -f \"${TOOLCHAIN_DIR}/usr/lib/libtapi.dylib\"\n    ln -s -f \"${TOOLCHAIN_DIR}/usr/lib/libswiftDemangle.dylib\"\nfi\n\n";
 			showEnvVarsInLog = 0;
 		};
 		F96D5367094A2754008E9EE8 /* ShellScript */ = {
@@ -1198,11 +1179,14 @@
 				GCC_WARN_UNUSED_PARAMETER = NO;
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(TOOLCHAIN_DIR)/usr/local/include",
-				);
+				HEADER_SEARCH_PATHS = "$(TOOLCHAIN_DIR)/usr/local/include";
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
-				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../lib/",
+					/var/db/xcode_select_link/Toolchains/XcodeDefault.xctoolchain/usr/lib/,
+					/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib,
+				);
 				LINKER_DISPLAYS_MANGLED_NAMES = NO;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_CPLUSPLUSFLAGS = (
@@ -1279,9 +1263,7 @@
 				GCC_WARN_UNUSED_PARAMETER = NO;
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(TOOLCHAIN_DIR)/usr/local/include",
-				);
+				HEADER_SEARCH_PATHS = "$(TOOLCHAIN_DIR)/usr/local/include";
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
 				OTHER_CPLUSPLUSFLAGS = (
@@ -1610,9 +1592,7 @@
 				GCC_WARN_UNUSED_PARAMETER = NO;
 				GCC_WARN_UNUSED_VALUE = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				HEADER_SEARCH_PATHS = (
-					"$(TOOLCHAIN_DIR)/usr/local/include",
-				);
+				HEADER_SEARCH_PATHS = "$(TOOLCHAIN_DIR)/usr/local/include";
 				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/bin";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../lib/";
 				ONLY_ACTIVE_ARCH = YES;

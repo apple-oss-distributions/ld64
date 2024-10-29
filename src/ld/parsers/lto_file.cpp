@@ -73,8 +73,8 @@ public:
 	uint64_t							size() const override		{ return 0; }
 	uint64_t							objectAddress() const override { return 0; }
 	void								copyRawContent(uint8_t buffer[]) const override { }
-	ld::Fixup::iterator					fixupsBegin() const override	{ return &_undefs[0]; }
-	ld::Fixup::iterator					fixupsEnd()	const override 	{ return &_undefs[_undefs.size()]; }
+	ld::Fixup::iterator					fixupsBegin() const override	{ return _undefs.data(); }
+	ld::Fixup::iterator					fixupsEnd()	const override 	{ return _undefs.data() + _undefs.size(); }
 
 	// for adding references to symbols outside bitcode file
 	void										addReference(const char* nm)
@@ -1790,6 +1790,38 @@ const char* archName(const uint8_t* fileContent, uint64_t fileLength)
 }
 
 //
+// used by ld to resolve runtime symbols early
+//
+// rdar://15476167 ("typeTempLTO should not make it to final linked image" when building a freestanding target)
+std::vector<std::string> softloadRuntimeSymbols()
+{
+	// TODO: rdar://15476167 ("typeTempLTO should not make it to final linked image" when building a freestanding target)
+	// adding all the symbols leads to a negative size impact and undefined symbols in some projects
+	//if ( runtime_api_version() >= 25 ) {
+	//	size_t  size = 0;
+	//	const char* const* symbols = ::lto_runtime_lib_symbols_list(&size);
+
+	//	if ( size != 0 ) {
+	//		std::vector<std::string> out;
+
+	//		for ( size_t i = 0; i < size; ++i ) {
+	//			// some of the names might be empty as LLVM reserves slots for some functions
+	//			// that can be configured dynamically depending on the target
+	//			if ( symbols[i] == nullptr ) continue;
+
+	//			// lto returns symbol names without the leading underscore
+	//			out.push_back(std::string("_") + symbols[i]);
+	//		}
+	//		return out;
+	//	}
+	//}
+
+	// fallback to a predefined (incomplete) list if libLTO didn't provide one
+	return std::vector<std::string>{ "___udivdi3", "___udivsi3", "___divsi3", "___muldi3",
+		"___gtdf2", "___ltdf2", "_memset", "_strcpy", "___sanitize_trap" };
+}
+
+//
 // used by ld for doing link time optimization
 //
 bool optimize(  const std::vector<const ld::Atom*>&	allAtoms,
@@ -1986,6 +2018,8 @@ WRAP_LTO_SYMBOL(lto_bool_t, lto_codegen_set_pic_model,
                 (lto_code_gen_t cg, lto_codegen_model model), (cg, model))
 WRAP_LTO_SYMBOL(void, lto_codegen_add_must_preserve_symbol,
                 (lto_code_gen_t cg, const char *symbol), (cg, symbol))
+WRAP_LTO_SYMBOL(const char* const*, lto_runtime_lib_symbols_list,
+                (size_t* sizeOut), (sizeOut))
 
 #undef WRAP_LTO_SYMBOL
 

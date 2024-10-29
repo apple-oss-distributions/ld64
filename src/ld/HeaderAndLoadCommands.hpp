@@ -199,7 +199,7 @@ HeaderAndLoadCommandsAtom<A>::HeaderAndLoadCommandsAtom(const Options& opts, ld:
 	_hasThreadLoadCommand = _options.needsThreadLoadCommand();
 	_hasEntryPointLoadCommand = _options.needsEntryPointLoadCommand();
 	_hasEncryptionLoadCommand = opts.makeEncryptable();
-	_hasSplitSegInfoLoadCommand = opts.sharedRegionEligible();
+	_hasSplitSegInfoLoadCommand = opts.sharedRegionEligible() || opts.emitSharedRegionMarker();
 	_hasRoutinesLoadCommand = (opts.initFunctionName() != NULL) && (state.entryPoint != NULL);
 	_hasSymbolTableLoadCommand = true;
 	_hasUUIDLoadCommand = (opts.UUIDMode() != Options::kUUIDNone);

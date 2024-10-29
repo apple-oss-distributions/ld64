@@ -122,7 +122,6 @@ public:
 	void									setSectionSizesAndAlignments();
 	void									sortSections();
 	void									markAtomsOrdered() { _atomsOrderedInSections = true; }
-	bool									hasReferenceToWeakExternal(const ld::Atom& atom);
 
 	virtual									~InternalState() {}
 private:
@@ -354,7 +353,7 @@ uint32_t InternalState::FinalSection::sectionOrder(const ld::Section& sect, uint
 	if ( sect.type() == ld::Section::typeLastSection )
 		return INT_MAX;
 	const std::vector<const char*>* sectionList = options.sectionOrder(sect.segmentName());
-	if ( ((options.outputKind() == Options::kPreload) || (options.outputKind() == Options::kDyld) || options.isKernel()) && (sectionList != NULL) ) {
+	if ( ((options.outputKind() == Options::kPreload) || (options.platforms().contains(ld::Platform::freestanding)) || (options.platforms().contains(ld::Platform::sepOS)) || (options.outputKind() == Options::kDyld) || options.isKernel()) && (sectionList != NULL) ) {
 		uint32_t count = 10;
 		for (std::vector<const char*>::const_iterator it=sectionList->begin(); it != sectionList->end(); ++it, ++count) {
 			if ( strcmp(*it, sect.sectionName()) == 0 ) 
@@ -575,34 +574,6 @@ static void validateFixups(const ld::Atom& atom)
 	}
 }
 #endif
-
-bool InternalState::hasReferenceToWeakExternal(const ld::Atom& atom)
-{
-	// if __DATA,__const atom has pointer to weak external symbol, don't move to __DATA_CONST
-	const ld::Atom* target = NULL;
-	for (ld::Fixup::iterator fit=atom.fixupsBegin(); fit != atom.fixupsEnd(); ++fit) {
-		if ( fit->firstInCluster() ) {
-			target = NULL;
-		}
-		switch ( fit->binding ) {
-			case ld::Fixup::bindingNone:
-			case ld::Fixup::bindingByNameUnbound:
-				break;
-			case ld::Fixup::bindingByContentBound:
-			case ld::Fixup::bindingDirectlyBound:
-				target = fit->u.target;
-				break;
-			case ld::Fixup::bindingsIndirectlyBound:
-				target = indirectBindingTable[fit->u.bindingIndex];
-				break;
-		}
-		if ( (target != NULL) && (target->definition() == ld::Atom::definitionRegular)
-			&& (target->combine() == ld::Atom::combineByName) && (target->scope() == ld::Atom::scopeGlobal) ) {
-			return true;
-		}
-	}
-	return false;
-}
 
 
 // .o files without .subsections_via_symbols have all atoms in a section chained together with kindNoneFollowOn
@@ -852,58 +823,23 @@ ld::Internal::FinalSection* InternalState::addAtom(const ld::Atom& atom)
 	// support for -rename_section and -rename_segment
 	for (const Options::SectionRename& rename : _options.sectionRenames()) {
 		if ( (strcmp(curSectName, rename.fromSection) == 0) && (strcmp(curSegName, rename.fromSegment) == 0) ) {
-			if ( _options.useDataConstSegment() && _options.sharedRegionEligible() && (strcmp(curSectName, "__const") == 0) && (strcmp(curSegName, "__DATA") == 0) && hasReferenceToWeakExternal(atom) ) {
-				// if __DATA,__const atom has pointer to weak external symbol, don't move to __DATA_CONST
-				curSectName = "__const_weak";
+			curSegName = rename.toSegment;
+			curSectName = rename.toSection;
 
 #if SUPPORT_ARCH_arm64e
-				// We may want __AUTH, but double check there isn't a chain already
+			// Actually move to __AUTH_CONST if we are const and authenticated
+			if ( !strcmp(curSegName, "__DATA_CONST") ) {
+				// We may want __AUTH_CONST, but double check there isn't a chain already
 				// for this atom which will force it in a different segment
-				curSegName = "__AUTH";
+				curSegName = "__AUTH_CONST";
 				if ( !inMoveAuthChain(atom, false, curSegName) )
-					curSegName = "__DATA";
+					curSegName = "__DATA_CONST";
+			}
 #endif
 
-				fs = this->getFinalSection(curSegName, curSectName, sectType);
-				if ( _options.traceSymbolLayout() )
-					printf("symbol '%s', contains pointers to weak symbols, so mapped it to %s/__const_weak\n", atom.name(), curSegName);
-			}
-			else if ( _options.useDataConstSegment() && _options.sharedRegionEligible() && (sectType == ld::Section::typeNonLazyPointer) && hasReferenceToWeakExternal(atom) ) {
-				// if __DATA,__nl_symbol_ptr atom has pointer to weak external symbol, don't move to __DATA_CONST
-				curSectName = "__got_weak";
-
-				curSegName = "__DATA";
-#if SUPPORT_ARCH_arm64e
-				// We may want __AUTH, but double check there isn't a chain already
-				// for this atom which will force it in a different segment
-				curSegName = "__AUTH";
-				if ( !inMoveAuthChain(atom, false, curSegName) )
-					curSegName = "__DATA";
-#endif
-
-				fs = this->getFinalSection(curSegName, curSectName, sectType);
-				if ( _options.traceSymbolLayout() )
-					printf("symbol '%s', contains pointers to weak symbols, so mapped it to %s/__got_weak\n", atom.name(), curSegName);
-			}
-			else {
-				curSegName = rename.toSegment;
-				curSectName = rename.toSection;
-
-#if SUPPORT_ARCH_arm64e
-				// Actually move to __AUTH_CONST if we are const and authenticated
-				if ( !strcmp(curSegName, "__DATA_CONST") ) {
-					// We may want __AUTH_CONST, but double check there isn't a chain already
-					// for this atom which will force it in a different segment
-					curSegName = "__AUTH_CONST";
-					if ( !inMoveAuthChain(atom, false, curSegName) )
-						curSegName = "__DATA_CONST";
-				}
-#endif
-
-				fs = this->getFinalSection(curSegName, rename.toSection, sectType);
-				if ( _options.traceSymbolLayout() )
-					printf("symbol '%s', -rename_section mapped it to %s/%s\n", atom.name(), fs->segmentName(), fs->sectionName());
-			}
+			fs = this->getFinalSection(curSegName, rename.toSection, sectType);
+			if ( _options.traceSymbolLayout() )
+				printf("symbol '%s', -rename_section mapped it to %s/%s\n", atom.name(), fs->segmentName(), fs->sectionName());
 		}
 	}
 	for (const Options::SegmentRename& rename : _options.segmentRenames()) {

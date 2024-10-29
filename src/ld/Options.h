@@ -341,6 +341,7 @@ public:
 	bool						traceEmitJSON() const { return fTraceEmitJSON; }
 	bool						deadCodeStrip()	const	{ return fDeadStrip; }
 	bool						removeSwiftReflectionMetadataSections()	const	{ return fRemoveSwiftReflectionMetadataSections; }
+	bool						removeDwarfUnwindSections() const { return fRemoveDwarfUnwindSections; }
 	UndefinedTreatment			undefinedTreatment() const { return fUndefinedTreatment; }
 	uint32_t 					minOSversion(const ld::Platform& platform) const;
 	bool						messagesPrefixedWithArchitecture();
@@ -358,15 +359,15 @@ public:
 	uint64_t					customStackAddr() const { return fStackAddr; }
 	bool						hasExecutableStack() const { return fExecutableStack; }
 	bool						hasNonExecutableHeap() const { return fNonExecutableHeap; }
-	UndefinesIterator			initialUndefinesBegin() const { return &fInitialUndefines[0]; }
-	UndefinesIterator			initialUndefinesEnd() const { return &fInitialUndefines[fInitialUndefines.size()]; }
+	UndefinesIterator			initialUndefinesBegin() const { return fInitialUndefines.data(); }
+	UndefinesIterator			initialUndefinesEnd() const { return fInitialUndefines.data() + fInitialUndefines.size(); }
 	const std::vector<const char*>&	initialUndefines() const { return fInitialUndefines; }
 	bool						printWhyLive(const char* name) const;
 	bool						printWhyLive() const { return !fWhyLive.empty(); }
 	uint32_t					minimumHeaderPad() const { return fMinimumHeaderPad; }
 	bool						maxMminimumHeaderPad() const { return fMaxMinimumHeaderPad; }
-	ExtraSection::const_iterator	extraSectionsBegin() const { return &fExtraSections[0]; }
-	ExtraSection::const_iterator	extraSectionsEnd() const { return &fExtraSections[fExtraSections.size()]; }
+	ExtraSection::const_iterator	extraSectionsBegin() const { return fExtraSections.data(); }
+	ExtraSection::const_iterator	extraSectionsEnd() const { return fExtraSections.data() + fExtraSections.size(); }
 	CommonsMode					commonsMode() const { return fCommonsMode; }
 	bool						warnCommons() const { return fWarnCommons; }
 	bool						keepRelocations();
@@ -384,13 +385,14 @@ public:
 	bool						printArchPrefix() const { return fMessagesPrefixedWithArchitecture; }
 	void						gotoPrimeLinker(int argc, const char* argv[]);
 	bool						sharedRegionEligible() const { return fSharedRegionEligible; }
+	bool						emitSharedRegionMarker() const { return fAddMarkerForCacheIneligibleDylibs; }
 	bool						printOrderFileStatistics() const { return fPrintOrderFileStatistics; }
 	const char*					orderFilePath() const { return fOrderFilePath; }
 	const char*					dTraceScriptName() { return fDtraceScriptName; }
 	bool						dTrace() { return (fDtraceScriptName != NULL); }
 	unsigned long				orderedSymbolsCount() const { return fOrderedSymbols.size(); }
-	OrderedSymbolsIterator		orderedSymbolsBegin() const { return &fOrderedSymbols[0]; }
-	OrderedSymbolsIterator		orderedSymbolsEnd() const { return &fOrderedSymbols[fOrderedSymbols.size()]; }
+	OrderedSymbolsIterator		orderedSymbolsBegin() const { return fOrderedSymbols.data(); }
+	OrderedSymbolsIterator		orderedSymbolsEnd() const { return fOrderedSymbols.data() + fOrderedSymbols.size(); }
 	uint64_t					baseWritableAddress() { return fBaseWritableAddress; }
 	uint64_t					segmentAlignment() const { return fSegmentAlignment; }
 	uint64_t					segPageSize(const char* segName) const;
@@ -565,6 +567,7 @@ public:
 	bool 						sharedCacheEligiblePath(const char* path) const;
 	const char* 				debugMapObjectPrefixPath() const { return fOSOPrefixPath; }
 	bool						fromSDK(const char* path) const;
+	bool						ltoSoftloadRuntimeSymbols() const { return fLTOSoftloadRuntimeSymbols; }
 
 	static uint32_t				parseVersionNumber32(const char*);
 
@@ -671,6 +674,7 @@ private:
 	mutable InterposeMode				fInterposeMode;
 	bool								fDeadStrip;
 	bool 								fRemoveSwiftReflectionMetadataSections;
+	bool								fRemoveDwarfUnwindSections;
 	NameSpace							fNameSpace;
 	uint32_t							fDylibCompatVersion;
 	uint64_t							fDylibCurrentVersion;
@@ -707,6 +711,9 @@ private:
 	const char*							fMapPath;
 	const char*							fDyldInstallPath;
 	const char*							fLtoCachePath;
+	bool										fLTOSoftloadRuntimeSymbols;
+	bool										fLTOSoftloadRuntimeSymbolsForceOn;
+	bool										fLTOSoftloadRuntimeSymbolsForceOff;
 	bool								fLtoPruneIntervalOverwrite;
 	int									fLtoPruneInterval;
 	int									fLtoPruneAfter;
@@ -743,6 +750,7 @@ private:
 	bool								fPrintOptions;
 	bool								fSharedRegionEligible;
 	bool								fSharedRegionEligibleForceOff;
+	bool								fAddMarkerForCacheIneligibleDylibs = false;
 	bool								fPrintOrderFileStatistics;
 	bool								fReadOnlyx86Stubs;
 	bool								fPositionIndependentExecutable;
@@ -919,6 +927,7 @@ private:
 	std::vector<SymbolsMove>			fSymbolsMovesData;
 	std::vector<SymbolsMove>			fSymbolsMovesCode;
 	std::vector<SymbolsMove>			fSymbolsMovesAXMethodLists;
+	std::vector<const char*>			fImageSuffixes;
 	bool								fSaveTempFiles;
     mutable Snapshot					fLinkSnapshot;
     bool								fSnapshotRequested;
@@ -932,7 +941,6 @@ private:
 	mutable std::vector<Options::TAPIInterface> fTAPIFiles;
 	bool								fPreferTAPIFile;
 	const char*							fOSOPrefixPath;
-	const char*							fImageSuffix;
 };
 
 

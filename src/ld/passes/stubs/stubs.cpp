@@ -315,7 +315,7 @@ ld::Atom* Pass::makeStub(const ld::Atom& target, bool weakImport)
 			else if ( _options.makeChainedFixups() && !stubToResolver )
 				return new ld::passes::stubs::arm64_32::NonLazyStubAtom(*this, target, weakImport);
 			else
-				return new ld::passes::stubs::arm64_32::StubAtom(*this, target, stubToGlobalWeakDef, stubToResolver, weakImport);
+				return new ld::passes::stubs::arm64_32::StubAtom(*this, target, stubToGlobalWeakDef, stubToResolver, weakImport, usingDataConst);
 			break;
 #endif
 	}

@@ -101,7 +101,7 @@ OutputFile::OutputFile(const Options& opts, ld::Internal& state)
 		_hasThreadedPageStarts(opts.makeThreadedStartsSection()),
 		_hasSymbolTable(true),
 		_hasSectionRelocations(opts.outputKind() == Options::kObjectFile),
-		_hasSplitSegInfo(opts.sharedRegionEligible()),
+		_hasSplitSegInfo(opts.sharedRegionEligible() || opts.emitSharedRegionMarker()),
 		_hasFunctionStartsInfo(opts.addFunctionStarts()),
 		_hasDataInCodeInfo(opts.addDataInCodeInfo()),
 		_hasDynamicSymbolTable(true),
@@ -1308,7 +1308,7 @@ void OutputFile::rangeCheckRISCVBranch20(int64_t displacement, ld::Internal& sta
 		const ld::Atom* target;
 		throwf("20-bit branch out of range (%lld max is +/-1MB): from %s (0x%08llX) to %s (0x%08llX)",
 				displacement, atom->name(), atom->finalAddress(), referenceTargetAtomName(state, fixup), 
-				addressOf(state, fixup, &target));
+				fixup->binding ? addressOf(state, fixup, &target) : 0);
 	}
 }
 #endif
@@ -2286,19 +2286,20 @@ void OutputFile::applyFixUps(ld::Internal& state, uint64_t mhAddress, const ld::
 				else
 					delta = accumulator - ((atom->finalAddress() + fit->offsetInAtom));
 				instruction = get32LE(fixUpLocation);
-				imm12 = (instruction >> 20);
-				signedImm12 = (int32_t)imm12;
-				if ( signedImm12 & 0x800 )
-					signedImm12 |= 0xFFFFF000;
-				delta -= signedImm12;
-				// FIXME: rangeCheck(delta, state, atom, fit);
 				if ((instruction & 0x7F) == 0x23 || (instruction & 0x7F) == 0x27) {
 					// sw/sh/sb/fsw/fsd
+					signedImm12 = ((int32_t)instruction) >> 20;
+					signedImm12 = (signedImm12 & ~0x1F) | extractBits(instruction, 11, 7);
+					delta -= signedImm12;
+					// FIXME: rangeCheck(delta, state, atom, fit);
 					uint32_t imm11_5 = extractBits(delta, 11, 5) << 25;
 					uint32_t imm4_0 = extractBits(delta, 4, 0) << 7;
 					newInstruction = (instruction & 0x1FFF07F) | imm11_5 | imm4_0;
 				} else {
 					// addi/lw/lh/lb
+					signedImm12 = ((int32_t)instruction) >> 20;
+					delta -= signedImm12;
+					// FIXME: rangeCheck(delta, state, atom, fit);
 					newInstruction = (instruction & 0x000FFFFF) | ((delta & 0x00000FFF) << 20);
 				}
 				set32LE(fixUpLocation, newInstruction);
@@ -3663,7 +3664,7 @@ void OutputFile::writeAtoms(ld::Internal& state, uint8_t* wholeBuffer)
 					dyld_chained_starts_offsets* startsSection = (dyld_chained_starts_offsets*)(&wholeBuffer[sect->fileOffset]);
 					startsSection->pointer_format = pointer_format;
 					startsSection->starts_count   = startOffsets.size();
-					memcpy(startsSection->chain_starts, &startOffsets[0], startsArraySize);
+					memcpy(startsSection->chain_starts, startOffsets.data(), startsArraySize);
 				}
 			}
 		}
@@ -6799,6 +6800,11 @@ void OutputFile::addSectionRelocs(ld::Internal& state, ld::Internal::FinalSectio
 
 void OutputFile::makeSplitSegInfo(ld::Internal& state)
 {
+	if ( !_options.sharedRegionEligible() && _options.emitSharedRegionMarker() ) {
+		// We'll emit a marker in the encode() methods.
+		return;
+	}
+
 	if ( _options.sharedRegionEncodingV2() ) {
 		this->makeSplitSegInfoV2(state);
 		return;
@@ -7977,7 +7983,7 @@ void OutputFile::buildLINKEDITContent(ld::Internal& state)
 			}
 		});
 	}
-	if ( _options.sharedRegionEligible() ) {
+	if ( _options.sharedRegionEligible() || _options.emitSharedRegionMarker() ) {
 		dispatch_group_async(group, queue, ^{
 			this->makeSplitSegInfo(state);	 // needs state.section.atoms, updates: _splitSegInfoAtom
 			_splitSegInfoAtom->encode();

@@ -220,6 +220,7 @@ static const PlatformVersion mac12_0		(Platform::macOS, 0x000C0000);
 static const PlatformVersion mac13_0		(Platform::macOS, 0x000D0000);
 static const PlatformVersion mac14_0		(Platform::macOS, 0x000E0000);
 static const PlatformVersion mac14_4		(Platform::macOS, 0x000E0400);
+static const PlatformVersion mac15_0		(Platform::macOS, 0x000F0000);
 static const PlatformVersion mac10_Future 	(Platform::macOS, 0x10000000);
 
 static const PlatformVersion iOS_2_0 		(Platform::iOS, 0x00020000);
@@ -241,6 +242,7 @@ static const PlatformVersion iOS_15_0		(Platform::iOS, 0x000F0000);
 static const PlatformVersion iOS_16_0		(Platform::iOS, 0x00100000);
 static const PlatformVersion iOS_17_0		(Platform::iOS, 0x00110000);
 static const PlatformVersion iOS_17_4		(Platform::iOS, 0x00110400);
+static const PlatformVersion iOS_18_0		(Platform::iOS, 0x00120000);
 static const PlatformVersion iOS_Future 	(Platform::iOS, 0x10000000);
 
 static const PlatformVersion watchOS_1_0 		(Platform::watchOS, 0x00010000);
@@ -252,6 +254,7 @@ static const PlatformVersion watchOS_8_0		(Platform::watchOS, 0x00080000);
 static const PlatformVersion watchOS_9_0		(Platform::watchOS, 0x00090000);
 static const PlatformVersion watchOS_10_0		(Platform::watchOS, 0x000A0000);
 static const PlatformVersion watchOS_10_4		(Platform::watchOS, 0x000A0400);
+static const PlatformVersion watchOS_11_0		(Platform::watchOS, 0x000B0000);
 static const PlatformVersion watchOS_Future		(Platform::watchOS, 0x10000000);
 
 static const PlatformVersion tvOS_9_0 			(Platform::tvOS, 0x00090000);
@@ -262,6 +265,7 @@ static const PlatformVersion tvOS_15_0			(Platform::tvOS, 0x000F0000);
 static const PlatformVersion tvOS_16_0			(Platform::tvOS, 0x00100000);
 static const PlatformVersion tvOS_17_0			(Platform::tvOS, 0x00110000);
 static const PlatformVersion tvOS_17_4			(Platform::tvOS, 0x00110400);
+static const PlatformVersion tvOS_18_0			(Platform::tvOS, 0x00120000);
 static const PlatformVersion tvOS_Future		(Platform::tvOS, 0x10000000);
 
 static const PlatformVersion bridgeOS_1_0 			(Platform::bridgeOS, 0x00010000);
@@ -270,6 +274,7 @@ static const PlatformVersion bridgeOS_5_0 			(Platform::bridgeOS, 0x00050000);
 static const PlatformVersion bridgeOS_6_0			(Platform::bridgeOS, 0x00060000);
 static const PlatformVersion bridgeOS_7_0			(Platform::bridgeOS, 0x00070000);
 static const PlatformVersion bridgeOS_8_0			(Platform::bridgeOS, 0x00080000);
+static const PlatformVersion bridgeOS_9_0			(Platform::bridgeOS, 0x00090000);
 static const PlatformVersion bridgeOS_Future		(Platform::bridgeOS, 0x10000000);
 
 static const PlatformVersion driverKit_19_0 		(Platform::driverKit, 0x00130000);
@@ -277,6 +282,7 @@ static const PlatformVersion driverKit_20_0 		(Platform::driverKit, 0x00140000);
 static const PlatformVersion driverKit_21_0 		(Platform::driverKit, 0x00150000);
 static const PlatformVersion driverKit_22_0			(Platform::driverKit, 0x00160000);
 static const PlatformVersion driverKit_23_0			(Platform::driverKit, 0x00170000);
+static const PlatformVersion driverKit_24_0			(Platform::driverKit, 0x00180000);
 static const PlatformVersion driverKit_Future		(Platform::driverKit, 0x10000000);
 
 
@@ -293,6 +299,7 @@ static const PlatformSet simulatorPlatforms ( {
        Platform::tvOS_simulator,
        Platform::watchOS_simulator,
 } );
+
 
 
 //FIXME do we need to add simulatots to these?
@@ -313,6 +320,9 @@ static const VersionSet version2021Fall ({mac12_0, iOS_15_0, watchOS_8_0, tvOS_1
 });
 
 static const VersionSet version2022Fall ({mac13_0, iOS_16_0, watchOS_9_0, tvOS_16_0, bridgeOS_7_0, sepOS_1_0,
+});
+
+static const VersionSet version2024Fall ({mac15_0, iOS_18_0, watchOS_11_0, tvOS_18_0, bridgeOS_9_0, sepOS_1_0,
 });
 
 

@@ -63,6 +63,7 @@ static const PlatformInfo sAllSupportedPlatforms[] = {
     { Platform::driverKit,         Platform::driverKit,    "DriverKit",         "-driverkit_version_min",         NULL,                         0x00130000, 0x00130000, 0,                       false, true,  PlatEnforce::error,                     PlatEnforce::error },
     { Platform::sepOS,             Platform::sepOS,        "sepOS",             "",                               NULL,                         0x00010000, 0x00010000, 0,                       false, true,  PlatEnforce::warning,                   PlatEnforce::warning },
     { Platform::freestanding,      Platform::freestanding, "free standing",     "-preload",                       NULL,                         0x00000000, 0x00000000, 0,                       false, false,  PlatEnforce::allow,                    PlatEnforce::allow },
+
 };
 
 static void versionToString(uint32_t value, char buffer[32])

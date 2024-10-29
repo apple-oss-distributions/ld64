@@ -763,12 +763,12 @@ public:
 															{ if ( _hash == 0 ) _hash = sect().contentHash(this, ind); return _hash; }
 	virtual bool								canCoalesceWith(const ld::Atom& rhs, const ld::IndirectBindingTable& ind) const 
 															{ return sect().canCoalesceWith(this, rhs, ind); }
-	virtual ld::Fixup::iterator					fixupsBegin() const	{ return &machofile()._fixups[_fixupsStartIndex]; }
-	virtual ld::Fixup::iterator					fixupsEnd()	const	{ return &machofile()._fixups[_fixupsStartIndex+_fixupsCount]; }
-	virtual ld::Atom::UnwindInfo::iterator		beginUnwind() const	{ return &machofile()._unwindInfos[_unwindInfoStartIndex]; }
-	virtual ld::Atom::UnwindInfo::iterator		endUnwind()	const	{ return &machofile()._unwindInfos[_unwindInfoStartIndex+_unwindInfoCount];  }
-	virtual ld::Atom::LineInfo::iterator		beginLineInfo() const{ return &machofile()._lineInfos[_lineInfoStartIndex]; }
-	virtual ld::Atom::LineInfo::iterator		endLineInfo() const { return &machofile()._lineInfos[_lineInfoStartIndex+_lineInfoCount];  }
+	virtual ld::Fixup::iterator					fixupsBegin() const	{ return machofile()._fixups.data() + _fixupsStartIndex; }
+	virtual ld::Fixup::iterator					fixupsEnd()	const	{ return machofile()._fixups.data() + (_fixupsStartIndex+_fixupsCount); }
+	virtual ld::Atom::UnwindInfo::iterator		beginUnwind() const	{ return machofile()._unwindInfos.data() + _unwindInfoStartIndex; }
+	virtual ld::Atom::UnwindInfo::iterator		endUnwind()	const	{ return machofile()._unwindInfos.data() + (_unwindInfoStartIndex+_unwindInfoCount);  }
+	virtual ld::Atom::LineInfo::iterator		beginLineInfo() const{ return machofile()._lineInfos.data() + _lineInfoStartIndex; }
+	virtual ld::Atom::LineInfo::iterator		endLineInfo() const { return machofile()._lineInfos.data() + (_lineInfoStartIndex+_lineInfoCount);  }
 	virtual void								setFile(const ld::File* f);
 
 private:
@@ -2409,7 +2409,8 @@ void Parser<A>::findPlatforms(const macho_header<P>* header, uint64_t fileLength
 				pv.minVersion = versCmd->version();
 				pv.sdkVersion = versCmd->sdk();
 				//  <rdar://problem/64626178> in -r mode, properly infer old binaries
-				if ( header->cputype() == CPU_TYPE_X86_64 )
+				//  rdar://123842672 (strip -S fails on libclang_rt.tvossim.a: internal link edit command failed)
+				if ( (header->cputype() == CPU_TYPE_I386) || (header->cputype() == CPU_TYPE_X86_64) )
 					pv.platform = ld::Platform::tvOS_simulator;
 				platformsFound.insert(pv);
 				break;
@@ -3792,9 +3793,11 @@ bool Parser<A>::skip_form(const uint8_t ** offset, const uint8_t * end, uint64_t
       break;
 
     case DW_FORM_string:
-      while (*offset != end && **offset)
-		  ++*offset;
-	  return true;
+      if ( *offset == end )
+        return false;
+      // rdar://124698722 (off-by-one error when decoding DW_FORM_string)
+      *offset += strnlen((char*)*offset, (end-(*offset)-1)) + 1;
+      return true;
     case DW_FORM_data1:
     case DW_FORM_flag:
     case DW_FORM_ref1:
@@ -6996,11 +6999,13 @@ bool Section<x86_64>::addRelocFixup(class Parser<x86_64>& parser, const macho_re
 					// rdar://94118705 account for the atom modulus when checking if it may cross a page boundry.
 					// Do this only when the atom has at least a pointer size alignment, otherwise we might introduce
 					// unaligned pointers by changing the atom's alignment.
-					if ( parser.avoidMisalignedPointers() && (src.atom->_alignmentPowerOf2 >= 3) && (((src.offsetInAtom + src.atom->_alignmentModulus) & 0x7) != 0) ) {
+					// rdar://104224215 (ld64 shouldn't attempt to avoid misaligned pointers in files without subsections via symbols)
+					if ( !this->addFollowOnFixups() && parser.avoidMisalignedPointers() && (src.atom->_alignmentPowerOf2 >= 3) && (((src.offsetInAtom + src.atom->_alignmentModulus) & 0x7) != 0) ) {
 					       // rdar://85230486 atom has misaligned pointer, over-align atom so the misaligned pointer will not cross a page boundary
 					       uint64_t atomSize = src.atom->size() + src.atom->_alignmentModulus;
 					       uint64_t currentAlign = (1ULL << src.atom->alignment().powerOf2);
-					       if ( currentAlign <  atomSize ) {
+					       // assume 4k page size for x86, increasing alignment won't guarantee aligned pointers if atom is larger than the page size
+					       if ( currentAlign < atomSize && atomSize <= 0x1000 ) {
 						       src.atom->_alignmentPowerOf2 = 64 - __builtin_clzl(atomSize - 1);
 					       }
 				        }

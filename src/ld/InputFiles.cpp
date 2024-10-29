@@ -163,7 +163,7 @@ public:
 									CustomStackAtom(uint64_t sz)
 										: ld::Atom(_s_section, ld::Atom::definitionRegular, ld::Atom::combineNever,
 											ld::Atom::scopeTranslationUnit, ld::Atom::typeZeroFill, 
-											symbolTableNotIn, false, false, false, ld::Atom::Alignment(12)),
+											symbolTableNotIn, /* dontDeadStrip */ true, false, false, ld::Atom::Alignment(12)),
 											_size(sz) {}
 
 	virtual ld::File*						file() const					{ return NULL; }
@@ -1583,7 +1583,8 @@ void InputFiles::dylibs(ld::Internal& state)
 					  _options.platforms().contains(ld::Platform::sepOS) ||
 					  _options.platforms().contains(ld::Platform::freestanding);
 
-	
+
+
 	// <rdar://problem/10807040> give an error when -nostdlib is used and libSystem is missing
 	if ( (state.dylibs.size() == 0) && shouldLinkLibSystem && !skipForPlatform
 	// <rdar://problem/75177082> (ld64 should enforce that dylibs and bundles link with libSystem.dylib)

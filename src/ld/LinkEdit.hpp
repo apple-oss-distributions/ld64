@@ -56,7 +56,7 @@ public:
 	std::vector<uint8_t>& bytes() { return _data; }
 	unsigned long size() const { return _data.size(); }
 	void reserve(unsigned long l) { _data.reserve(l); }
-	const uint8_t* start() const { return &_data[0]; }
+	const uint8_t* start() const { return _data.data(); }
 
 	void append_uleb128(uint64_t value) {
 		uint8_t byte;
@@ -1362,24 +1362,24 @@ void ChainedInfoAtom<A>::encode() const
 			this->_encodedData.pad_to_size(4);
 			chainHeader = (dyld_chained_fixups_header*)(this->_encodedData.start());
 			chainHeader->imports_offset = this->_encodedData.size();
-			this->_encodedData.append_mem(&imports[0], sizeof(dyld_chained_import)*imports.size());
+			this->_encodedData.append_mem(imports.data(), sizeof(dyld_chained_import)*imports.size());
 			break;
 		case DYLD_CHAINED_IMPORT_ADDEND:
 			this->_encodedData.pad_to_size(4);
 			chainHeader = (dyld_chained_fixups_header*)(this->_encodedData.start());
 			chainHeader->imports_offset = this->_encodedData.size();
-			this->_encodedData.append_mem(&importsAddend[0], sizeof(dyld_chained_import_addend)*importsAddend.size());
+			this->_encodedData.append_mem(importsAddend.data(), sizeof(dyld_chained_import_addend)*importsAddend.size());
 			break;
 		case DYLD_CHAINED_IMPORT_ADDEND64:
 			this->_encodedData.pad_to_size(8);
 			chainHeader = (dyld_chained_fixups_header*)(this->_encodedData.start());
 			chainHeader->imports_offset = this->_encodedData.size();
-			this->_encodedData.append_mem(&importsAddend64[0], sizeof(dyld_chained_import_addend64)*importsAddend64.size());
+			this->_encodedData.append_mem(importsAddend64.data(), sizeof(dyld_chained_import_addend64)*importsAddend64.size());
 			break;
 	}
 	chainHeader = (dyld_chained_fixups_header*)(this->_encodedData.start());
 	chainHeader->symbols_offset = this->_encodedData.size();
-	this->_encodedData.append_mem(&stringPool[0], stringPool.size());
+	this->_encodedData.append_mem(stringPool.data(), stringPool.size());
 
 	// align to pointer size
 	this->_encodedData.pad_to_size(sizeof(pint_t));
@@ -1739,6 +1739,12 @@ void SplitSegInfoV1Atom<A>::uleb128EncodeAddresses(const std::vector<uint64_t>& 
 template <typename A>
 void SplitSegInfoV1Atom<A>::encode() const
 {
+	if ( !_options.sharedRegionEligible() && _options.emitSharedRegionMarker() ) {
+		assert(this->_encodedData.size() == 0);
+		this->_encoded = true;
+		return;
+	}
+
 	// sort into group by pointer adjustment kind
 	std::vector<OutputFile::SplitSegInfoEntry>& info = this->_writer._splitSegInfos;
 	for (std::vector<OutputFile::SplitSegInfoEntry>::const_iterator it = info.begin(); it != info.end(); ++it) {
@@ -1859,6 +1865,12 @@ ld::Section SplitSegInfoV2Atom<A>::_s_section("__LINKEDIT", "__splitSegInfo", ld
 template <typename A>
 void SplitSegInfoV2Atom<A>::encode() const
 {
+	if ( !_options.sharedRegionEligible() && _options.emitSharedRegionMarker() ) {
+		assert(this->_encodedData.size() == 0);
+		this->_encoded = true;
+		return;
+	}
+
 	// sort into group by adjustment kind
 	//fprintf(stderr, "_splitSegV2Infos.size=%lu\n", this->_writer._splitSegV2Infos.size());
 	WholeMap whole;

@@ -146,7 +146,6 @@ private:
 	bool									_is64;
 	
 	static ld::Section						_s_section;
-	static ld::Section						_s_sectionWeak;
 };
 
 ld::Section SelRefAtom::_s_section("__DATA", "__objc_selrefs", ld::Section::typeCStringPointer);
@@ -181,7 +180,6 @@ private:
 	bool									_is64;
 
 	static ld::Section						_s_section;
-	static ld::Section						_s_sectionWeak;
 };
 
 ld::Section NonLazyClassListAtom::_s_section("__DATA", "__objc_nlclslist", ld::Section::typeObjC2ClassList);
