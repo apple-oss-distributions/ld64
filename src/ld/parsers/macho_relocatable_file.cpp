@@ -1432,7 +1432,7 @@ bool Parser<arm64_32>::validFile(const uint8_t* fileContent, bool subtypeMustMat
 }
 #endif
 
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <>
 bool Parser<riscv32>::validFile(const uint8_t* fileContent, bool subtypeMustMatch, cpu_subtype_t subtype)
 {
@@ -1521,7 +1521,7 @@ const char* Parser<arm64_32>::fileKind(const uint8_t* fileContent)
 }
 #endif
 
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <>
 const char* Parser<riscv32>::fileKind(const uint8_t* fileContent)
 {
@@ -2182,7 +2182,7 @@ template <> uint8_t Parser<arm64>::loadCommandSizeMask()	{ return 0x07; }
 #if SUPPORT_ARCH_arm64_32
 template <> uint8_t Parser<arm64_32>::loadCommandSizeMask()	{ return 0x03; }
 #endif
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <> uint8_t Parser<riscv32>::loadCommandSizeMask()  { return 0x03; }
 #endif
 
@@ -5146,7 +5146,7 @@ void CFISection<arm64_32>::cfiParse(class Parser<arm64_32>& parser, uint8_t* buf
 }
 #endif
 
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <>
 void CFISection<riscv32>::cfiParse(class Parser<riscv32>& parser, uint8_t* buffer,
 									libunwind::CFI_Atom_Info<CFISection<riscv32>::OAS> cfiArray[],
@@ -5196,7 +5196,7 @@ template <> bool CFISection<arm64>::bigEndian() { return false; }
 #if SUPPORT_ARCH_arm64_32
 template <> bool CFISection<arm64_32>::bigEndian() { return false; }
 #endif
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <> bool CFISection<riscv32>::bigEndian() { return false; }
 #endif
 
@@ -5716,7 +5716,7 @@ bool CUSection<arm64_32>::encodingMeansUseDwarf(compact_unwind_encoding_t enc)
 }
 #endif
 
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <>
 bool CUSection<riscv32>::encodingMeansUseDwarf(compact_unwind_encoding_t enc)
 {
@@ -5981,7 +5981,7 @@ ld::Atom::SymbolTableInclusion ImplicitSizeSection<arm64_32>::symbolTableInclusi
 }
 #endif
 
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <>
 ld::Atom::SymbolTableInclusion ImplicitSizeSection<riscv32>::symbolTableInclusion()
 {
@@ -6297,7 +6297,7 @@ ld::Fixup::Kind NonLazyPointerSection<arm64_32>::fixupKind()
 }
 #endif
 
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <>
 ld::Fixup::Kind NonLazyPointerSection<riscv32>::fixupKind()
 {
@@ -8578,7 +8578,7 @@ bool Section<arm64_32>::addRelocFixup(class Parser<arm64_32>& parser, const mach
 #endif
 
 
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 template <>
 void Section<riscv32>::targetFromExternReloc(class Parser<riscv32>& parser, Parser<riscv32>::SourceLocation& src, const macho_relocation_info<P>* reloc, Parser<riscv32>::TargetDesc& target)
 {
@@ -8769,7 +8769,7 @@ bool Section<riscv32>::addRelocFixup(class Parser<riscv32>& parser, const macho_
 	}
 	return result;
 }
-#endif // SUPPORT_ARCH_riscv
+#endif // SUPPORT_ARCH_riscv32
 
 template <typename A>
 bool ObjC1ClassSection<A>::addRelocFixup(class Parser<A>& parser, const macho_relocation_info<P>* reloc)
@@ -9229,7 +9229,7 @@ ld::relocatable::File* parse(const uint8_t* fileContent, uint64_t fileLength,
 				return mach_o::relocatable::Parser<arm64_32>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
 			break;
 #endif
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 		case CPU_TYPE_RISCV32:
 			if ( mach_o::relocatable::Parser<riscv32>::validFile(fileContent, opts.objSubtypeMustMatch, opts.subType) )
 				return mach_o::relocatable::Parser<riscv32>::parse(fileContent, fileLength, path, modTime, ordinal, opts);
@@ -9258,7 +9258,7 @@ bool isObjectFile(const uint8_t* fileContent, uint64_t fileLength, const ParserO
 		case CPU_TYPE_ARM64_32:
 			return ( mach_o::relocatable::Parser<arm64_32>::validFile(fileContent, opts.objSubtypeMustMatch, opts.subType) );
 #endif
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 		case CPU_TYPE_RISCV32:
 			return ( mach_o::relocatable::Parser<riscv32>::validFile(fileContent, opts.objSubtypeMustMatch, opts.subType) );
 #endif
@@ -9308,7 +9308,7 @@ bool isObjectFile(const uint8_t* fileContent, uint64_t fileLength, cpu_type_t* r
 		return true;
 	}
 #endif
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 	if ( mach_o::relocatable::Parser<riscv32>::validFile(fileContent, false, 0) ) {
 		const macho_header<Pointer32<LittleEndian> >* header = (const macho_header<Pointer32<LittleEndian> >*)fileContent;
 		*result = CPU_TYPE_RISCV32;
@@ -9344,7 +9344,7 @@ const char* archName(const uint8_t* fileContent)
 		return mach_o::relocatable::Parser<arm64_32>::fileKind(fileContent);
 	}
 #endif
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 	if ( mach_o::relocatable::Parser<riscv32>::validFile(fileContent, false, 0) ) {
 		return mach_o::relocatable::Parser<riscv32>::fileKind(fileContent);
 	}
@@ -9414,7 +9414,7 @@ bool getNonLocalSymbols(const uint8_t* fileContent, std::vector<const char*> &sy
 		return mach_o::relocatable::Parser<arm64_32>::getNonLocalSymbols(fileContent, syms);
 	}
 #endif
-#if SUPPORT_ARCH_riscv
+#if SUPPORT_ARCH_riscv32
 	else if ( mach_o::relocatable::Parser<riscv32>::validFile(fileContent, false, 0) ) {
 		return mach_o::relocatable::Parser<riscv32>::getNonLocalSymbols(fileContent, syms);
 	}

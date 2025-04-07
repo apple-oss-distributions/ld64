@@ -179,9 +179,6 @@ public:
 			return p;
 		return NULL;
 	}
-	
-	BlobType *clone() const
-	{ assert(validateBlob()); return specific(this->BlobCore::clone());	}
 
 	static BlobType *readBlob(int fd)
 	{ return specific(BlobCore::readBlob(fd, _magic, sizeof(BlobType), 0), true); }

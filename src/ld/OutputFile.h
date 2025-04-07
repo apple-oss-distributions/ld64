@@ -283,8 +283,9 @@ private:
 																							const ld::Fixup* fixup);
 	void						rangeCheckARM64Page21(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
 																							const ld::Fixup* fixup);
-#if SUPPORT_ARCH_riscv
-	void						rangeCheckRISCVBranch20(int64_t delta, ld::Internal& state, const ld::Atom* atom, 
+#if SUPPORT_ARCH_riscv32
+	bool 						checkRISCVBranchDisplacement(int64_t displacement);
+	void						rangeCheckRISCVBranch20(int64_t delta, ld::Internal& state, const ld::Atom* atom,
 																							const ld::Fixup* fixup);
 #endif
 																							

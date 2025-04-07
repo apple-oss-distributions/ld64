@@ -33,6 +33,7 @@
 #include <vector>
 #include <unordered_set>
 #include <unordered_map>
+#include <xpc/xpc.h>
 
 #include "ld.hpp"
 #include "Snapshot.h"
@@ -91,6 +92,15 @@ inline bool isSwiftLib(const char* path) {
 		return false;
 	return strncmp(libName, "/libswift", 9);
 }
+
+enum class OptimizationLevel
+{
+    // note: the values/order matters for analytics
+    O0, O1, O2, O3,
+    Os = 10, Oz,
+    unknown = 254,
+    unspecified = 255,
+};
 
 //
 // The public interface to the Options class is the abstract representation of what work the linker
@@ -654,6 +664,8 @@ private:
 	void						cannotBeUsedWithBitcode(const char* arg);
 	void						loadImplictZipperFile(const char *path,std::vector<const char*>& paths);
 	void 						inferArchAndPlatform();
+	xpc_object_t 		makeAnalyticsObject() const;
+	void						sendAnalytics() const;
 
 
 //	ObjectFile::ReaderOptions			fReaderOptions;
@@ -902,6 +914,9 @@ private:
 	bool								fUseObjCRelativeMethodLists;
 	bool								fObjcSmallStubs;
 	bool								fRunHugePass;
+	bool								fForceLdClassic;
+	bool								fLdPrimeFallback;
+	OptimizationLevel   fOptLevel;
 	std::vector<AliasPair>				fAliases;
 	std::vector<const char*>			fInitialUndefines;
 	NameSet								fAllowedUndefined;
