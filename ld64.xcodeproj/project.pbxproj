@@ -30,7 +30,6 @@
 			dependencies = (
 				F9B1A2690A3A568200DA8FAB /* PBXTargetDependency */,
 				F9B8135D0EC2620E00F94C13 /* PBXTargetDependency */,
-				F9A3DE160ED76D9A00C590B9 /* PBXTargetDependency */,
 			);
 			name = all;
 			productName = all;
@@ -40,9 +39,7 @@
 /* Begin PBXBuildFile section */
 		2D07B6E727E1F6FC009DF6CC /* Mangling.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D07B6E627E1F6FB009DF6CC /* Mangling.cpp */; };
 		2D57F2F0291C0F5E003049A7 /* ExportsTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D57F2ED291C0F5E003049A7 /* ExportsTrie.cpp */; };
-		2D57F2F1291C0F5E003049A7 /* ExportsTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D57F2ED291C0F5E003049A7 /* ExportsTrie.cpp */; };
 		2D57F2F2291C0F5E003049A7 /* Error.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D57F2EE291C0F5E003049A7 /* Error.cpp */; };
-		2D57F2F3291C0F5E003049A7 /* Error.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 2D57F2EE291C0F5E003049A7 /* Error.cpp */; };
 		2DF9935D2CFFA9A5000ABB01 /* CoreAnalytics.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 2DF9935C2CFFA9A5000ABB01 /* CoreAnalytics.framework */; };
 		37D7995423A4666000B314BC /* generic_dylib_file.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 37D7995323A4666000B314BC /* generic_dylib_file.cpp */; };
 		83046A851C8FF2F700024A7E /* objcimageinfo.cpp in Sources */ = {isa = PBXBuildFile; fileRef = 83046A841C8FF2D000024A7E /* objcimageinfo.cpp */; };
@@ -62,8 +59,6 @@
 		F984A38210BB4B0D009E9878 /* branch_island.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F984A38010BB4B0D009E9878 /* branch_island.cpp */; };
 		F989D30D106826020014B60C /* OutputFile.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F989D30B106826020014B60C /* OutputFile.cpp */; };
 		F993989226F94A9F0074D515 /* FatFile.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F993989126F942020074D515 /* FatFile.cpp */; };
-		F9A3DDD30ED762E400C590B9 /* PruneTrie.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9A3DDD20ED762E400C590B9 /* PruneTrie.cpp */; };
-		F9A3DE1E0ED7738300C590B9 /* prune_trie.h in CopyFiles */ = {isa = PBXBuildFile; fileRef = F9A3DE0F0ED76D1900C590B9 /* prune_trie.h */; };
 		F9A4DB9110F816FF00BD8423 /* objc.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9A4DB8F10F816FF00BD8423 /* objc.cpp */; };
 		F9AA44DC1294885F00CB8390 /* branch_shim.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9AA44DA1294885F00CB8390 /* branch_shim.cpp */; };
 		F9AA65111051BD2B003E3539 /* stubs.cpp in Sources */ = {isa = PBXBuildFile; fileRef = F9AA65101051BD2B003E3539 /* stubs.cpp */; };
@@ -140,13 +135,6 @@
 			remoteGlobalIDString = F971EED206D5ACF60041D381;
 			remoteInfo = ObjectDump;
 		};
-		F9A3DE150ED76D9A00C590B9 /* PBXContainerItemProxy */ = {
-			isa = PBXContainerItemProxy;
-			containerPortal = F9023C3006D5A227001BBF46 /* Project object */;
-			proxyType = 1;
-			remoteGlobalIDString = F9A3DDC90ED762B700C590B9;
-			remoteInfo = libprunetrie;
-		};
 		F9B1A2680A3A568200DA8FAB /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = F9023C3006D5A227001BBF46 /* Project object */;
@@ -180,16 +168,6 @@
 				F97F5029070D0BB200B9FCD7 /* ld-classic.1 in copy man page */,
 			);
 			name = "copy man page";
-			runOnlyForDeploymentPostprocessing = 1;
-		};
-		F9A3DE140ED76D7700C590B9 /* CopyFiles */ = {
-			isa = PBXCopyFilesBuildPhase;
-			buildActionMask = 8;
-			dstPath = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/include/mach-o";
-			dstSubfolderSpec = 0;
-			files = (
-				F9A3DE1E0ED7738300C590B9 /* prune_trie.h in CopyFiles */,
-			);
 			runOnlyForDeploymentPostprocessing = 1;
 		};
 		F9B813870EC2659600F94C13 /* install man page */ = {
@@ -263,9 +241,6 @@
 		F989D7E91072DEC20014B60C /* HeaderAndLoadCommands.hpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.h; name = HeaderAndLoadCommands.hpp; path = src/ld/HeaderAndLoadCommands.hpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F993989026F942020074D515 /* FatFile.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = FatFile.h; path = src/ld/FatFile.h; sourceTree = "<group>"; };
 		F993989126F942020074D515 /* FatFile.cpp */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.cpp; name = FatFile.cpp; path = src/ld/FatFile.cpp; sourceTree = "<group>"; };
-		F9A3DDCA0ED762B700C590B9 /* libprunetrie.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = libprunetrie.a; sourceTree = BUILT_PRODUCTS_DIR; };
-		F9A3DDD20ED762E400C590B9 /* PruneTrie.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; name = PruneTrie.cpp; path = src/other/PruneTrie.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
-		F9A3DE0F0ED76D1900C590B9 /* prune_trie.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; name = prune_trie.h; path = src/other/prune_trie.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9A4DB8F10F816FF00BD8423 /* objc.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = objc.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9A4DB9010F816FF00BD8423 /* objc.h */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.c.h; path = objc.h; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
 		F9AA44DA1294885F00CB8390 /* branch_shim.cpp */ = {isa = PBXFileReference; fileEncoding = 4; indentWidth = 4; lastKnownFileType = sourcecode.cpp.cpp; path = branch_shim.cpp; sourceTree = "<group>"; tabWidth = 4; usesTabs = 1; };
@@ -395,7 +370,6 @@
 				F9023C3906D5A23E001BBF46 /* ld-classic */,
 				F971EED306D5ACF60041D381 /* ObjectDump */,
 				F9B670080DDA176100E6D0DA /* unwinddump */,
-				F9A3DDCA0ED762B700C590B9 /* libprunetrie.a */,
 				83046A831C8FF23E00024A7E /* objcimageinfo */,
 			);
 			name = Products;
@@ -574,8 +548,6 @@
 				F9CCF761144CE1AD007CB524 /* create_configure */,
 				F971EED706D5AD240041D381 /* ObjectDump.cpp */,
 				F9B670110DDA17E800E6D0DA /* UnwindDump.cpp */,
-				F9A3DE0F0ED76D1900C590B9 /* prune_trie.h */,
-				F9A3DDD20ED762E400C590B9 /* PruneTrie.cpp */,
 				83046A841C8FF2D000024A7E /* objcimageinfo.cpp */,
 			);
 			name = other;
@@ -652,23 +624,6 @@
 			productReference = F971EED306D5ACF60041D381 /* ObjectDump */;
 			productType = "com.apple.product-type.tool";
 		};
-		F9A3DDC90ED762B700C590B9 /* libprunetrie */ = {
-			isa = PBXNativeTarget;
-			buildConfigurationList = F9A3DDCF0ED762C100C590B9 /* Build configuration list for PBXNativeTarget "libprunetrie" */;
-			buildPhases = (
-				F9CCF781144CE3DF007CB524 /* make configure.h */,
-				F9A3DDC70ED762B700C590B9 /* Sources */,
-				F9A3DE140ED76D7700C590B9 /* CopyFiles */,
-			);
-			buildRules = (
-			);
-			dependencies = (
-			);
-			name = libprunetrie;
-			productName = libmachotrie;
-			productReference = F9A3DDCA0ED762B700C590B9 /* libprunetrie.a */;
-			productType = "com.apple.product-type.library.static";
-		};
 		F9B670010DDA176100E6D0DA /* unwinddump */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = F9B670050DDA176100E6D0DA /* Build configuration list for PBXNativeTarget "unwinddump" */;
@@ -719,7 +674,6 @@
 				F9B670010DDA176100E6D0DA /* unwinddump */,
 				F971EED206D5ACF60041D381 /* ObjectDump */,
 				83046A771C8FF23E00024A7E /* objcimageinfo */,
-				F9A3DDC90ED762B700C590B9 /* libprunetrie */,
 				F96D5368094A2754008E9EE8 /* unit-tests */,
 			);
 		};
@@ -790,22 +744,6 @@
 			showEnvVarsInLog = 0;
 		};
 		F9CCF77C144CE36B007CB524 /* make configure.h */ = {
-			isa = PBXShellScriptBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			inputPaths = (
-			);
-			name = "make configure.h";
-			outputPaths = (
-				"$(DERIVED_FILE_DIR)/configure.h",
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-			shellPath = /bin/sh;
-			shellScript = "${SRCROOT}/src/create_configure\n";
-			showEnvVarsInLog = 0;
-		};
-		F9CCF781144CE3DF007CB524 /* make configure.h */ = {
 			isa = PBXShellScriptBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -906,16 +844,6 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
-		F9A3DDC70ED762B700C590B9 /* Sources */ = {
-			isa = PBXSourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				2D57F2F3291C0F5E003049A7 /* Error.cpp in Sources */,
-				F9A3DDD30ED762E400C590B9 /* PruneTrie.cpp in Sources */,
-				2D57F2F1291C0F5E003049A7 /* ExportsTrie.cpp in Sources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
 		F9B670020DDA176100E6D0DA /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -941,11 +869,6 @@
 			isa = PBXTargetDependency;
 			target = F971EED206D5ACF60041D381 /* ObjectDump */;
 			targetProxy = F96D536B094A275F008E9EE8 /* PBXContainerItemProxy */;
-		};
-		F9A3DE160ED76D9A00C590B9 /* PBXTargetDependency */ = {
-			isa = PBXTargetDependency;
-			target = F9A3DDC90ED762B700C590B9 /* libprunetrie */;
-			targetProxy = F9A3DE150ED76D9A00C590B9 /* PBXContainerItemProxy */;
 		};
 		F9B1A2690A3A568200DA8FAB /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -1642,26 +1565,6 @@
 			};
 			name = "Release-assert";
 		};
-		F984A00010B5DE8E009E9878 /* Release-assert */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				COMBINE_HIDPI_IMAGES = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				GCC_MODEL_TUNING = G5;
-				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
-				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/lib";
-				OTHER_CPLUSPLUSFLAGS = (
-					"-stdlib=libc++",
-					"$(OTHER_CFLAGS)",
-				);
-				PRODUCT_NAME = prunetrie;
-			};
-			name = "Release-assert";
-		};
 		F984A00110B5DE8E009E9878 /* Release-assert */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -1671,48 +1574,6 @@
 				PRODUCT_NAME = "unit-tests";
 			};
 			name = "Release-assert";
-		};
-		F9A3DDCB0ED762B800C590B9 /* Debug */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				COMBINE_HIDPI_IMAGES = YES;
-				COPY_PHASE_STRIP = NO;
-				GCC_DYNAMIC_NO_PIC = NO;
-				GCC_MODEL_TUNING = G5;
-				GCC_OPTIMIZATION_LEVEL = 0;
-				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
-				GCC_WARN_ABOUT_MISSING_PROTOTYPES = YES;
-				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/lib";
-				OTHER_CPLUSPLUSFLAGS = (
-					"-stdlib=libc++",
-					"$(OTHER_CFLAGS)",
-				);
-				PRODUCT_NAME = prunetrie;
-			};
-			name = Debug;
-		};
-		F9A3DDCC0ED762B800C590B9 /* Release */ = {
-			isa = XCBuildConfiguration;
-			buildSettings = {
-				ALWAYS_SEARCH_USER_PATHS = NO;
-				CLANG_CXX_LANGUAGE_STANDARD = "c++20";
-				CLANG_ENABLE_OBJC_WEAK = YES;
-				COMBINE_HIDPI_IMAGES = YES;
-				COPY_PHASE_STRIP = NO;
-				DEBUG_INFORMATION_FORMAT = dwarf;
-				GCC_MODEL_TUNING = G5;
-				GCC_SYMBOLS_PRIVATE_EXTERN = YES;
-				INSTALL_PATH = "$(DT_VARIANT)/$(TOOLCHAIN_INSTALL_DIR)/usr/local/lib";
-				OTHER_CPLUSPLUSFLAGS = (
-					"-stdlib=libc++",
-					"$(OTHER_CFLAGS)",
-				);
-				PRODUCT_NAME = prunetrie;
-			};
-			name = Release;
 		};
 		F9B1A26D0A3A568700DA8FAB /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -1836,16 +1697,6 @@
 				F96D536E094A2773008E9EE8 /* Debug */,
 				F96D536F094A2773008E9EE8 /* Release */,
 				F984A00110B5DE8E009E9878 /* Release-assert */,
-			);
-			defaultConfigurationIsVisible = 0;
-			defaultConfigurationName = "Release-assert";
-		};
-		F9A3DDCF0ED762C100C590B9 /* Build configuration list for PBXNativeTarget "libprunetrie" */ = {
-			isa = XCConfigurationList;
-			buildConfigurations = (
-				F9A3DDCB0ED762B800C590B9 /* Debug */,
-				F9A3DDCC0ED762B800C590B9 /* Release */,
-				F984A00010B5DE8E009E9878 /* Release-assert */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = "Release-assert";
